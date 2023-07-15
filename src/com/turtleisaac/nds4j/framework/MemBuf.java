@@ -68,6 +68,10 @@ public class MemBuf {
             readPos = pos;
         }
 
+        public void setPosition(long pos) {
+            readPos = (int) pos;
+        }
+
         public byte[] getBuffer() {
             byte[] ret = new byte[writePos-readPos];
             System.arraycopy(buf, readPos, ret, 0, writePos-readPos);
@@ -81,26 +85,30 @@ public class MemBuf {
 
         public int readInt() {
             require(4);
-            int ret = readByte();
-            ret |= readByte() << 8;
-            ret |= readByte() << 16;
-            ret |= readByte() << 24;
+            int ret = readUShort8();
+            ret |= (readUShort8() << 8);
+            ret |= (readUShort8() << 16);
+            ret |= (readUShort8() << 24);
             return ret;
         }
 
         public long readUInt32() {
-            require(4);
-            int ret = readByte();
-            ret |= readByte() << 8;
-            ret |= readByte() << 16;
-            ret |= readByte() << 24;
-            return ((long) ret) & 0xFFFFFFFFL;
+            return ((long) readInt()) & 0xFFFFFFFFL;
         }
 
         public short readShort() {
             require(2);
-            int ret = readByte() | (readByte() << 8);
+            int ret = readUShort8() | (readUShort8() << 8);
             return (short)ret;
+        }
+
+        public int readUInt16() {
+            return ((int) readShort()) & 0xffff;
+        }
+
+        public short readUShort8()
+        {
+            return (short) ((short)readByte() & 0xff);
         }
 
         public String readString(int size) {
@@ -114,6 +122,33 @@ public class MemBuf {
             require(size);
             byte[] ret = new byte[size];
             System.arraycopy(buf, readPos, ret, 0, size);
+            readPos += size;
+            return ret;
+        }
+
+        public byte[] readTo(int addrs) {
+            int size = addrs - readPos;
+            return readBytes(size);
+        }
+
+        public byte[] readTo(long addrs) {
+            int size = (int) (addrs - readPos);
+            require(size);
+            byte[] ret = new byte[size];
+            System.arraycopy(buf, readPos, ret, 0, size);
+            readPos += size;
+            return ret;
+        }
+
+        public int[] readBytesI(int size) {
+            byte[] arr = readBytes(size);
+            int[] ret = new int[arr.length];
+
+            for(int i = 0; i < arr.length; i++)
+            {
+                ret[i] = arr[i] & 0xff;
+            }
+
             return ret;
         }
 
@@ -149,6 +184,10 @@ public class MemBuf {
             buf[writePos++] = (byte) ((i >> 16) & 0xff);
             buf[writePos++] = (byte) ((i >> 24) & 0xff);
             return this;
+        }
+
+        public MemBufWriter writeUInt32(long i) {
+            return writeInt((int) i);
         }
 
         public MemBufWriter writeShort(short s) {
@@ -193,6 +232,13 @@ public class MemBuf {
         public MemBufWriter writeString(String s) {
             byte[] b = s.getBytes(StandardCharsets.ISO_8859_1);
             return write(b);
+        }
+
+        public MemBufWriter writeString(String s, int len) {
+            byte[] b = s.getBytes(StandardCharsets.ISO_8859_1);
+            byte[] toWrite = new byte[len];
+            System.arraycopy(b, 0, toWrite, 0, b.length);
+            return write(toWrite);
         }
 
         /**

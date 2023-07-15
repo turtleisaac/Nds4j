@@ -28,12 +28,12 @@ public class Buffer {
 
     private byte[] bytes = new byte[1024*64];
     private int position = 0;
-    private int truePosition = 0;
+    private int truePosition= 0;
     private int limit = 0;
     private String file;
     private final BufferedInputStream in;
     private boolean endOfFile;
-    private final boolean virtual;
+
 
     public Buffer(String file) {
         this.file= file;
@@ -43,7 +43,7 @@ public class Buffer {
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
-        virtual = false;
+
     }
 
     public Buffer(Path file) {
@@ -54,32 +54,12 @@ public class Buffer {
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
-        virtual = false;
-    }
 
-    public Buffer(byte[] arr)
-    {
-        this.file = null;
-        this.endOfFile = false;
-        bytes = arr;
-        in = null;
-        virtual = true;
-        limit = arr.length;
-    }
-
-    /**
-     * produces a special variation of a Buffer class where the entire file gets loaded into memory at once, which allows for free position adjustment
-     * @param file a String path to a file
-     * @return a <code>Buffer</code>
-     */
-    public static Buffer getVirtualBuffer(String file)
-    {
-        return new Buffer(readFile(file));
     }
 
     public static byte[] readFile(String file)
     {
-        Buffer buffer = new Buffer(file);
+        Buffer buffer= new Buffer(file);
         return buffer.readRemainder();
     }
 
@@ -226,9 +206,7 @@ public class Buffer {
 
     private void require(int size) {
         if (limit - position < size) {
-            if (!virtual) {
-                refill();
-            }
+            refill();
             if (limit - position < size) {
                 throw new RuntimeException("Want "+size+" bytes but only "+limit+" bytes remain. Current position: " + truePosition);
             }
@@ -259,10 +237,7 @@ public class Buffer {
 
     public void close() throws IOException
     {
-        if (!virtual)
-        {
-            in.close();
-        }
+        in.close();
     }
 
     public String getFile()
@@ -294,33 +269,9 @@ public class Buffer {
             readBytes((int) (offset-truePosition));
     }
 
-    public void seekGlobal(int offset)
-    {
-        if(offset > bytes.length)
-            throw new RuntimeException("Buffer error: out of bounds address");
-        else if (!virtual)
-            throw new RuntimeException("Only available on virtual buffers");
-        else {
-            truePosition = offset;
-            position = offset;
-        }
-    }
-
-    public void seekGlobal(long offset)
-    {
-        if(offset > bytes.length)
-            throw new RuntimeException("Buffer error: out of bounds address");
-        else if (!virtual)
-            throw new RuntimeException("Only available on virtual buffers");
-        else {
-            truePosition = (int) offset;
-            position = (int) offset;
-        }
-
-    }
-
     public byte[] readTo(int offset)
     {
+
         if(offset < truePosition)
             throw new RuntimeException("Already beyond this offset. Currently at: " + truePosition + ", Target was: " + offset);
         else if(offset != truePosition)
@@ -343,9 +294,6 @@ public class Buffer {
 
     public int getLength()
     {
-        if (!virtual)
-            return (int) new File(file).length();
-        else
-            return bytes.length;
+        return (int) new File(file).length();
     }
 }

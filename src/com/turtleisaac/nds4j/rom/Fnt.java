@@ -33,12 +33,22 @@ public class Fnt
         private HashMap<String, Folder> folders;
         private ArrayList<String> files;
         private int firstId;
+        private String name;
 
         public Folder()
         {
             this.folders = new HashMap<>();
             this.files = new ArrayList<>();
             this.firstId = 0;
+            this.name = "";
+        }
+
+        public Folder(String name)
+        {
+            this.folders = new HashMap<>();
+            this.files = new ArrayList<>();
+            this.firstId = 0;
+            this.name = name;
         }
 
         public Folder(HashMap<String, Folder> folders, ArrayList<String> files, int firstId)
@@ -46,6 +56,28 @@ public class Fnt
             this.folders = Objects.requireNonNullElseGet(folders, HashMap::new);
             this.files = Objects.requireNonNullElseGet(files, ArrayList::new);
             this.firstId = firstId;
+            this.name = "";
+        }
+
+        public ArrayList<String> getFiles()
+        {
+            return files;
+        }
+
+        public HashMap<String, Folder> getFolders()
+        {
+            return folders;
+        }
+
+        public int getFirstId()
+        {
+            return firstId;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Folder{%s}", name);
         }
     }
 
@@ -56,7 +88,7 @@ public class Fnt
      */
     public static Folder load(byte[] fnt)
     {
-        return loadFolder(fnt, 0xF000); // this is always root folder
+        return loadFolder(fnt, 0xF000, "root"); // this is always root folder
     }
 
     /**
@@ -65,29 +97,30 @@ public class Fnt
      * @param folderId the ID of the folder to load
      * @return a <code>Folder</code>
      */
-    private static Folder loadFolder(byte[] fnt, int folderId)
+    private static Folder loadFolder(byte[] fnt, int folderId, String name)
     {
-        Buffer buffer = new Buffer(fnt);
-        Folder folder = new Folder();
+        MemBuf fntBuf = MemBuf.create();
+        fntBuf.writer().write(fnt);
+        MemBuf.MemBufReader reader = fntBuf.reader();
+        Folder folder = new Folder(name);
 
         long offset = 8 * (folderId & 0xFFF);
-        buffer.seekGlobal(offset);
-        long entriesTableOffset = buffer.readUInt32();
-        int fileId = buffer.readUInt16();
+        reader.setPosition(offset);
+        long entriesTableOffset = reader.readUInt32();
+        int fileId = reader.readUInt16();
 
         folder.firstId = fileId;
 
-        buffer.seekGlobal(entriesTableOffset);
+        reader.setPosition(entriesTableOffset);
 
         int control;
         int length;
         int isFolder;
-        String name;
         int subFolderId;
         // Read file and folder entries from the entries table
         while(true)
         {
-            control = buffer.readUShort8();
+            control = reader.readUShort8();
             if (control == 0)
                 break;
 
@@ -96,13 +129,13 @@ public class Fnt
             length = control & 0x7F;
             isFolder = control & 0x80;
 
-            name = buffer.readString(length);
+            name = reader.readString(length);
 
             if (isFolder == 0x80)
             {
                 // There's an additional 2-byte value with the subfolder ID. Get that and load the folder
-                subFolderId = buffer.readUInt16();
-                folder.folders.put(name, loadFolder(fnt, subFolderId));
+                subFolderId = reader.readUInt16();
+                folder.folders.put(name, loadFolder(fnt, subFolderId, name));
             }
             else
             {
@@ -120,6 +153,8 @@ public class Fnt
         MemBuf getFileContents();
     }
 
+    public static int nextFolderId;
+
     /**
      * Generates a MemBuf representing the root folder as a filename table. This is the inverse of <code>load()</code>
      * @param root a Folder object for the root folder
@@ -131,19 +166,21 @@ public class Fnt
 
         // nextFolderId allows us to assign folder IDs in sequential order.
         // The root folder always has ID 0xF000.
-        int nextFolderId = 0xF000;
+        nextFolderId = 0xF000;
         // The root folder's parent's ID is the total number of folders.
         int rootParentId = countFoldersIn(root);
 
         // Ensure that the root folder has the proper folder ID.
-        int rootId = parseFolder(root, rootParentId, folderEntries, nextFolderId);
+        int rootId = parseFolder(root, rootParentId, folderEntries);
         assert (rootId == 0xF000);
 
-        // in theory, (folderEntries.size() * 8) bytes are needed
+        // in theory, (folderEntries.size() * 8) bytes are needed for the folders table at the beginning of the fnt
+        int fntLen = folderEntries.size() * 8;
         MemBuf fntBuf = MemBuf.create();
         MemBuf.MemBufWriter fntBufWriter = fntBuf.writer();
 
         // We need to iterate over the folders in order of increasing ID.
+        int storedPosition = folderEntries.size() * 8;
         for (int currentFolderId : folderEntries.keySet().stream().sorted().collect(Collectors.toList()))
         {
             FileProcessingData data = folderEntries.get(currentFolderId);
@@ -151,12 +188,15 @@ public class Fnt
             //Add the folder entries to the folder table
             int offsetInFolderTable = 8 * (currentFolderId & 0xFFF);
             fntBufWriter.setPosition(offsetInFolderTable);
-            fntBufWriter.writeInt(offsetInFolderTable);
+            fntBufWriter.writeInt(fntLen);
             fntBufWriter.writeShort((short) data.getFileId());
             fntBufWriter.writeShort((short) data.getParentFolderId());
 
             // And tack the folder's entries table onto the end of the file
+            fntBufWriter.setPosition(storedPosition);
             fntBufWriter.write(data.getFileContents().reader().getBuffer());
+            fntLen += data.getFileContents().reader().getBuffer().length;
+            storedPosition = fntBufWriter.getPosition();
         }
 
         return fntBuf;
@@ -167,10 +207,9 @@ public class Fnt
      * @param folder
      * @param parentId
      * @param folderEntries
-     * @param nextFolderId
      * @return the ID number assigned to the parsed folder
      */
-    private static int parseFolder(Folder folder, int parentId, HashMap<Integer, FileProcessingData> folderEntries, int nextFolderId)
+    private static int parseFolder(Folder folder, int parentId, HashMap<Integer, FileProcessingData> folderEntries)
     {
         int folderId = nextFolderId;
         nextFolderId += 1;
@@ -191,7 +230,7 @@ public class Fnt
             Folder sub = folder.folders.get(folderName);
 
             // First, parse the subfolder and get its ID, so we can save that to the entries table.
-            int otherId = parseFolder(folder, folderId, folderEntries, nextFolderId);
+            int otherId = parseFolder(sub, folderId, folderEntries);
 
             if (folderName.length() > 127)
                 throw new RuntimeException("Folder name \"" + folderName + "\" is " + folderName.length() + " characters long (maximum is 127)!");
@@ -240,7 +279,7 @@ public class Fnt
         int folderCount = 0;
         for (Folder f : folder.folders.values())
         {
-            folderCount += 1;
+            folderCount += countFoldersIn(f);
         }
         return folderCount + 1;
     }

@@ -25,6 +25,7 @@ import com.turtleisaac.nds4j.framework.Buffer;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -33,6 +34,8 @@ import java.util.stream.Collectors;
 import com.turtleisaac.nds4j.framework.CRC16;
 import com.turtleisaac.nds4j.framework.MemBuf;
 import com.turtleisaac.nds4j.rom.Fnt.Folder;
+
+//import static com.turtleisaac.nds4j.rom.Filesystem.writeFolder;
 
 public class NintendoDsRom
 {
@@ -81,8 +84,8 @@ public class NintendoDsRom
     int arm7Autoload;
     byte[] secureDisable;
 
-    int romSizeOrRsaSigOffset;
-    int headerLength;
+    long romSizeOrRsaSigOffset;
+    long headerLength;
 
     byte[] padding_088h;
     byte[] reserved4;
@@ -128,183 +131,137 @@ public class NintendoDsRom
         }
     };
 
-
-//    public NintendoDsRom()
-//    {
-//        String title = "";
-//        String gameCode = "####";
-//        String makerCode = "\0\0";
-//        int deviceCode = 0;
-//        int encryptionSeed = 0;
-//        byte romChipCapacity = 9;
-//        byte[] reserved1 = {0, 0, 0, 0, 0, 0, 0};
-//        byte reserved2 = 0;
-//        int systemRegion = 0;
-//        int romVersion = 0;
-//        int autoStartFlag = 0;
-//
-//        int arm9EntryAddress = 0x2000800;
-//        int arm9LoadAddress = 0x2000000;
-//        int arm7EntryAddress = 0x2380000;
-//        int arm7LoadAddress = 0x2380000;
-//
-//        int fntbOffset;
-//        int fntbLength;
-//
-//        int fatbOffset;
-//        int fatbLength;
-//
-//        int arm9OverlayOffset;
-//        int amr9OverlayLength;
-//
-//        int arm7OverlayOffset;
-//        int arm7OverlayLength;
-//
-//        int normalCardControlRegisterSettings;
-//        int secureCardControlRegisterSettings;
-//
-//        int iconBannerOffset;
-//        short secureAreaCrc;
-//        short secureTransferTimeout;
-//        int arm9Autoload;
-//        int arm7Autoload;
-//        byte[] secureDisable;
-//
-//        int romLength;
-//        int headerLength;
-//
-//        byte[] reserved3;
-//        byte[] reserved4;
-//        byte[] nintendoLogo;
-//        short nintendoLogoCrc;
-//        short headerCrc;
-//        int debugRomOffset;
-//        int debugLength;
-//        int debugRamOffset;
-//        int reserved5;
-//        byte[] reserved6;
-//    }
-
-    public static NintendoDsRom fromFile(String file)
-    {
-        return fromFile(new File(file));
-    }
-
-    public static NintendoDsRom fromFile(Path file)
-    {
-        return fromFile(file.toFile());
-    }
-
+    /**
+     * Reads a <code>NintendoDsRom</code> from a ROM file on disk
+     * @param file <code>File</code> path to ROM file location
+     * @return a <code>NintendoDsRom</code>
+     */
     public static NintendoDsRom fromFile(File file)
     {
-        Buffer buffer = new Buffer(file);
-
+        return new NintendoDsRom(Buffer.readFile(file.getAbsolutePath()));
     }
 
+//    public static NintendoDsRom fromUnpacked(String file)
+//    {
+//        // TODO implement load rom from unpacked folder
+//    }
+//
+//    public static NintendoDsRom fromUnpacked(Path file)
+//    {
+//        return fromUnpacked(file.toFile());
+//    }
+//
+//    public static NintendoDsRom fromUnpacked(File file)
+//    {
+//        return fromUnpacked(file.getAbsolutePath());
+//    }
 
-    public NintendoDsRom(String file)
+    /**
+     * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
+     */
+    private NintendoDsRom()
     {
-        this(Buffer.getVirtualBuffer(file));
+        title = "";
+        gameCode = "####";
+        developerCode = new String(new byte[] {0, 0}, 0, 2);
+        unitCode = 0;
+        encryptionSeed = 0;
+        deviceCapacity = 9;
+//        reserved1;
+//        reserved2;
+        systemRegion = 0;
+        romVersion = 0;
+        autoStartFlag = 0;
+
+        arm9EntryAddress = 0x2000800;
+        arm9LoadAddress = 0x2000000;
+
+        arm7EntryAddress = 0x2380000;
+        arm7LoadAddress = 0x2380000;
+
+        normalCardControlRegisterSettings = 0x0416657;
+        secureCardControlRegisterSettings = 0x81808f8;
+
+        secureAreaCrc = 0x0000;
+        secureTransferTimeout = 0x0D7E;
+        arm9Autoload = 0;
+        arm7Autoload = 0;
+        secureDisable = new byte[] {0, 0, 0, 0, 0, 0, 0, 0};
+
+        //0x38 bytes
+        padding_088h = new byte[] {0x38};
+
+        nintendoLogo = new byte[] {
+                (byte) 0x24, (byte) 0xFF, (byte) 0xAE, (byte) 0x51, (byte) 0x69, (byte) 0x9A, (byte) 0xA2,
+                (byte) 0x21, (byte) 0x3D, (byte) 0x84, (byte) 0x82, (byte) 0x0A, (byte) 0x84, (byte) 0xE4, (byte) 0x09, (byte) 0xAD,
+                (byte) 0x11, (byte) 0x24, (byte) 0x8B, (byte) 0x98, (byte) 0xC0, (byte) 0x81, (byte) 0x7F, (byte) 0x21, (byte) 0xA3,
+                (byte) 0x52, (byte) 0xBE, (byte) 0x19, (byte) 0x93, (byte) 0x09, (byte) 0xCE, (byte) 0x20, (byte) 0x10, (byte) 0x46,
+                (byte) 0x4A, (byte) 0x4A, (byte) 0xF8, (byte) 0x27, (byte) 0x31, (byte) 0xEC, (byte) 0x58, (byte) 0xC7, (byte) 0xE8,
+                (byte) 0x33, (byte) 0x82, (byte) 0xE3, (byte) 0xCE, (byte) 0xBF, (byte) 0x85, (byte) 0xF4, (byte) 0xDF, (byte) 0x94,
+                (byte) 0xCE, (byte) 0x4B, (byte) 0x09, (byte) 0xC1, (byte) 0x94, (byte) 0x56, (byte) 0x8A, (byte) 0xC0, (byte) 0x13,
+                (byte) 0x72, (byte) 0xA7, (byte) 0xFC, (byte) 0x9F, (byte) 0x84, (byte) 0x4D, (byte) 0x73, (byte) 0xA3, (byte) 0xCA,
+                (byte) 0x9A, (byte) 0x61, (byte) 0x58, (byte) 0x97, (byte) 0xA3, (byte) 0x27, (byte) 0xFC, (byte) 0x03, (byte) 0x98,
+                (byte) 0x76, (byte) 0x23, (byte) 0x1D, (byte) 0xC7, (byte) 0x61, (byte) 0x03, (byte) 0x04, (byte) 0xAE, (byte) 0x56,
+                (byte) 0xBF, (byte) 0x38, (byte) 0x84, (byte) 0x00, (byte) 0x40, (byte) 0xA7, (byte) 0x0E, (byte) 0xFD, (byte) 0xFF,
+                (byte) 0x52, (byte) 0xFE, (byte) 0x03, (byte) 0x6F, (byte) 0x95, (byte) 0x30, (byte) 0xF1, (byte) 0x97, (byte) 0xFB,
+                (byte) 0xC0, (byte) 0x85, (byte) 0x60, (byte) 0xD6, (byte) 0x80, (byte) 0x25, (byte) 0xA9, (byte) 0x63, (byte) 0xBE,
+                (byte) 0x03, (byte) 0x01, (byte) 0x4E, (byte) 0x38, (byte) 0xE2, (byte) 0xF9, (byte) 0xA2, (byte) 0x34, (byte) 0xFF,
+                (byte) 0xBB, (byte) 0x3E, (byte) 0x03, (byte) 0x44, (byte) 0x78, (byte) 0x00, (byte) 0x90, (byte) 0xCB, (byte) 0x88,
+                (byte) 0x11, (byte) 0x3A, (byte) 0x94, (byte) 0x65, (byte) 0xC0, (byte) 0x7C, (byte) 0x63, (byte) 0x87, (byte) 0xF0,
+                (byte) 0x3C, (byte) 0xAF, (byte) 0xD6, (byte) 0x25, (byte) 0xE4, (byte) 0x8B, (byte) 0x38, (byte) 0x0A, (byte) 0xAC,
+                (byte) 0x72, (byte) 0x21, (byte) 0xD4, (byte) 0xF8, (byte) 0x07};
+
+        debugRomAddress = 0;
+        padding_16Ch = new byte[0x94];
+        padding_200h = new byte[0x3E00];
+
+        // Misc Section
+
+        rsaSignature = new byte[] {};
+
+        arm9 = new byte[] {};
+        arm9PostData = new int[] {};
+        arm7 = new byte[] {};
+        y9 = new byte[] {};
+        y7 = new byte[] {};
+        iconBanner = new byte[] {};
+        debugRom = new byte[] {};
+
+        filenames = new Fnt.Folder();
+        files = new ArrayList<>();
+        sortedFileIDs = new ArrayList<>();
     }
 
-    public NintendoDsRom(Buffer buffer)
+    /**
+     * Creates a <code>NintendoDsRom</code> object from a provided code<>byte[]</> representing the bytes of a ROM file
+     * @param data a <code>byte[]</code>
+     */
+    public NintendoDsRom(byte[] data)
     {
-        title = buffer.readString(12).trim();
-        gameCode = buffer.readString(4);
-        developerCode = buffer.readString(2);
-        unitCode = buffer.readByte();
-        encryptionSeed = buffer.readByte();
-        deviceCapacity = buffer.readBytes(1)[0];
-        reserved1 = buffer.readBytes(7);
-        reserved2 = (byte)buffer.readByte();
-        systemRegion = buffer.readByte();
-        romVersion = buffer.readByte();
-        autoStartFlag = buffer.readByte();
+        MemBuf romBuf = MemBuf.create();
+        romBuf.writer().write(data);
+        MemBuf.MemBufReader reader = romBuf.reader();
 
-        arm9Offset = buffer.readInt();
-        if(arm9Offset < 0x4000) {
-            throw new RuntimeException("Invalid ROM Header: ARM9 Offset");
-        }
-        arm9EntryAddress = buffer.readInt();
-        if(!(arm9EntryAddress >= 0x2000000 && arm9EntryAddress <= 0x23BFE00)) {
-            throw new RuntimeException("Invalid ROM Header: ARM9 Entry Address");
-        }
-        arm9LoadAddress = buffer.readInt();
-        if(!(arm9LoadAddress >= 0x2000000 && arm9LoadAddress <= 0x23BFE00)) {
-            throw new RuntimeException("Invalid ROM Header: ARM9 RAM Address");
-        }
-        arm9Length = buffer.readInt();
-        if(arm9Length > 0x3BFE00) {
-            throw new RuntimeException("Invalid ROM Header: ARM9 Size");
-        }
-        arm7Offset = buffer.readInt();
-        if(arm7Offset < 0x8000) {
-            throw new RuntimeException("Invalid ROM Header: ARM7 Offset");
-        }
-        arm7EntryAddress = buffer.readInt();
-        if(!((arm7EntryAddress >= 0x2000000 && arm7EntryAddress <= 0x23BFE00) || (arm7EntryAddress >= 0x37F8000 && arm7EntryAddress <= 0x3807E00))) {
-            throw new RuntimeException("Invalid ROM Header: ARM7 Entry Address");
-        }
-        arm7LoadAddress = buffer.readInt();
-        if(!((arm7LoadAddress >= 0x2000000 && arm7LoadAddress <= 0x23BFE00) || (arm7LoadAddress >= 0x37F8000 && arm7LoadAddress <= 0x3807E00))) {
-            throw new RuntimeException("Invalid ROM Header: ARM7 Load Address");
-        }
-        arm7Length = buffer.readInt();
-        if(arm7Length > 0x3BFE0) {
-            throw new RuntimeException("Invalid ROM Header: ARM7 Size");
-        }
+        int fileLength = romBuf.writer().getPosition();
 
-        System.out.println(buffer.getPosition());
-        fntOffset = buffer.readInt();
-        fntLength = buffer.readInt();
-
-        fatOffset = buffer.readInt();
-        fatLength = buffer.readInt();
-
-        y9Offset = buffer.readInt();
-        y9Length = buffer.readInt();
-
-        y7Offset = buffer.readInt();
-        y7Length = buffer.readInt();
-
-        normalCardControlRegisterSettings = buffer.readInt();
-        secureCardControlRegisterSettings = buffer.readInt();
-
-        iconBannerOffset = buffer.readInt();
-        secureAreaCrc = buffer.readShort();
-        secureTransferTimeout = buffer.readShort();
-        arm9Autoload = buffer.readInt();
-        arm7Autoload = buffer.readInt();
-        secureDisable = buffer.readBytes(8);
-
-        romSizeOrRsaSigOffset = buffer.readInt();
-        headerLength = buffer.readInt();
-
-        padding_088h = buffer.readBytes(0x38);
-        nintendoLogo = buffer.readBytes(0x9C);
-        nintendoLogoCrc = buffer.readShort();
-        headerCrc = buffer.readShort();
-        debugRomOffset = buffer.readInt();
-        debugRomLength = buffer.readInt();
-        debugRomAddress = buffer.readInt();
-        padding_16Ch = buffer.readBytes(0x94);
-        padding_200h = buffer.readBytes(Math.min(arm9Offset, buffer.getLength()));
+        // read the ROM header
+        readHeader(reader, fileLength);
 
         // RSA signature file
-        int realSigOffset = 0;
-        if (buffer.getLength() >= 0x1004)
+        long realSigOffset = 0;
+        if (fileLength >= 0x1004)
         {
-            buffer.seekGlobal(0x1000);
-            realSigOffset = buffer.readInt();
+            reader.setPosition(0x1000);
+            realSigOffset = reader.readUInt32();
         }
-        if (realSigOffset == 0 && buffer.getLength() > romSizeOrRsaSigOffset)
+        if (realSigOffset == 0 && fileLength > romSizeOrRsaSigOffset)
         {
             realSigOffset = romSizeOrRsaSigOffset;
         }
         if (realSigOffset != 0)
         {
-            buffer.seekGlobal(realSigOffset);
-            rsaSignature = buffer.readBytes(Math.min(buffer.getPosition(), realSigOffset + 0x88));
+            reader.setPosition(realSigOffset);
+            rsaSignature = reader.readTo(Math.min(fileLength, realSigOffset + 0x88));
         }
         else
         {
@@ -312,59 +269,36 @@ public class NintendoDsRom
         }
 
         // arm9, arm7, FNT, FAT, overlay tables, icon banner
-        buffer.seekGlobal(arm9Offset);
-        arm9 = buffer.readBytes(arm9Length);
+        reader.setPosition(arm9Offset);
+        readArm9(reader, arm9Length);
 
-        buffer.seekGlobal(arm7Offset);
-        arm7 = buffer.readBytes(arm7Length);
+        reader.setPosition(arm7Offset);
+        readArm7(reader, arm7Length);
 
-        buffer.seekGlobal(fntOffset);
-        fnt = buffer.readBytes(fntLength);
+        reader.setPosition(fntOffset);
+        fnt = reader.readBytes(fntLength);
 
-        buffer.seekGlobal(fatOffset);
-        fat = buffer.readBytes(fatLength);
+        reader.setPosition(fatOffset);
+        fat = reader.readBytes(fatLength);
 
-        buffer.seekGlobal(y9Offset);
-        y9 = buffer.readBytes(y9Length);
+        reader.setPosition(y9Offset);
+        readY9(reader, y9Length);
 
-        buffer.seekGlobal(y7Offset);
-        y7 = buffer.readBytes(y7Length);
+        reader.setPosition(y7Offset);
+        readY7(reader, y7Length);
 
-        if (iconBannerOffset != 0)
-        {
-            buffer.seekGlobal(iconBannerOffset);
-            int val = buffer.readUInt16();
-            int iconBannerLength;
-            if (ICON_BANNER_LENGTHS.get(val) == null)
-                iconBannerLength = ICON_BANNER_LENGTHS.get(1);
-            else
-                iconBannerLength = ICON_BANNER_LENGTHS.get(val);
+        readIconBanner(reader);
 
-            iconBanner = buffer.readBytes(iconBannerLength);
-        }
-        else
-        {
-            iconBanner = new byte[ICON_BANNER_LENGTHS.get(1)];
-        }
-
-        if (debugRomOffset != 0)
-        {
-            buffer.seekGlobal(debugRomOffset);
-            debugRom = buffer.readBytes(debugRomLength);
-        }
-        else
-        {
-            debugRom = new byte[1];
-        }
+        readDebugRom(reader);
 
         int arm9PostDataOffset = arm9Offset + arm9Length;
         ArrayList<Integer> arm9PostData = new ArrayList<>();
 
         int[] extraData;
-        while (Arrays.equals(new int[] {0x21, 0x06, 0xC0, 0xDE}, (extraData = buffer.readBytesI(4)) ))
+        while (Arrays.equals(new int[] {0x21, 0x06, 0xC0, 0xDE}, (extraData = reader.readBytesI(4)) ))
         {
             arm9PostData.addAll(Arrays.stream(extraData).boxed().collect(Collectors.toList()));
-            arm9PostData.addAll(Arrays.stream(buffer.readBytesI(8)).boxed().collect(Collectors.toList()));
+            arm9PostData.addAll(Arrays.stream(reader.readBytesI(8)).boxed().collect(Collectors.toList()));
         }
 
         this.arm9PostData = arm9PostData.stream().mapToInt(Integer::intValue).toArray();
@@ -378,11 +312,147 @@ public class NintendoDsRom
         sortedFileIDs = new ArrayList<>();
         if (fat.length != 0)
         {
-            readFat(buffer);
+            processFat(reader);
         }
     }
 
-    private void readFat(Buffer romBuffer)
+    private void readHeader(MemBuf.MemBufReader reader, int fileLength)
+    {
+        title = reader.readString(12).trim();
+        gameCode = reader.readString(4);
+        developerCode = reader.readString(2);
+        unitCode = reader.readByte();
+        encryptionSeed = reader.readByte();
+        deviceCapacity = reader.readBytes(1)[0];
+        reserved1 = reader.readBytes(7);
+        reserved2 = (byte)reader.readByte();
+        systemRegion = reader.readByte();
+        romVersion = reader.readByte();
+        autoStartFlag = reader.readByte();
+
+        arm9Offset = reader.readInt();
+        if(arm9Offset < 0x4000) {
+            throw new RuntimeException("Invalid ROM Header: ARM9 Offset");
+        }
+        arm9EntryAddress = reader.readInt();
+        if(!(arm9EntryAddress >= 0x2000000 && arm9EntryAddress <= 0x23BFE00)) {
+            throw new RuntimeException("Invalid ROM Header: ARM9 Entry Address");
+        }
+        arm9LoadAddress = reader.readInt();
+        if(!(arm9LoadAddress >= 0x2000000 && arm9LoadAddress <= 0x23BFE00)) {
+            throw new RuntimeException("Invalid ROM Header: ARM9 RAM Address");
+        }
+        arm9Length = reader.readInt();
+        if(arm9Length > 0x3BFE00) {
+            throw new RuntimeException("Invalid ROM Header: ARM9 Size");
+        }
+        arm7Offset = reader.readInt();
+        if(arm7Offset < 0x8000) {
+            throw new RuntimeException("Invalid ROM Header: ARM7 Offset");
+        }
+        arm7EntryAddress = reader.readInt();
+        if(!((arm7EntryAddress >= 0x2000000 && arm7EntryAddress <= 0x23BFE00) || (arm7EntryAddress >= 0x37F8000 && arm7EntryAddress <= 0x3807E00))) {
+            throw new RuntimeException("Invalid ROM Header: ARM7 Entry Address");
+        }
+        arm7LoadAddress = reader.readInt();
+        if(!((arm7LoadAddress >= 0x2000000 && arm7LoadAddress <= 0x23BFE00) || (arm7LoadAddress >= 0x37F8000 && arm7LoadAddress <= 0x3807E00))) {
+            throw new RuntimeException("Invalid ROM Header: ARM7 Load Address");
+        }
+        arm7Length = reader.readInt();
+        if(arm7Length > 0x3BFE0) {
+            throw new RuntimeException("Invalid ROM Header: ARM7 Size");
+        }
+
+        fntOffset = reader.readInt();
+        fntLength = reader.readInt();
+
+        fatOffset = reader.readInt();
+        fatLength = reader.readInt();
+
+        y9Offset = reader.readInt();
+        y9Length = reader.readInt();
+
+        y7Offset = reader.readInt();
+        y7Length = reader.readInt();
+
+        normalCardControlRegisterSettings = reader.readInt();
+        secureCardControlRegisterSettings = reader.readInt();
+
+        iconBannerOffset = reader.readInt();
+        secureAreaCrc = reader.readShort();
+        secureTransferTimeout = reader.readShort();
+        arm9Autoload = reader.readInt();
+        arm7Autoload = reader.readInt();
+        secureDisable = reader.readBytes(8);
+
+        romSizeOrRsaSigOffset = reader.readUInt32();
+        headerLength = reader.readUInt32();
+
+        padding_088h = reader.readBytes(0x38);
+        nintendoLogo = reader.readBytes(0x9C);
+        nintendoLogoCrc = reader.readShort();
+        headerCrc = reader.readShort();
+        debugRomOffset = reader.readInt();
+        debugRomLength = reader.readInt();
+        debugRomAddress = reader.readInt();
+        padding_16Ch = reader.readBytes(0x94);
+        padding_200h = reader.readBytes(Math.min(arm9Offset, fileLength));
+    }
+
+    private void readArm9(MemBuf.MemBufReader reader, int length)
+    {
+        arm9 = reader.readBytes(length);
+    }
+
+    private void readArm7(MemBuf.MemBufReader reader, int length)
+    {
+        arm7 = reader.readBytes(length);
+    }
+
+    private void readY9(MemBuf.MemBufReader reader, int length)
+    {
+        y9 = reader.readBytes(length);
+    }
+
+    private void readY7(MemBuf.MemBufReader reader, int length)
+    {
+        y7 = reader.readBytes(length);
+    }
+
+    private void readIconBanner(MemBuf.MemBufReader reader)
+    {
+        if (iconBannerOffset != 0)
+        {
+            reader.setPosition(iconBannerOffset);
+            int val = reader.readUInt16();
+            int iconBannerLength;
+            if (ICON_BANNER_LENGTHS.get(val) == null)
+                iconBannerLength = ICON_BANNER_LENGTHS.get(1);
+            else
+                iconBannerLength = ICON_BANNER_LENGTHS.get(val);
+
+            iconBanner = reader.readBytes(iconBannerLength);
+        }
+        else
+        {
+            iconBanner = new byte[ICON_BANNER_LENGTHS.get(1)];
+        }
+    }
+
+    private void readDebugRom(MemBuf.MemBufReader reader)
+    {
+        if (debugRomOffset != 0)
+        {
+            reader.setPosition(debugRomOffset);
+            debugRom = reader.readBytes(debugRomLength);
+        }
+        else
+        {
+            debugRom = new byte[] {};
+        }
+    }
+
+    private void processFat(MemBuf.MemBufReader reader)
     {
         MemBuf fatBuf = MemBuf.create();
         fatBuf.writer().write(fat);
@@ -395,8 +465,8 @@ public class NintendoDsRom
         {
             startOffset = fatBufReader.readUInt32();
             endOffset = fatBufReader.readUInt32();
-            romBuffer.seekGlobal(startOffset);
-            files.add(romBuffer.readTo(endOffset));
+            reader.setPosition(startOffset);
+            files.add(reader.readTo(endOffset));
             offsetToId.put(startOffset, i);
             offsetToIdKeys.add(startOffset);
         }
@@ -406,6 +476,8 @@ public class NintendoDsRom
             sortedFileIDs.add(offsetToId.get(offset));
         }
     }
+
+    //SAVE-RELATED FUNCTIONS
 
     private void align(MemBuf.MemBufWriter writer, int alignment)
     {
@@ -422,11 +494,11 @@ public class NintendoDsRom
         }
     }
 
-    public byte[] save()
-    {
-        return save(false);
-    }
-
+    /**
+     * Generate a <code>byte[]</code> representation of this ROM
+     * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
+     * @return a <code>byte[]</code>
+     */
     public byte[] save(boolean updateDeviceCapacity)
     {
         HashMap<Integer, Integer> fileOffsets = new HashMap<>();
@@ -437,7 +509,8 @@ public class NintendoDsRom
         // to begin, assume header size of 0x200 (header will be filled in at end)
         int storedPosition = 0x200;
         // then add size of padding_200h (bytes between end of header and start of arm9)
-        writer.writeAt(padding_200h, 0, 0x200, padding_200h.length);
+        writer.setPosition(0x200);
+        writer.write(padding_200h);
         // then align to 0x4000
         align(writer, 0x4000);
 
@@ -497,7 +570,7 @@ public class NintendoDsRom
             y7Offset = 0;
         }
 
-        // write the arm9 overlays
+        // write the arm7 overlays
         MemBuf y7Buf = MemBuf.create();
         y7Buf.writer().write(y7);
         for (int i = 0; i < y7.length / 32; i++)
@@ -609,17 +682,19 @@ public class NintendoDsRom
         // Now that all the offsets and stuff are determined, write the header data
         writer.setPosition(0);
 
-        writer.writeString(title);
-        writer.writeString(gameCode);
-        writer.writeString(developerCode);
+        writer.writeString(title, 12);
+        writer.writeString(gameCode, 4);
+        writer.writeString(developerCode, 2);
         writer.writeByte((byte) unitCode);
         writer.writeByte((byte) encryptionSeed);
         writer.writeByte(deviceCapacity);
+        assert (writer.getPosition() == 0x15);
         writer.write(reserved1);
         writer.writeByte(reserved2);
         writer.writeByte((byte) systemRegion);
         writer.writeByte((byte) romVersion);
         writer.writeByte((byte) autoStartFlag);
+        assert (writer.getPosition() == 0x20);
 
         writer.writeInt(arm9Offset);
         writer.writeInt(arm9EntryAddress);
@@ -630,9 +705,10 @@ public class NintendoDsRom
         writer.writeInt(arm7EntryAddress);
         writer.writeInt(arm7LoadAddress);
         writer.writeInt(arm7.length);
+        assert (writer.getPosition() == 0x40);
 
         writer.writeInt(fntOffset);
-        writer.writeInt(fntBuf.len);
+        writer.writeInt(fntBuf.writer().getPosition());
 
         writer.writeInt(fatOffset);
         writer.writeInt(files.size() * 8);
@@ -671,53 +747,6 @@ public class NintendoDsRom
     }
 
     /**
-     * Generate binary file representing this ROM, and save it to the file specified by filePath, and does not update device capacity code
-     * @param filePath <code>String</code> path to file where the rom will be saved
-     */
-    public void saveToFile(String filePath) throws IOException
-    {
-        saveRomFile(new File(filePath), false);
-    }
-
-    /**
-     * Generate binary file representing this ROM, and save it to the file specified by filePath.
-     * @param filePath <code>String</code> to file where the rom will be saved
-     * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
-     */
-    public void saveToFile(String filePath, boolean updateDeviceCapacity) throws IOException
-    {
-        saveRomFile(new File(filePath), updateDeviceCapacity);
-    }
-
-    /**
-     * Generate binary file representing this ROM, and save it to the file specified by filePath, and does not update device capacity code
-     * @param filePath <code>Path</code> path to file where the rom will be saved
-     */
-    public void saveToFile(Path filePath) throws IOException
-    {
-        saveRomFile(filePath.toFile(), false);
-    }
-
-    /**
-     * Generate binary file representing this ROM, and save it to the file specified by filePath.
-     * @param filePath <code>Path</code> to file where the rom will be saved
-     * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
-     */
-    public void saveToFile(Path filePath, boolean updateDeviceCapacity) throws IOException
-    {
-        saveRomFile(filePath.toFile(), updateDeviceCapacity);
-    }
-
-    /**
-     * Generate binary file representing this ROM, and save it to the file specified by filePath, and does not update device capacity code
-     * @param filePath <code>File</code> path to file where the rom will be saved
-     */
-    public void saveToFile(File filePath) throws IOException
-    {
-        saveRomFile(filePath, false);
-    }
-
-    /**
      * Generate binary file representing this ROM, and save it to the file specified by filePath.
      * @param filePath <code>File</code> to file where the rom will be saved
      * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
@@ -753,12 +782,166 @@ public class NintendoDsRom
             }
         }
 
-        for (byte[] fileNum : files)
+        for (int fileNum = 0; fileNum < files.size(); fileNum++)
         {
-            //TODO finish this and figure out wtf is going on with the contents of "files" in the ndspy src
+            if (!fileOffsets.containsKey(fileNum))
+            {
+                return fileNum;
+            }
         }
 
         return null;
+    }
+
+    public enum UNPACKED_FILENAMES {
+        ARM9("arm9.bin"),
+        ARM7("arm7.bin"),
+        Y9("y9.bin"),
+        Y7("y7.bin"),
+        HEADER("header.bin"),
+        BANNER("banner.bin"),
+        OVERLAY("overlay"),
+        DATA("data");
+
+        final String name;
+
+        UNPACKED_FILENAMES(String s) {
+            name = s;
+        }
+    }
+
+    public void unpack(String dir) throws IOException
+    {
+        unpack(new File(dir));
+    }
+
+    public void unpack(Path dir) throws IOException
+    {
+        unpack(dir.toFile());
+    }
+
+    public void unpack(File dir) throws IOException
+    {
+        if (dir.exists() && dir.isDirectory() && dir.listFiles().length != 0)
+        {
+            throw new RuntimeException("Unable to unpack rom, target folder already exists");
+        }
+        else if (!dir.mkdir())
+        {
+            throw new RuntimeException("Failed to create unpacked directory, check write perms.");
+        }
+
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM9.name), arm9);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM7.name), arm7);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y9.name), y9);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y7.name), y7);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.BANNER.name), iconBanner);
+
+        MemBuf headerBuf = MemBuf.create();
+        MemBuf.MemBufWriter headerWriter = headerBuf.writer();
+
+        headerWriter.writeString(title, 12);
+        headerWriter.writeString(gameCode, 4);
+        headerWriter.writeString(developerCode, 2);
+        headerWriter.writeByte((byte) unitCode);
+        headerWriter.writeByte((byte) encryptionSeed);
+        headerWriter.writeByte(deviceCapacity);
+        headerWriter.write(reserved1);
+        headerWriter.writeByte(reserved2);
+        headerWriter.writeByte((byte) systemRegion);
+        headerWriter.writeByte((byte) romVersion);
+        headerWriter.writeByte((byte) autoStartFlag);
+
+        headerWriter.writeInt(arm9Offset);
+        headerWriter.writeInt(arm9EntryAddress);
+        headerWriter.writeInt(arm9LoadAddress);
+        headerWriter.writeInt(arm9.length);
+
+        headerWriter.writeInt(arm7Offset);
+        headerWriter.writeInt(arm7EntryAddress);
+        headerWriter.writeInt(arm7LoadAddress);
+        headerWriter.writeInt(arm7.length);
+
+        headerWriter.writeInt(fntOffset);
+        headerWriter.writeInt(fntLength);
+
+        headerWriter.writeInt(fatOffset);
+        headerWriter.writeInt(files.size() * 8);
+
+        headerWriter.writeInt(y9Offset);
+        headerWriter.writeInt(y9.length);
+
+        headerWriter.writeInt(y7Offset);
+        headerWriter.writeInt(y7.length);
+
+        headerWriter.writeInt(normalCardControlRegisterSettings);
+        headerWriter.writeInt(secureCardControlRegisterSettings);
+
+        headerWriter.writeInt(iconBannerOffset);
+        headerWriter.writeShort(secureAreaCrc); //todo wait when do I recalc this
+        headerWriter.writeShort(secureTransferTimeout);
+        headerWriter.writeInt(arm9Autoload);
+        headerWriter.writeInt(arm7Autoload);
+        headerWriter.write(secureDisable);
+        headerWriter.writeUInt32(romSizeOrRsaSigOffset);
+        headerWriter.writeUInt32(headerLength);
+        headerWriter.write(padding_088h);
+        headerWriter.write(nintendoLogo);
+        headerWriter.write(calculateCRC16(nintendoLogo));
+        headerWriter.write(calculateCRC16(headerBuf.reader().readBytes(0x15e)));
+        headerWriter.writeInt(debugRomOffset);
+        headerWriter.writeInt(debugRom.length);
+        headerWriter.writeInt(debugRomAddress);
+        headerWriter.write(padding_16Ch);
+
+        assert (headerWriter.getPosition() == 0x200);
+
+        headerBuf.reader().setPosition(0);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name), headerBuf.reader().getBuffer());
+
+        // write the filesystem
+        Filesystem.writeFolder(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile(), filenames, files);
+
+        File overlayDir = Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.OVERLAY.name).toFile();
+
+        if (!overlayDir.mkdir())
+        {
+            throw new RuntimeException("Failed to create overlay directory, check write perms.");
+        }
+
+        // write the overlays
+        MemBuf y9Buf = MemBuf.create();
+        y9Buf.writer().write(y9);
+        int fileId;
+        for (int i = 0; i < y9.length / 32; i++)
+        {
+            y9Buf.reader().setPosition(i * 32 + 0x18);
+            fileId = y9Buf.reader().readInt();
+            BinaryWriter.writeFile(Paths.get(overlayDir.getAbsolutePath(), formatOverlayNumString(i, y9.length / 32)), files.get(fileId));
+        }
+    }
+
+    private static String formatOverlayNumString(int i, int cnt)
+    {
+
+        StringBuilder sb = new StringBuilder("" + i);
+        if (cnt < 10)
+        {
+            while (sb.length() < 2)
+                sb.insert(0, "0");
+        }
+        else if (cnt < 100)
+        {
+            while (sb.length() < 3)
+                sb.insert(0, "0");
+        }
+        else if (cnt < 1000)
+        {
+            while (sb.length() < 4)
+                sb.insert(0, "0");
+        }
+        sb.insert(0, "overlay_").append(".bin");
+        return sb.toString();
     }
 
     public String toString()
@@ -768,9 +951,13 @@ public class NintendoDsRom
 
 
 
-    public static void main(String[] args)
+    public static void main(String[] args) throws IOException
     {
-        NintendoDsRom rom = new NintendoDsRom("HeartGold.nds");
-        System.out.println(rom.title);
+        NintendoDsRom rom = NintendoDsRom.fromFile(new File("HeartGold.nds"));
+        System.out.println(rom);
+        rom.unpack("test_out");
+        rom.saveToFile(new File("test.nds"), false);
+        rom = NintendoDsRom.fromFile(new File("test.nds"));
+        System.out.println(rom);
     }
 }

@@ -22,6 +22,7 @@ package com.turtleisaac.nds4j.framework;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Path;
 import java.util.Arrays;
 
 public class BinaryWriter {
@@ -47,6 +48,11 @@ public class BinaryWriter {
         writeFile(new File(file),bytes);
     }
 
+    public static void writeFile(Path file, byte... bytes) throws IOException
+    {
+        writeFile(file.toFile(),bytes);
+    }
+
     public BinaryWriter(File file) throws IOException {
         raf = new RandomAccessFile(file, "rw");
         raf.setLength(0);
@@ -55,6 +61,10 @@ public class BinaryWriter {
     public BinaryWriter(String fileName) throws IOException
     {
         this(new File(fileName));
+    }
+
+    public BinaryWriter(Path file) throws IOException {
+        this(file.toFile());
     }
 
 
