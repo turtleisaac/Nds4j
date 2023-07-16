@@ -19,10 +19,15 @@
 
 package com.turtleisaac.nds4j.rom;
 
+import com.turtleisaac.nds4j.framework.BinaryWriter;
 import com.turtleisaac.nds4j.framework.Buffer;
 import com.turtleisaac.nds4j.framework.MemBuf;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -282,5 +287,82 @@ public class Fnt
             folderCount += countFoldersIn(f);
         }
         return folderCount + 1;
+    }
+
+
+
+    /**
+     * writes the ROM's internal filesystem to disk at the specified path
+     * @param dir a <code>File</code> representation of the write path
+     * @param folder the <code>Folder</code>> object to write
+     */
+    public static void writeFolderToDisk(File dir, Folder folder, ArrayList<byte[]> files) throws IOException
+    {
+        if (!dir.mkdir())
+        {
+            throw new RuntimeException("Could not create data dir, check write perms.");
+        }
+
+        for (String name : folder.getFolders().keySet())
+        {
+            writeFolderToDisk(Paths.get(dir.getAbsolutePath(), name).toFile(), folder.getFolders().get(name), files);
+        }
+
+        int counter = 0;
+        for (String name : folder.getFiles())
+        {
+            BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), name).toFile(), files.get(folder.getFirstId() + counter++));
+        }
+    }
+
+    /**
+     * Create a <code>Folder</code> from an unpacked filesystem on disk.
+     * This also grabs all the binary data for each file.
+     * @param dir a <code>File</code> representing the path to the unpacked data dir on disk to process
+     * @param rom a <code>NintendoDsRom</code> object
+     */
+    public static void loadFromDisk(File dir, NintendoDsRom rom)
+    {
+        rom.filenames = loadFolderFromDisk(dir, rom); // this is always root folder
+    }
+
+    /**
+     * Loads a given folder from disk
+     * @param dir a <code>File</code> representing the path to an unpacked dir on disk to process
+     * @param rom a <code>NintendoDsRom</code> object
+     * @return a <code>Folder</code>
+     */
+    private static Folder loadFolderFromDisk(File dir, NintendoDsRom rom)
+    {
+        Folder folder = new Folder(dir.getName());
+        folder.firstId = findLowestAvailableFileId(rom);
+
+        String name;
+        // Read file and folders entries from the entries table
+        for (File sub : Arrays.stream(Objects.requireNonNull(dir.listFiles())).sorted().collect(Collectors.toList()))
+        {
+            name = sub.getName();
+            if (sub.isDirectory())
+            {
+                folder.folders.put(name, loadFolderFromDisk(sub, rom));
+            }
+            else
+            {
+                folder.files.add(name);
+                rom.files.set(findLowestAvailableFileId(rom), Buffer.readFile(sub.getAbsolutePath()));
+            }
+        }
+        return folder;
+    }
+
+    private static int findLowestAvailableFileId(NintendoDsRom rom)
+    {
+        for (int i = 0; i < rom.files.size(); i++)
+        {
+            if (rom.files.get(i) == null)
+                return i;
+        }
+
+        throw new RuntimeException("No available file IDs to allocate.");
     }
 }

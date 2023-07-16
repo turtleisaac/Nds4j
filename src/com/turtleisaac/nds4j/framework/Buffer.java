@@ -63,6 +63,11 @@ public class Buffer {
         return buffer.readRemainder();
     }
 
+    public static byte[] readFile(Path file)
+    {
+        return readFile(file.toFile().getAbsolutePath());
+    }
+
     public int readInt() {
         require(4);
 

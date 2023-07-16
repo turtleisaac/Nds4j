@@ -24,12 +24,11 @@ import com.turtleisaac.nds4j.framework.Buffer;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
+import java.util.*;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.turtleisaac.nds4j.framework.CRC16;
 import com.turtleisaac.nds4j.framework.MemBuf;
@@ -141,21 +140,6 @@ public class NintendoDsRom
         return new NintendoDsRom(Buffer.readFile(file.getAbsolutePath()));
     }
 
-//    public static NintendoDsRom fromUnpacked(String file)
-//    {
-//        // TODO implement load rom from unpacked folder
-//    }
-//
-//    public static NintendoDsRom fromUnpacked(Path file)
-//    {
-//        return fromUnpacked(file.toFile());
-//    }
-//
-//    public static NintendoDsRom fromUnpacked(File file)
-//    {
-//        return fromUnpacked(file.getAbsolutePath());
-//    }
-
     /**
      * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
      */
@@ -245,7 +229,7 @@ public class NintendoDsRom
         int fileLength = romBuf.writer().getPosition();
 
         // read the ROM header
-        readHeader(reader, fileLength);
+        readHeader(reader, fileLength, false);
 
         // RSA signature file
         long realSigOffset = 0;
@@ -316,7 +300,7 @@ public class NintendoDsRom
         }
     }
 
-    private void readHeader(MemBuf.MemBufReader reader, int fileLength)
+    private void readHeader(MemBuf.MemBufReader reader, int fileLength, boolean fromUnpacked)
     {
         title = reader.readString(12).trim();
         gameCode = reader.readString(4);
@@ -396,7 +380,10 @@ public class NintendoDsRom
         debugRomLength = reader.readInt();
         debugRomAddress = reader.readInt();
         padding_16Ch = reader.readBytes(0x94);
-        padding_200h = reader.readBytes(Math.min(arm9Offset, fileLength));
+        if (!fromUnpacked)
+            padding_200h = reader.readTo(Math.min(arm9Offset, fileLength));
+        else
+            padding_200h = reader.readTo(fileLength);
     }
 
     private void readArm9(MemBuf.MemBufReader reader, int length)
@@ -810,19 +797,80 @@ public class NintendoDsRom
         }
     }
 
-    public void unpack(String dir) throws IOException
+    public static NintendoDsRom fromUnpacked(File dir)
     {
-        unpack(new File(dir));
+        if (!dir.exists() || !dir.isDirectory())
+        {
+            throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" does not exist");
+        }
+
+        NintendoDsRom rom = new NintendoDsRom();
+        byte[] header = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name));
+        MemBuf headerBuf = MemBuf.create();
+        headerBuf.writer().write(header);
+        rom.readHeader(headerBuf.reader(), headerBuf.writer().getPosition(), true);
+        rom.arm9 = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM9.name));
+        rom.arm9Length = rom.arm9.length;
+        rom.arm7 = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM7.name));
+        rom.arm7Length = rom.arm7.length;
+        rom.y9 = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y9.name));
+        rom.y9Length = rom.y9.length;
+        rom.y7 = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y7.name));
+        rom.y7Length = rom.y7.length;
+        rom.iconBanner = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.BANNER.name));
+
+        File overlayDir = Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.OVERLAY.name).toFile();
+        File dataDir = Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile();
+
+        Stream<File> overlayStream = Arrays.stream(Objects.requireNonNull(overlayDir.listFiles(File::isFile)));
+        List<File> overlays = overlayStream.sorted(Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("_")[1].replace(".bin", "")))).filter(file -> !file.isHidden()).collect(Collectors.toList());
+
+        int numFiles = calculateNumFiles(overlayDir) + calculateNumFiles(dataDir);
+        for (int i = 0; i < numFiles; i++)
+        {
+            rom.files.add(null);
+        }
+
+        // read the overlays
+        int fileId;
+        MemBuf y9Buf = MemBuf.create();
+        y9Buf.writer().write(rom.y9);
+        for (int i = 0; i < rom.y9Length / 32; i++)
+        {
+            y9Buf.reader().setPosition(i * 32 + 0x18);
+            fileId = y9Buf.reader().readInt();
+            rom.files.set(fileId, Buffer.readFile(overlays.get(i).getAbsolutePath()));
+        }
+
+        rom.filenames = new Folder();
+        Fnt.loadFromDisk(dataDir, rom);
+
+        if (rom.files.contains(null))
+            throw new RuntimeException("Internal file table not properly filled");
+
+        return rom;
     }
 
-    public void unpack(Path dir) throws IOException
+    private static int calculateNumFiles(File dir)
     {
-        unpack(dir.toFile());
+        int fileCount = 0;
+        for (File f : Objects.requireNonNull(dir.listFiles()))
+        {
+            if (f.isDirectory())
+                fileCount += calculateNumFiles(f);
+            else
+                fileCount += 1;
+        }
+        return fileCount;
     }
 
+    /**
+     * Unpacks the rom to the target directory on disk
+     * @param dir a <code>File</code> object representing the target directory
+     */
     public void unpack(File dir) throws IOException
     {
-        if (dir.exists() && dir.isDirectory() && dir.listFiles().length != 0)
+        if (dir.exists() && dir.isDirectory() && Objects.requireNonNull(dir.listFiles()).length != 0)
         {
             throw new RuntimeException("Unable to unpack rom, target folder already exists");
         }
@@ -831,6 +879,7 @@ public class NintendoDsRom
             throw new RuntimeException("Failed to create unpacked directory, check write perms.");
         }
 
+        //todo figure out arm9 post data
         BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM9.name), arm9);
         BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM7.name), arm7);
         BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y9.name), y9);
@@ -895,12 +944,13 @@ public class NintendoDsRom
         headerWriter.write(padding_16Ch);
 
         assert (headerWriter.getPosition() == 0x200);
+        headerWriter.write(padding_200h);
 
         headerBuf.reader().setPosition(0);
         BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name), headerBuf.reader().getBuffer());
 
         // write the filesystem
-        Filesystem.writeFolder(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile(), filenames, files);
+        Fnt.writeFolderToDisk(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile(), filenames, files);
 
         File overlayDir = Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.OVERLAY.name).toFile();
 
@@ -955,9 +1005,12 @@ public class NintendoDsRom
     {
         NintendoDsRom rom = NintendoDsRom.fromFile(new File("HeartGold.nds"));
         System.out.println(rom);
-        rom.unpack("test_out");
+        rom.unpack(new File("test_out"));
         rom.saveToFile(new File("test.nds"), false);
         rom = NintendoDsRom.fromFile(new File("test.nds"));
         System.out.println(rom);
+        NintendoDsRom rum = NintendoDsRom.fromUnpacked(new File("test_out"));
+        System.out.println(rum);
+        rum.saveToFile(new File("test2.nds"), false);
     }
 }
