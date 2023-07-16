@@ -119,7 +119,7 @@ public class NintendoDsRom
     ArrayList<byte[]> files;
     ArrayList<Integer> sortedFileIDs;
 
-    private static final HashMap<Integer, Integer> ICON_BANNER_LENGTHS = new HashMap<>() {
+    private static final HashMap<Integer, Integer> ICON_BANNER_LENGTHS = new HashMap<Integer, Integer>() {
         {
             put(0x0001, 0x840);
             put(0x0002, 0x940);

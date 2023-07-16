@@ -35,6 +35,10 @@ Note that Java doesn't support the Nintendo DS itself; Nds4j is intended to be u
 
 [//]: # (the [Installation]&#40;#installation&#41; section!)
 
+**Note:** Code from the [Universal Pokemon Randomizer ZX](https://github.com/Ajarmar/universal-pokemon-randomizer-zx)
+is adapted for LZ decompression purposes under the rights provided by the GNU General Public License v3.0.
+If there are any complaints related to this, please create a new Issue in the Issues tab here on GitHub.
+
 A few examples of Nds4j in action
 ---------------------------------
 
@@ -175,15 +179,23 @@ This section will try to answer some questions you may have.
 Documentation
 -------------
 
-[ndspy's documentation is hosted on Read the
-Docs](https://ndspy.readthedocs.io/en/latest/index.html), and the documentation
-source code can be found in the ``docs/`` folder in this repository. In
-addition to the [API
-reference](https://ndspy.readthedocs.io/en/latest/api/index.html), there are
-also
-[examples](https://ndspy.readthedocs.io/en/latest/index.html#a-few-examples-of-ndspy-in-action)
-and [tutorials](https://ndspy.readthedocs.io/en/latest/tutorials/index.html) to
-help you out!
+[//]: # ([ndspy's documentation is hosted on Read the)
+
+[//]: # (Docs]&#40;https://ndspy.readthedocs.io/en/latest/index.html&#41;, and the documentation)
+
+[//]: # (source code can be found in the ``docs/`` folder in this repository. In)
+
+[//]: # (addition to the [API)
+
+[//]: # (reference]&#40;https://ndspy.readthedocs.io/en/latest/api/index.html&#41;, there are)
+
+[//]: # (also)
+
+[//]: # ([examples]&#40;https://ndspy.readthedocs.io/en/latest/index.html#a-few-examples-of-ndspy-in-action&#41;)
+
+[//]: # (and [tutorials]&#40;https://ndspy.readthedocs.io/en/latest/tutorials/index.html&#41; to)
+
+[//]: # (help you out!)
 
 
 Support

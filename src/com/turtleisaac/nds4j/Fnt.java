@@ -56,8 +56,16 @@ public class Fnt
 
         public Folder(HashMap<String, Folder> folders, ArrayList<String> files, int firstId)
         {
-            this.folders = Objects.requireNonNullElseGet(folders, HashMap::new);
-            this.files = Objects.requireNonNullElseGet(files, ArrayList::new);
+            if (folders != null)
+                this.folders = folders;
+            else
+                this.folders = new HashMap<>();
+
+            if (files != null)
+                this.files = files;
+            else
+                this.files = new ArrayList<>();
+
             this.firstId = firstId;
             this.name = "";
         }
@@ -242,7 +250,7 @@ public class Fnt
          */
         public String[] toStringList(int indent)
         {
-            return toStringListHelper(indent).toArray(String[]::new);
+            return toStringListHelper(indent).toArray(new String[0]);
         }
 
         private ArrayList<String> toStringListHelper(int indent)
