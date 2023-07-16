@@ -56,7 +56,7 @@ public class MemBuf {
 
         private void require(int space) {
             if (writePos - readPos < space) {
-                throw new IllegalStateException("Not enough room to read. need "+space+" bytes, have"+(writePos-readPos));
+                throw new IllegalStateException("Not enough room to read. need "+space+" bytes, have "+(writePos-readPos));
             }
         }
 
@@ -151,7 +151,6 @@ public class MemBuf {
 
             return ret;
         }
-
     }
 
 
@@ -288,6 +287,17 @@ public class MemBuf {
                 buf[writePos++] = b;
             }
             return this;
+        }
+
+        public MemBufWriter align(int alignment)
+        {
+            skip(alignment - writePos % alignment);
+            return this;
+        }
+
+        public MemBufWriter align(int alignment, byte fill)
+        {
+            return writeByteNumTimes(fill, alignment - writePos % alignment);
         }
 
     }

@@ -17,22 +17,20 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j.rom;
+package com.turtleisaac.nds4j;
 
-import com.turtleisaac.nds4j.framework.BinaryWriter;
-import com.turtleisaac.nds4j.framework.Buffer;
+import com.turtleisaac.nds4j.framework.*;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.turtleisaac.nds4j.framework.CRC16;
-import com.turtleisaac.nds4j.framework.MemBuf;
-import com.turtleisaac.nds4j.rom.Fnt.Folder;
+import com.turtleisaac.nds4j.Fnt.Folder;
+
+import static com.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
 
 //import static com.turtleisaac.nds4j.rom.Filesystem.writeFolder;
 
@@ -138,82 +136,6 @@ public class NintendoDsRom
     public static NintendoDsRom fromFile(File file)
     {
         return new NintendoDsRom(Buffer.readFile(file.getAbsolutePath()));
-    }
-
-    /**
-     * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
-     */
-    private NintendoDsRom()
-    {
-        title = "";
-        gameCode = "####";
-        developerCode = new String(new byte[] {0, 0}, 0, 2);
-        unitCode = 0;
-        encryptionSeed = 0;
-        deviceCapacity = 9;
-//        reserved1;
-//        reserved2;
-        systemRegion = 0;
-        romVersion = 0;
-        autoStartFlag = 0;
-
-        arm9EntryAddress = 0x2000800;
-        arm9LoadAddress = 0x2000000;
-
-        arm7EntryAddress = 0x2380000;
-        arm7LoadAddress = 0x2380000;
-
-        normalCardControlRegisterSettings = 0x0416657;
-        secureCardControlRegisterSettings = 0x81808f8;
-
-        secureAreaCrc = 0x0000;
-        secureTransferTimeout = 0x0D7E;
-        arm9Autoload = 0;
-        arm7Autoload = 0;
-        secureDisable = new byte[] {0, 0, 0, 0, 0, 0, 0, 0};
-
-        //0x38 bytes
-        padding_088h = new byte[] {0x38};
-
-        nintendoLogo = new byte[] {
-                (byte) 0x24, (byte) 0xFF, (byte) 0xAE, (byte) 0x51, (byte) 0x69, (byte) 0x9A, (byte) 0xA2,
-                (byte) 0x21, (byte) 0x3D, (byte) 0x84, (byte) 0x82, (byte) 0x0A, (byte) 0x84, (byte) 0xE4, (byte) 0x09, (byte) 0xAD,
-                (byte) 0x11, (byte) 0x24, (byte) 0x8B, (byte) 0x98, (byte) 0xC0, (byte) 0x81, (byte) 0x7F, (byte) 0x21, (byte) 0xA3,
-                (byte) 0x52, (byte) 0xBE, (byte) 0x19, (byte) 0x93, (byte) 0x09, (byte) 0xCE, (byte) 0x20, (byte) 0x10, (byte) 0x46,
-                (byte) 0x4A, (byte) 0x4A, (byte) 0xF8, (byte) 0x27, (byte) 0x31, (byte) 0xEC, (byte) 0x58, (byte) 0xC7, (byte) 0xE8,
-                (byte) 0x33, (byte) 0x82, (byte) 0xE3, (byte) 0xCE, (byte) 0xBF, (byte) 0x85, (byte) 0xF4, (byte) 0xDF, (byte) 0x94,
-                (byte) 0xCE, (byte) 0x4B, (byte) 0x09, (byte) 0xC1, (byte) 0x94, (byte) 0x56, (byte) 0x8A, (byte) 0xC0, (byte) 0x13,
-                (byte) 0x72, (byte) 0xA7, (byte) 0xFC, (byte) 0x9F, (byte) 0x84, (byte) 0x4D, (byte) 0x73, (byte) 0xA3, (byte) 0xCA,
-                (byte) 0x9A, (byte) 0x61, (byte) 0x58, (byte) 0x97, (byte) 0xA3, (byte) 0x27, (byte) 0xFC, (byte) 0x03, (byte) 0x98,
-                (byte) 0x76, (byte) 0x23, (byte) 0x1D, (byte) 0xC7, (byte) 0x61, (byte) 0x03, (byte) 0x04, (byte) 0xAE, (byte) 0x56,
-                (byte) 0xBF, (byte) 0x38, (byte) 0x84, (byte) 0x00, (byte) 0x40, (byte) 0xA7, (byte) 0x0E, (byte) 0xFD, (byte) 0xFF,
-                (byte) 0x52, (byte) 0xFE, (byte) 0x03, (byte) 0x6F, (byte) 0x95, (byte) 0x30, (byte) 0xF1, (byte) 0x97, (byte) 0xFB,
-                (byte) 0xC0, (byte) 0x85, (byte) 0x60, (byte) 0xD6, (byte) 0x80, (byte) 0x25, (byte) 0xA9, (byte) 0x63, (byte) 0xBE,
-                (byte) 0x03, (byte) 0x01, (byte) 0x4E, (byte) 0x38, (byte) 0xE2, (byte) 0xF9, (byte) 0xA2, (byte) 0x34, (byte) 0xFF,
-                (byte) 0xBB, (byte) 0x3E, (byte) 0x03, (byte) 0x44, (byte) 0x78, (byte) 0x00, (byte) 0x90, (byte) 0xCB, (byte) 0x88,
-                (byte) 0x11, (byte) 0x3A, (byte) 0x94, (byte) 0x65, (byte) 0xC0, (byte) 0x7C, (byte) 0x63, (byte) 0x87, (byte) 0xF0,
-                (byte) 0x3C, (byte) 0xAF, (byte) 0xD6, (byte) 0x25, (byte) 0xE4, (byte) 0x8B, (byte) 0x38, (byte) 0x0A, (byte) 0xAC,
-                (byte) 0x72, (byte) 0x21, (byte) 0xD4, (byte) 0xF8, (byte) 0x07};
-
-        debugRomAddress = 0;
-        padding_16Ch = new byte[0x94];
-        padding_200h = new byte[0x3E00];
-
-        // Misc Section
-
-        rsaSignature = new byte[] {};
-
-        arm9 = new byte[] {};
-        arm9PostData = new int[] {};
-        arm7 = new byte[] {};
-        y9 = new byte[] {};
-        y7 = new byte[] {};
-        iconBanner = new byte[] {};
-        debugRom = new byte[] {};
-
-        filenames = new Fnt.Folder();
-        files = new ArrayList<>();
-        sortedFileIDs = new ArrayList<>();
     }
 
     /**
@@ -797,6 +719,82 @@ public class NintendoDsRom
         }
     }
 
+    /**
+     * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
+     */
+    private NintendoDsRom()
+    {
+        title = "";
+        gameCode = "####";
+        developerCode = new String(new byte[] {0, 0}, 0, 2);
+        unitCode = 0;
+        encryptionSeed = 0;
+        deviceCapacity = 9;
+//        reserved1;
+//        reserved2;
+        systemRegion = 0;
+        romVersion = 0;
+        autoStartFlag = 0;
+
+        arm9EntryAddress = 0x2000800;
+        arm9LoadAddress = 0x2000000;
+
+        arm7EntryAddress = 0x2380000;
+        arm7LoadAddress = 0x2380000;
+
+        normalCardControlRegisterSettings = 0x0416657;
+        secureCardControlRegisterSettings = 0x81808f8;
+
+        secureAreaCrc = 0x0000;
+        secureTransferTimeout = 0x0D7E;
+        arm9Autoload = 0;
+        arm7Autoload = 0;
+        secureDisable = new byte[] {0, 0, 0, 0, 0, 0, 0, 0};
+
+        //0x38 bytes
+        padding_088h = new byte[] {0x38};
+
+        nintendoLogo = new byte[] {
+                (byte) 0x24, (byte) 0xFF, (byte) 0xAE, (byte) 0x51, (byte) 0x69, (byte) 0x9A, (byte) 0xA2,
+                (byte) 0x21, (byte) 0x3D, (byte) 0x84, (byte) 0x82, (byte) 0x0A, (byte) 0x84, (byte) 0xE4, (byte) 0x09, (byte) 0xAD,
+                (byte) 0x11, (byte) 0x24, (byte) 0x8B, (byte) 0x98, (byte) 0xC0, (byte) 0x81, (byte) 0x7F, (byte) 0x21, (byte) 0xA3,
+                (byte) 0x52, (byte) 0xBE, (byte) 0x19, (byte) 0x93, (byte) 0x09, (byte) 0xCE, (byte) 0x20, (byte) 0x10, (byte) 0x46,
+                (byte) 0x4A, (byte) 0x4A, (byte) 0xF8, (byte) 0x27, (byte) 0x31, (byte) 0xEC, (byte) 0x58, (byte) 0xC7, (byte) 0xE8,
+                (byte) 0x33, (byte) 0x82, (byte) 0xE3, (byte) 0xCE, (byte) 0xBF, (byte) 0x85, (byte) 0xF4, (byte) 0xDF, (byte) 0x94,
+                (byte) 0xCE, (byte) 0x4B, (byte) 0x09, (byte) 0xC1, (byte) 0x94, (byte) 0x56, (byte) 0x8A, (byte) 0xC0, (byte) 0x13,
+                (byte) 0x72, (byte) 0xA7, (byte) 0xFC, (byte) 0x9F, (byte) 0x84, (byte) 0x4D, (byte) 0x73, (byte) 0xA3, (byte) 0xCA,
+                (byte) 0x9A, (byte) 0x61, (byte) 0x58, (byte) 0x97, (byte) 0xA3, (byte) 0x27, (byte) 0xFC, (byte) 0x03, (byte) 0x98,
+                (byte) 0x76, (byte) 0x23, (byte) 0x1D, (byte) 0xC7, (byte) 0x61, (byte) 0x03, (byte) 0x04, (byte) 0xAE, (byte) 0x56,
+                (byte) 0xBF, (byte) 0x38, (byte) 0x84, (byte) 0x00, (byte) 0x40, (byte) 0xA7, (byte) 0x0E, (byte) 0xFD, (byte) 0xFF,
+                (byte) 0x52, (byte) 0xFE, (byte) 0x03, (byte) 0x6F, (byte) 0x95, (byte) 0x30, (byte) 0xF1, (byte) 0x97, (byte) 0xFB,
+                (byte) 0xC0, (byte) 0x85, (byte) 0x60, (byte) 0xD6, (byte) 0x80, (byte) 0x25, (byte) 0xA9, (byte) 0x63, (byte) 0xBE,
+                (byte) 0x03, (byte) 0x01, (byte) 0x4E, (byte) 0x38, (byte) 0xE2, (byte) 0xF9, (byte) 0xA2, (byte) 0x34, (byte) 0xFF,
+                (byte) 0xBB, (byte) 0x3E, (byte) 0x03, (byte) 0x44, (byte) 0x78, (byte) 0x00, (byte) 0x90, (byte) 0xCB, (byte) 0x88,
+                (byte) 0x11, (byte) 0x3A, (byte) 0x94, (byte) 0x65, (byte) 0xC0, (byte) 0x7C, (byte) 0x63, (byte) 0x87, (byte) 0xF0,
+                (byte) 0x3C, (byte) 0xAF, (byte) 0xD6, (byte) 0x25, (byte) 0xE4, (byte) 0x8B, (byte) 0x38, (byte) 0x0A, (byte) 0xAC,
+                (byte) 0x72, (byte) 0x21, (byte) 0xD4, (byte) 0xF8, (byte) 0x07};
+
+        debugRomAddress = 0;
+        padding_16Ch = new byte[0x94];
+        padding_200h = new byte[0x3E00];
+
+        // Misc Section
+
+        rsaSignature = new byte[] {};
+
+        arm9 = new byte[] {};
+        arm9PostData = new int[] {};
+        arm7 = new byte[] {};
+        y9 = new byte[] {};
+        y7 = new byte[] {};
+        iconBanner = new byte[] {};
+        debugRom = new byte[] {};
+
+        filenames = new Fnt.Folder();
+        files = new ArrayList<>();
+        sortedFileIDs = new ArrayList<>();
+    }
+
     public static NintendoDsRom fromUnpacked(File dir)
     {
         if (!dir.exists() || !dir.isDirectory())
@@ -825,7 +823,7 @@ public class NintendoDsRom
         Stream<File> overlayStream = Arrays.stream(Objects.requireNonNull(overlayDir.listFiles(File::isFile)));
         List<File> overlays = overlayStream.sorted(Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("_")[1].replace(".bin", "")))).filter(file -> !file.isHidden()).collect(Collectors.toList());
 
-        int numFiles = calculateNumFiles(overlayDir) + calculateNumFiles(dataDir);
+        int numFiles = Fnt.calculateNumFiles(overlayDir) + Fnt.calculateNumFiles(dataDir);
         for (int i = 0; i < numFiles; i++)
         {
             rom.files.add(null);
@@ -842,26 +840,12 @@ public class NintendoDsRom
             rom.files.set(fileId, Buffer.readFile(overlays.get(i).getAbsolutePath()));
         }
 
-        rom.filenames = new Folder();
-        Fnt.loadFromDisk(dataDir, rom);
+        rom.filenames = Fnt.loadFromDisk(dataDir, rom.files);
 
         if (rom.files.contains(null))
             throw new RuntimeException("Internal file table not properly filled");
 
         return rom;
-    }
-
-    private static int calculateNumFiles(File dir)
-    {
-        int fileCount = 0;
-        for (File f : Objects.requireNonNull(dir.listFiles()))
-        {
-            if (f.isDirectory())
-                fileCount += calculateNumFiles(f);
-            else
-                fileCount += 1;
-        }
-        return fileCount;
     }
 
     /**
@@ -967,32 +951,40 @@ public class NintendoDsRom
         {
             y9Buf.reader().setPosition(i * 32 + 0x18);
             fileId = y9Buf.reader().readInt();
-            BinaryWriter.writeFile(Paths.get(overlayDir.getAbsolutePath(), formatOverlayNumString(i, y9.length / 32)), files.get(fileId));
+            BinaryWriter.writeFile(Paths.get(overlayDir.getAbsolutePath(), formatOutputString(i, y9.length / 32, "overlay_", ".bin")), files.get(fileId));
         }
     }
 
-    private static String formatOverlayNumString(int i, int cnt)
+    /**
+     * Return the data for the file with the given filename (path).
+     * @param filename a <code>String</code> path to a file in the ROM
+     * @return a byte[] representing the file contents
+     */
+    public byte[] getFileByName(String filename)
     {
-
-        StringBuilder sb = new StringBuilder("" + i);
-        if (cnt < 10)
+        int fid = filenames.getIdOf(filename);
+        if (fid == -1)
         {
-            while (sb.length() < 2)
-                sb.insert(0, "0");
+            throw new RuntimeException("Cannot find file ID of \"" + filename + "\"");
         }
-        else if (cnt < 100)
-        {
-            while (sb.length() < 3)
-                sb.insert(0, "0");
-        }
-        else if (cnt < 1000)
-        {
-            while (sb.length() < 4)
-                sb.insert(0, "0");
-        }
-        sb.insert(0, "overlay_").append(".bin");
-        return sb.toString();
+        return files.get(fid);
     }
+
+    /**
+     * Set the data for the file with the given filename (path).
+     * @param filename a <code>String</code> path to a file in the ROM
+     * @param data a <code>byte[]</code> containing the new file contents
+     */
+    public void setFileByName(String filename, byte[] data)
+    {
+        int fid = filenames.getIdOf(filename);
+        if (fid == -1)
+        {
+            throw new RuntimeException("Cannot find file ID of \"" + filename + "\"");
+        }
+        files.set(fid, data);
+    }
+
 
     public String toString()
     {
@@ -1005,12 +997,16 @@ public class NintendoDsRom
     {
         NintendoDsRom rom = NintendoDsRom.fromFile(new File("HeartGold.nds"));
         System.out.println(rom);
-        rom.unpack(new File("test_out"));
-        rom.saveToFile(new File("test.nds"), false);
-        rom = NintendoDsRom.fromFile(new File("test.nds"));
+        BinaryWriter.writeFile("a056.narc", rom.getFileByName("a/0/5/6"));
+        Narc narc = new Narc(rom.getFileByName("a/0/5/6"));
+        narc.saveToFile("a056_2.narc");
+        System.out.println(narc);
+//        narc.unpack("a056");
+        Narc narc2 = Narc.fromUnpacked("a056", true, Endianness.BIG);
+        System.out.println(narc.equals(narc2));
+//        NintendoDsRom rom2 = NintendoDsRom.fromUnpacked(new File("test_out"));
         System.out.println(rom);
-        NintendoDsRom rum = NintendoDsRom.fromUnpacked(new File("test_out"));
-        System.out.println(rum);
-        rum.saveToFile(new File("test2.nds"), false);
+        Narc narc3 = new Narc(narc.save());
+        System.out.println(narc3.equals(narc2));
     }
 }
