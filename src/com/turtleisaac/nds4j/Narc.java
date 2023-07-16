@@ -27,7 +27,6 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static com.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
 

@@ -130,7 +130,17 @@ public class NintendoDsRom
 
     /**
      * Reads a <code>NintendoDsRom</code> from a ROM file on disk
-     * @param file <code>File</code> path to ROM file location
+     * @param file a <code>String</code> containing the path to a ROM file on disk
+     * @return a <code>NintendoDsRom</code>
+     */
+    public static NintendoDsRom fromFile(String file)
+    {
+        return fromFile(new File(file));
+    }
+
+    /**
+     * Reads a <code>NintendoDsRom</code> from a ROM file on disk
+     * @param file a <code>File</code> containing the path to a ROM file on disk
      * @return a <code>NintendoDsRom</code>
      */
     public static NintendoDsRom fromFile(File file)
@@ -657,15 +667,20 @@ public class NintendoDsRom
 
     /**
      * Generate binary file representing this ROM, and save it to the file specified by filePath.
-     * @param filePath <code>File</code> to file where the rom will be saved
+     * @param filePath <code>String</code> containing path to file on disk where the rom will be saved
+     * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
+     */
+    public void saveToFile(String filePath, boolean updateDeviceCapacity) throws IOException
+    {
+        saveToFile(new File(filePath), updateDeviceCapacity);
+    }
+
+    /**
+     * Generate binary file representing this ROM, and save it to the file specified by filePath.
+     * @param filePath <code>File</code> containing path to file on disk where the rom will be saved
      * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
      */
     public void saveToFile(File filePath, boolean updateDeviceCapacity) throws IOException
-    {
-        saveRomFile(filePath, updateDeviceCapacity);
-    }
-
-    private void saveRomFile(File filePath, boolean updateDeviceCapacity) throws IOException
     {
         BinaryWriter.writeFile(filePath, save(updateDeviceCapacity));
     }
@@ -795,6 +810,21 @@ public class NintendoDsRom
         sortedFileIDs = new ArrayList<>();
     }
 
+    /**
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * @param dir a <code>String</code> containing the path to an unpacked ROM on disk
+     * @return a <code>NintendoDsRom</code>
+     */
+    public static NintendoDsRom fromUnpacked(String dir)
+    {
+        return fromUnpacked(new File(dir));
+    }
+
+    /**
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * @param dir a <code>File</code> containing the path to an unpacked ROM on disk
+     * @return a <code>NintendoDsRom</code>
+     */
     public static NintendoDsRom fromUnpacked(File dir)
     {
         if (!dir.exists() || !dir.isDirectory())
@@ -850,7 +880,16 @@ public class NintendoDsRom
 
     /**
      * Unpacks the rom to the target directory on disk
-     * @param dir a <code>File</code> object representing the target directory
+     * @param dir a <code>String</code> containing the path to the target directory
+     */
+    public void unpack(String dir) throws IOException
+    {
+        unpack(new File(dir));
+    }
+
+    /**
+     * Unpacks the rom to the target directory on disk
+     * @param dir a <code>File</code> object containing the path to the target directory
      */
     public void unpack(File dir) throws IOException
     {
@@ -989,24 +1028,5 @@ public class NintendoDsRom
     public String toString()
     {
         return String.format("ROM \"%s\" (%s)", title, gameCode);
-    }
-
-
-
-    public static void main(String[] args) throws IOException
-    {
-        NintendoDsRom rom = NintendoDsRom.fromFile(new File("HeartGold.nds"));
-        System.out.println(rom);
-        BinaryWriter.writeFile("a056.narc", rom.getFileByName("a/0/5/6"));
-        Narc narc = new Narc(rom.getFileByName("a/0/5/6"));
-        narc.saveToFile("a056_2.narc");
-        System.out.println(narc);
-//        narc.unpack("a056");
-        Narc narc2 = Narc.fromUnpacked("a056", true, Endianness.BIG);
-        System.out.println(narc.equals(narc2));
-//        NintendoDsRom rom2 = NintendoDsRom.fromUnpacked(new File("test_out"));
-        System.out.println(rom);
-        Narc narc3 = new Narc(narc.save());
-        System.out.println(narc3.equals(narc2));
     }
 }
