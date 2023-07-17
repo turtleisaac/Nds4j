@@ -17,14 +17,14 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j;
+package io.github.turtleisaac.nds4j;
 
 public class Core
 {
     /**
      * Individual values can be accessed in a structured manner using <code>Core.getSpecificVersionNumber(VersionData vData)</code>
      */
-    public static final int[] VERSION = {1, 0, 0};
+    public static final int[] VERSION = {0, 0, 1};
 
     public enum VersionData
     {

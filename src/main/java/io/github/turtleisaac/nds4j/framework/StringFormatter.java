@@ -17,7 +17,7 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j.framework;
+package io.github.turtleisaac.nds4j.framework;
 
 public class StringFormatter
 {

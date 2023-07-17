@@ -17,9 +17,7 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j;
-
-import com.turtleisaac.nds4j.framework.*;
+package io.github.turtleisaac.nds4j;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,11 +26,10 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.turtleisaac.nds4j.Fnt.Folder;
+import io.github.turtleisaac.nds4j.framework.*;
+import io.github.turtleisaac.nds4j.Fnt.Folder;
 
-import static com.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
-
-//import static com.turtleisaac.nds4j.rom.Filesystem.writeFolder;
+import static io.github.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
 
 public class NintendoDsRom
 {
@@ -85,7 +82,6 @@ public class NintendoDsRom
     long headerLength;
 
     byte[] padding_088h;
-    byte[] reserved4;
     byte[] nintendoLogo;
     short nintendoLogoCrc;
     short headerCrc;
@@ -149,7 +145,7 @@ public class NintendoDsRom
     }
 
     /**
-     * Creates a <code>NintendoDsRom</code> object from a provided code<>byte[]</> representing the bytes of a ROM file
+     * Creates a <code>NintendoDsRom</code> object from a provided <code>byte[]</code> representing the bytes of a ROM file
      * @param data a <code>byte[]</code>
      */
     public NintendoDsRom(byte[] data)
@@ -669,6 +665,7 @@ public class NintendoDsRom
      * Generate binary file representing this ROM, and save it to the file specified by filePath.
      * @param filePath <code>String</code> containing path to file on disk where the rom will be saved
      * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
+     * @throws IOException if the specified file's parent directory does not exist.
      */
     public void saveToFile(String filePath, boolean updateDeviceCapacity) throws IOException
     {
@@ -679,6 +676,7 @@ public class NintendoDsRom
      * Generate binary file representing this ROM, and save it to the file specified by filePath.
      * @param filePath <code>File</code> containing path to file on disk where the rom will be saved
      * @param updateDeviceCapacity whether the rom capacity code in the header will be changed (boolean)
+     * @throws IOException if the specified file's parent directory does not exist.
      */
     public void saveToFile(File filePath, boolean updateDeviceCapacity) throws IOException
     {
@@ -881,6 +879,7 @@ public class NintendoDsRom
     /**
      * Unpacks the rom to the target directory on disk
      * @param dir a <code>String</code> containing the path to the target directory
+     * @throws IOException if any of the output files fail to be written
      */
     public void unpack(String dir) throws IOException
     {
@@ -890,6 +889,7 @@ public class NintendoDsRom
     /**
      * Unpacks the rom to the target directory on disk
      * @param dir a <code>File</code> object containing the path to the target directory
+     * @throws IOException if any of the output files fail to be written
      */
     public void unpack(File dir) throws IOException
     {

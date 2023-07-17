@@ -38,7 +38,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j.framework;
+package io.github.turtleisaac.nds4j.framework;
 
 import java.io.FileOutputStream;
 import java.io.IOException;

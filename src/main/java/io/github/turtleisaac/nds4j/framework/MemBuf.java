@@ -17,7 +17,7 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j.framework;
+package io.github.turtleisaac.nds4j.framework;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -242,10 +242,6 @@ public class MemBuf {
 
         /**
          * writes provided bytes at current offset
-         * @param bytes
-         * @param srcPos
-         * @param length
-         * @return
          */
         public MemBufWriter write(byte[] bytes, int srcPos, int length) {
             require(length);

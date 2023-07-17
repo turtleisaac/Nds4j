@@ -17,9 +17,9 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j;
+package io.github.turtleisaac.nds4j;
 
-import com.turtleisaac.nds4j.framework.*;
+import io.github.turtleisaac.nds4j.framework.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,8 +27,6 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
-
-import static com.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
 
 // smell ya later Narctowl
 
@@ -162,6 +160,8 @@ public class Narc
      * Load an unpacked NARC from a directory on disk
      * @param dir a <code>String</code> object containing the path to an unpacked NARC directory on disk
      * @param removeFilenames whether the NARC should have a Fnt (ignored if there are subfolders within)
+     * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
+     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
      * @return a <code>Narc</code> object
      */
     public static Narc fromUnpacked(String dir, boolean removeFilenames, Endianness endiannessOfBeginning)
@@ -175,6 +175,8 @@ public class Narc
      * @param dir a <code>File</code> object representing the path to an unpacked NARC directory on disk
      * @param removeFilenames whether the NARC should have a Fnt (ignored if there are subfolders within)
      * @return a <code>Narc</code> object
+     * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
+     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
      * @exception RuntimeException if the specified path on disk does not exist or is not a directory
      */
     public static Narc fromUnpacked(File dir, boolean removeFilenames, Endianness endiannessOfBeginning)
@@ -203,15 +205,28 @@ public class Narc
      * Create a NARC archive from a list of files and (optionally) a filename table.
      * @param files an <code>ArrayList</code> of <code>byte[]</code>'s representing all the subfiles in the NARC
      * @param filenames an (OPTIONAL) <code>Folder</code> representing the NARC's filesystem
+     * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
+     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
      * @return a <code>Narc</code> representation of the provided parameters
      */
     public static Narc fromContentsAndNames(ArrayList<byte[]> files, Fnt.Folder filenames, Endianness endiannessOfBeginning)
     {
         Narc narc = new Narc();
-        narc.endiannessOfBeginning = endiannessOfBeginning;
-        narc.files = files;
+        if (endiannessOfBeginning != null)
+            narc.endiannessOfBeginning = endiannessOfBeginning;
+        else
+            narc.endiannessOfBeginning = Endianness.LITTLE;
+
+        if (files != null)
+            narc.files = new ArrayList<>(files);
+        else
+            narc.files = new ArrayList<>();
+
         if (filenames != null)
             narc.filenames = filenames;
+        else
+            narc.filenames = new Fnt.Folder();
+        narc.filenames = filenames;
         return narc;
     }
 
@@ -249,7 +264,7 @@ public class Narc
 
         for (int i = 0; i < files.size(); i++)
         {
-            BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), formatOutputString(i, files.size(), "", "")), files.get(i));
+            BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), StringFormatter.formatOutputString(i, files.size(), "", "")), files.get(i));
         }
     }
 
@@ -331,6 +346,7 @@ public class Narc
     /**
      * Generate a <code>byte[]</code> representing this NARC, and save it to a file on disk
      * @param path a <code>String</code> containing the path to the file on disk to save as
+     * @throws IOException if the specified file's parent directory does not exist.
      */
     public void saveToFile(String path) throws IOException
     {
@@ -341,7 +357,7 @@ public class Narc
      * Generate a <code>byte[]</code> representing this NARC, and save it to a file on disk
      * @param file a <code>File</code> representing the path to the file on disk to save as
      * @exception RuntimeException if the provided path leads to a directory
-     * @exception IOException if the specified file's parent directory does not exist.
+     * @throws IOException if the specified file's parent directory does not exist.
      */
     public void saveToFile(File file) throws IOException
     {

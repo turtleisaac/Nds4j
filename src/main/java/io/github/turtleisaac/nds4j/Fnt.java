@@ -17,11 +17,11 @@
  * along with Nds4j. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package com.turtleisaac.nds4j;
+package io.github.turtleisaac.nds4j;
 
-import com.turtleisaac.nds4j.framework.BinaryWriter;
-import com.turtleisaac.nds4j.framework.Buffer;
-import com.turtleisaac.nds4j.framework.MemBuf;
+import io.github.turtleisaac.nds4j.framework.BinaryWriter;
+import io.github.turtleisaac.nds4j.framework.Buffer;
+import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.io.File;
 import java.io.IOException;
@@ -57,12 +57,12 @@ public class Fnt
         public Folder(HashMap<String, Folder> folders, ArrayList<String> files, int firstId)
         {
             if (folders != null)
-                this.folders = folders;
+                this.folders = new HashMap<>(folders);
             else
                 this.folders = new HashMap<>();
 
             if (files != null)
-                this.files = files;
+                this.files = new ArrayList<>(files);
             else
                 this.files = new ArrayList<>();
 
@@ -89,7 +89,7 @@ public class Fnt
         /**
          * Find the file ID for the given filename, or for the given file path (using "/" as the separator) relative to this folder.
          * @param name a <code>String</code> representing the path to the file
-         * @return an <code>int</code> representing the file ID of the specified file, or <int>-1</int> if not found
+         * @return an <code>int</code> representing the file ID of the specified file, or <code>-1</code> if not found
          */
         public int getIdOf(String name)
         {
@@ -514,7 +514,9 @@ public class Fnt
     /**
      * writes the ROM's internal filesystem to disk at the specified path
      * @param dir a <code>File</code> representation of the write path
-     * @param folder the <code>Folder</code>> object to write
+     * @param folder the <code>Folder</code> object to write
+     * @param files an <code>ArrayList</code> of <code>byte[]</code>'s containing the file contents of the provided folder
+     * @throws IOException if the specified file's parent directory does not exist.
      */
     public static void writeFolderToDisk(File dir, Folder folder, ArrayList<byte[]> files) throws IOException
     {

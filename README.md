@@ -1,14 +1,12 @@
 Nds4j
 =====
 
-[//]: # ([![Discord]&#40;https://img.shields.io/discord/534221996230180884.svg?logo=discord&logoColor=white&colorB=7289da&#41;]&#40;https://discord.gg/RQhxAxw&#41;)
-
 [//]: # ([![Documentation]&#40;https://img.shields.io/badge/documentation-Read%20the%20Docs-brightgreen.svg?logo=read%20the%20docs&logoColor=white&#41;]&#40;http://ndspy.readthedocs.io/&#41;)
 
 [//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/ndspy.svg?logo=python&logoColor=white&#41;]&#40;https://pypi.org/project/ndspy/&#41;)
 [![License: GNU GPL 3.0](https://img.shields.io/github/license/RoadrunnerWMC/ndspy.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/gpl-3.0)
 
-**Nds4j** is a Java package that can help you read, modify and create a few types of files used in
+**Nds4j** is a Java library that can help you read, modify and create a few types of files used in
 Nintendo DS games, with many more coming soon.
 
 > Author: Turtleisaac
@@ -43,14 +41,11 @@ A few examples of Nds4j in action
 ---------------------------------
 
 ```java
-import com.turtleisaac.nds4j.Narc;
-import com.turtleisaac.nds4j.NintendoDsRom;
-import com.turtleisaac.nds4j.framework.BinaryWriter;
-import com.turtleisaac.nds4j.framework.Buffer;
-import com.turtleisaac.nds4j.framework.Endianness;
-import com.turtleisaac.nds4j.framework.MemBuf;
-
-import java.util.ArrayList;
+import Narc;
+import NintendoDsRom;
+import BinaryWriter;
+import Endianness;
+import MemBuf;
 
 public class Example
 {
