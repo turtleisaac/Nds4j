@@ -1,9 +1,8 @@
 Nds4j
 =====
 
-[//]: # ([![Documentation]&#40;https://img.shields.io/badge/documentation-Read%20the%20Docs-brightgreen.svg?logo=read%20the%20docs&logoColor=white&#41;]&#40;http://ndspy.readthedocs.io/&#41;)
-
-[//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/ndspy.svg?logo=python&logoColor=white&#41;]&#40;https://pypi.org/project/ndspy/&#41;)
+[![Maven](https://img.shields.io/badge/maven_central-Current-blue?logo=apachemaven&color=C71A36)](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j/)
+[![javadoc](https://javadoc.io/badge2/io.github.turtleisaac/Nds4j/javadoc.svg?)](https://javadoc.io/doc/io.github.turtleisaac/Nds4j)
 [![License: GNU GPL 3.0](https://img.shields.io/github/license/RoadrunnerWMC/ndspy.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/gpl-3.0)
 
 **Nds4j** is a Java library that can help you read, modify and create a few types of files used in
@@ -17,23 +16,11 @@ DS hacking community (aka pretty much only me), namely [jNdstool](https://github
 codebase uses [ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master)
 by [RoadrunnerWMC](https://github.com/RoadrunnerWMC) as a reference and can be thought of as a Java counterpart to it.
 
-As I continue to work on and maintain this package, it will become the new core of [PokEditor v2](https://github.com/turtleisaac/PokEditor-v2), 
-my Java tool for hacking the gen 4 Pokémon games, but feel free to use it yourself!
-
 Nds4j is suitable for use in applications written in Java or any other language which runs on the JVM.
-
 As Nds4j is written in pure Java, it is cross-platform and should run on all platforms Java 8 or higher supports.
 Note that Java doesn't support the Nintendo DS itself; Nds4j is intended to be used on your computer.
 
-[//]: # (Interested? Read on to see some examples, or check the [API)
-
-[//]: # (Reference]&#40;https://ndspy.readthedocs.io/en/latest/api/index.html&#41; to see the)
-
-[//]: # (documentation for a specific module. When you're ready to install, head over to)
-
-[//]: # (the [Installation]&#40;#installation&#41; section!)
-
-**Note:** Code from the [Universal Pokemon Randomizer ZX](https://github.com/Ajarmar/universal-pokemon-randomizer-zx)
+**Note:** Code from the [Universal Pokémon Randomizer ZX](https://github.com/Ajarmar/universal-pokemon-randomizer-zx)
 is adapted for LZ decompression purposes under the rights provided by the GNU General Public License v3.0.
 If there are any complaints related to this, please create a new Issue in the Issues tab here on GitHub.
 
@@ -135,21 +122,11 @@ Misconceptions
 Still a little confused about what exactly Nds4j is or what it's capable of?
 This section will try to answer some questions you may have.
 
-[//]: # (- Nds4j is a *library*, not a *program.* To use Nds4j, you have to write your)
-
-[//]: # (    own Java code; Nds4j is essentially a tool your code can use. This may)
-
-[//]: # (    sound daunting -- especially if you're not very familiar with Java -- but)
-
-[//]: # (    the [tutorials]&#40;https://ndspy.readthedocs.io/en/latest/tutorials/index.html&#41;)
-
-[//]: # (    walk you through this process step-by-step for some common tasks. )
-
-[//]: # (    If Python)
-
-[//]: # (    is what you are more familiar with, please check out)
-
-[//]: # (    [ndspy]&#40;https://github.com/RoadrunnerWMC/ndspy/tree/master&#41;.)
+- Nds4j is a *library*, not a *program.* To use Nds4j, you have to write your
+    own Java code; Nds4j is essentially a tool your code can use. This may
+    sound daunting -- especially if you're not very familiar with Java -- but
+    if Python is what you are more familiar with, please check out
+    [ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master).
 - Nds4j runs on your PC, not on the Nintendo DS itself. You use it to create
     and modify game files, which can then be run on the console. DS games have
     to be written in a compiled language such as C or C++ to have any hope of
@@ -174,49 +151,13 @@ This section will try to answer some questions you may have.
 Documentation
 -------------
 
-[//]: # ([ndspy's documentation is hosted on Read the)
-
-[//]: # (Docs]&#40;https://ndspy.readthedocs.io/en/latest/index.html&#41;, and the documentation)
-
-[//]: # (source code can be found in the ``docs/`` folder in this repository. In)
-
-[//]: # (addition to the [API)
-
-[//]: # (reference]&#40;https://ndspy.readthedocs.io/en/latest/api/index.html&#41;, there are)
-
-[//]: # (also)
-
-[//]: # ([examples]&#40;https://ndspy.readthedocs.io/en/latest/index.html#a-few-examples-of-ndspy-in-action&#41;)
-
-[//]: # (and [tutorials]&#40;https://ndspy.readthedocs.io/en/latest/tutorials/index.html&#41; to)
-
-[//]: # (help you out!)
+[Nds4j's documentation is hosted on Javadoc.io](https://www.javadoc.io/doc/io.github.turtleisaac/Nds4j/latest/index.html)
 
 
 Support
 -------
 
-[//]: # (I spent a long time writing the documentation for ndspy, so first please)
-
-[//]: # (double-check that your question isn't already answered in the [API)
-
-[//]: # (reference]&#40;https://ndspy.readthedocs.io/en/latest/api/index.html&#41; or)
-
-[//]: # ([Tutorials]&#40;https://ndspy.readthedocs.io/en/latest/tutorials/index.html&#41;)
-
-[//]: # (sections in the documentation.)
-
-[//]: # ()
-[//]: # (If that doesn't help, you can ask me &#40;RoadrunnerWMC&#41; your questions via [the)
-
-[//]: # (ndspy Discord server]&#40;https://discord.gg/RQhxAxw&#41;. I'll try to get back to)
-
-[//]: # (you as quickly as I can!)
-
-[//]: # (If you think you've found a bug in Nds4j, please [file an issue on)
-
-[//]: # (GitHub]&#40;https://github.com/turtleisaac/Nds4j/issues/new&#41;. Thanks!)
-
+If you think you've found a bug in Nds4j, please [file an issue on GitHub](https://github.com/turtleisaac/Nds4j/issues/new). Thanks!
 
 Versioning
 ----------
@@ -225,13 +166,3 @@ Nds4j follows [semantic versioning](https://semver.org/) to the best of my
 ability. If a tool claims to work with Nds4j 1.0.2, it should also work with
 Nds4j 1.2.0, but not necessarily 2.0.0. (Please note that not all of those
 version numbers actually exist!)
-
-[//]: # (Undocumented modules are considered exempt from semantic versioning, and are)
-
-[//]: # (subject to drastic changes at any time. This is also mentioned in the)
-
-[//]: # ([Undocumented)
-
-[//]: # (APIs]&#40;https://ndspy.readthedocs.io/en/latest/api/index.html#undocumented-apis&#41;)
-
-[//]: # (section of the documentation.)
