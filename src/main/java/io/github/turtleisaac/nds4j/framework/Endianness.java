@@ -19,15 +19,52 @@
 
 package io.github.turtleisaac.nds4j.framework;
 
-public enum Endianness
+public class Endianness
 {
-    LITTLE("<"),
-    BIG(">");
-
-    public final String symbol;
-
-    Endianness(String s)
+    public enum EndiannessType
     {
-        symbol = s;
+        LITTLE("<"),
+        BIG(">");
+
+        public final String symbol;
+
+        EndiannessType(String s)
+        {
+            symbol = s;
+        }
+    }
+
+    /**
+     * Swaps the endianness of the provided <code>int</code>
+     * @param num an <code>int</code>
+     * @return an <code>int</code> with its endianness swapped from the original
+     */
+    public static int swapEndianness(int num)
+    {
+        byte[] bytes = new byte[] {
+                (byte) (num & 0xff),
+                (byte) ((num >> 8) & 0xff),
+                (byte) ((num >> 16) & 0xff),
+                (byte) ((num >> 24) & 0xff)
+        };
+
+        return (bytes[3] & 0xff) | ( (bytes[2] & 0xff) << 8) | ( (bytes[1] & 0xff) << 16) | ( (bytes[0] & 0xff) << 24);
+    }
+
+    /**
+     * Swaps the endianness of the provided <code>short</code>
+     * @param num a <code>short</code>
+     * @return a <code>short</code> with its endianness swapped from the original
+     */
+    public static short swapEndianness(short num)
+    {
+        byte[] bytes = new byte[] {
+                (byte) (num & 0xff),
+                (byte) ((num >> 8) & 0xff)
+        };
+
+        return (short) (( (bytes[1] & 0xff) << 16) | ( (bytes[0] & 0xff) << 24));
     }
 }
+
+

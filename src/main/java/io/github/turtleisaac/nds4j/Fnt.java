@@ -347,7 +347,7 @@ public class Fnt
         // Read file and folder entries from the entries table
         while(true)
         {
-            control = reader.readUShort8();
+            control = reader.readUInt8();
             if (control == 0)
                 break;
 

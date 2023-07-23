@@ -31,6 +31,9 @@ import io.github.turtleisaac.nds4j.Fnt.Folder;
 
 import static io.github.turtleisaac.nds4j.framework.StringFormatter.formatOutputString;
 
+/**
+ * An object representation of a Nintendo DS ROM
+ */
 public class NintendoDsRom
 {
     // Header Section

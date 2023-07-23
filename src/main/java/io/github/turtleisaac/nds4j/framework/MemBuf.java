@@ -37,6 +37,12 @@ public class MemBuf {
         return new MemBuf();
     }
 
+    public static MemBuf create(byte[] data) {
+        MemBuf buf = new MemBuf();
+        buf.writer.write(data);
+        return buf;
+    }
+
     public MemBuf() {
         this.buf = new byte[INITIAL_SIZE];
         this.capacity = INITIAL_SIZE;
@@ -85,10 +91,10 @@ public class MemBuf {
 
         public int readInt() {
             require(4);
-            int ret = readUShort8();
-            ret |= (readUShort8() << 8);
-            ret |= (readUShort8() << 16);
-            ret |= (readUShort8() << 24);
+            int ret = readUInt8();
+            ret |= (readUInt8() << 8);
+            ret |= (readUInt8() << 16);
+            ret |= (readUInt8() << 24);
             return ret;
         }
 
@@ -98,7 +104,7 @@ public class MemBuf {
 
         public short readShort() {
             require(2);
-            int ret = readUShort8() | (readUShort8() << 8);
+            int ret = readUInt8() | (readUInt8() << 8);
             return (short)ret;
         }
 
@@ -106,7 +112,7 @@ public class MemBuf {
             return ((int) readShort()) & 0xffff;
         }
 
-        public short readUShort8()
+        public short readUInt8()
         {
             return (short) ((short)readByte() & 0xff);
         }
@@ -150,6 +156,10 @@ public class MemBuf {
             }
 
             return ret;
+        }
+
+        public void skip(int num) {
+            readBytes(num);
         }
     }
 

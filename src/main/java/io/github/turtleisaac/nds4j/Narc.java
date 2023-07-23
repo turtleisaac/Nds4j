@@ -30,6 +30,9 @@ import java.util.Objects;
 
 // smell ya later Narctowl
 
+/**
+ * An object representation of a NARC file (Nitro-Archive)
+ */
 public class Narc
 {
     public static final int NARC_HEADER_SIZE = 0x10;
@@ -37,17 +40,15 @@ public class Narc
     public static final int FIMG_HEADER_SIZE = 8;
     public static final int FNTB_HEADER_SIZE = 8;
 
-
-
     Fnt.Folder filenames; // represents the root folder of the filesystem
-    ArrayList<byte[]> files;
-    Endianness endiannessOfBeginning;
+    public ArrayList<byte[]> files;
+    Endianness.EndiannessType endiannessOfBeginning;
 
     public Narc()
     {
         filenames = new Fnt.Folder();
         files = new ArrayList<>();
-        endiannessOfBeginning = Endianness.LITTLE;
+        endiannessOfBeginning = Endianness.EndiannessType.LITTLE;
     }
 
     /**
@@ -57,7 +58,7 @@ public class Narc
     public Narc(byte[] data)
     {
         filenames = new Fnt.Folder();
-        endiannessOfBeginning = Endianness.LITTLE;
+        endiannessOfBeginning = Endianness.EndiannessType.LITTLE;
 
         MemBuf buf = MemBuf.create();
         buf.writer().write(data);
@@ -77,7 +78,7 @@ public class Narc
 
         // some games use big endian, some use little - NSMB uses big for example, but Spirit Tracks uses little
         if (bom == 0xFFFE) {
-            endiannessOfBeginning = Endianness.BIG;
+            endiannessOfBeginning = Endianness.EndiannessType.BIG;
             version = (version & 0xFF) << 8 | version >> 8;
         }
 
@@ -161,10 +162,10 @@ public class Narc
      * @param dir a <code>String</code> object containing the path to an unpacked NARC directory on disk
      * @param removeFilenames whether the NARC should have a Fnt (ignored if there are subfolders within)
      * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
-     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
+     *                              - can be <code>Endianness.EndiannessType.BIG</code> or <code>Endianness.EndiannessType.LITTLE</code>
      * @return a <code>Narc</code> object
      */
-    public static Narc fromUnpacked(String dir, boolean removeFilenames, Endianness endiannessOfBeginning)
+    public static Narc fromUnpacked(String dir, boolean removeFilenames, Endianness.EndiannessType endiannessOfBeginning)
     {
         return fromUnpacked(new File(dir), removeFilenames, endiannessOfBeginning);
     }
@@ -176,10 +177,10 @@ public class Narc
      * @param removeFilenames whether the NARC should have a Fnt (ignored if there are subfolders within)
      * @return a <code>Narc</code> object
      * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
-     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
+     *                              - can be <code>Endianness.EndiannessType.BIG</code> or <code>Endianness.EndiannessType.LITTLE</code>
      * @exception RuntimeException if the specified path on disk does not exist or is not a directory
      */
-    public static Narc fromUnpacked(File dir, boolean removeFilenames, Endianness endiannessOfBeginning)
+    public static Narc fromUnpacked(File dir, boolean removeFilenames, Endianness.EndiannessType endiannessOfBeginning)
     {
         Fnt.Folder root;
         ArrayList<byte[]> files = new ArrayList<>();
@@ -206,16 +207,16 @@ public class Narc
      * @param files an <code>ArrayList</code> of <code>byte[]</code>'s representing all the subfiles in the NARC
      * @param filenames an (OPTIONAL) <code>Folder</code> representing the NARC's filesystem
      * @param endiannessOfBeginning whether the NARC's beginning is encoded in Big Endian or Little Endian
-     *                              - can be <code>Endianness.BIG</code> or <code>Endianness.LITTLE</code>
+     *                              - can be <code>Endianness.EndiannessType.BIG</code> or <code>Endianness.EndiannessType.LITTLE</code>
      * @return a <code>Narc</code> representation of the provided parameters
      */
-    public static Narc fromContentsAndNames(ArrayList<byte[]> files, Fnt.Folder filenames, Endianness endiannessOfBeginning)
+    public static Narc fromContentsAndNames(ArrayList<byte[]> files, Fnt.Folder filenames, Endianness.EndiannessType endiannessOfBeginning)
     {
         Narc narc = new Narc();
         if (endiannessOfBeginning != null)
             narc.endiannessOfBeginning = endiannessOfBeginning;
         else
-            narc.endiannessOfBeginning = Endianness.LITTLE;
+            narc.endiannessOfBeginning = Endianness.EndiannessType.LITTLE;
 
         if (files != null)
             narc.files = new ArrayList<>(files);
@@ -324,7 +325,7 @@ public class Narc
 
         int bom = 0xFEFF;
         int version = 1;
-        if (endiannessOfBeginning == Endianness.BIG)
+        if (endiannessOfBeginning == Endianness.EndiannessType.BIG)
         {
             bom = 0xFFFE;
             version = 0x100;

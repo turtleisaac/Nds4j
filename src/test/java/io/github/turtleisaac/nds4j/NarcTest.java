@@ -34,7 +34,7 @@ public class NarcTest
     private final byte[] b2 = {1, 1, 1, 1};
     private final byte[] b3 = {0, 0, 0, 0};
     private final ArrayList<byte[]> testList = new ArrayList<>(Arrays.stream(new byte[][]{b1, b2, b3}).collect(Collectors.toList()));
-    private final Narc narc = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.BIG);
+    private final Narc narc = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.EndiannessType.BIG);
 
     @Test
     void narcNotNull() {
@@ -45,18 +45,18 @@ public class NarcTest
     @Test
     void fromContentsAndNamesProducesSame() {
         assertThat(narc)
-                .isEqualTo(Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.BIG));
+                .isEqualTo(Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.EndiannessType.BIG));
     }
 
     @Test
     void fromContentsAndNamesProducesDifferent() {
         assertThat(narc)
-                .isNotEqualTo(Narc.fromContentsAndNames(new ArrayList<>(), new Fnt.Folder(), Endianness.BIG));
+                .isNotEqualTo(Narc.fromContentsAndNames(new ArrayList<>(), new Fnt.Folder(), Endianness.EndiannessType.BIG));
     }
 
     @Test
     void fileContentsModificationChangesEquality() {
-        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.BIG);
+        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.EndiannessType.BIG);
         narc.files.set(0, new byte[] {0});
         assertThat(narc)
                 .isNotEqualTo(narc2);
@@ -64,7 +64,7 @@ public class NarcTest
 
     @Test
     void saveDoesNotAffectEquality() {
-        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.BIG);
+        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.EndiannessType.BIG);
         narc.save();
         assertThat(narc)
                 .isEqualTo(narc2);
@@ -72,7 +72,7 @@ public class NarcTest
 
     @Test
     void differentNarcsDoNotSaveIdentically() {
-        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.BIG);
+        Narc narc2 = Narc.fromContentsAndNames(testList, new Fnt.Folder(), Endianness.EndiannessType.BIG);
         narc2.files.remove(0);
         assertThat(narc.save())
                 .isNotEqualTo(narc2.save());

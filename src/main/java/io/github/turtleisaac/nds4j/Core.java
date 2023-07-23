@@ -24,7 +24,7 @@ public class Core
     /**
      * Individual values can be accessed in a structured manner using <code>Core.getSpecificVersionNumber(VersionData vData)</code>
      */
-    public static final int[] VERSION = {0, 0, 1};
+    public static final int[] VERSION = {0, 1, 0};
 
     public enum VersionData
     {

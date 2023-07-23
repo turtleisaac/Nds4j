@@ -23,9 +23,9 @@ public class CRC16
 {
     public static int calculateCrc(byte... arr)
     {
-        CRC16 crc16= new CRC16();
+        CRC16 crc16 = new CRC16();
 
-        for(byte b : arr)
+        for (byte b : arr)
         {
             crc16.update(b);
         }
@@ -41,7 +41,7 @@ public class CRC16
     public void update(byte var1) {
         int var2 = var1;
 
-        for(int var4 = 7; var4 >= 0; --var4) {
+        for (int var4 = 7; var4 >= 0; --var4) {
             var2 <<= 1;
             int var3 = var2 >>> 8 & 1;
             if ((this.value & '耀') != 0) {
