@@ -48,10 +48,10 @@ public class Palette extends GenericNtrFile
     {
         super("RLCN", "RPCN");
         this.numColors = numColors;
-        colors = new Color[256];
+        colors = new Color[numColors];
         for (int i = 0; i < colors.length; i++)
         {
-            colors[255 - i] = new Color((i*8) % 256, (i*8) % 256, (i*8) % 256);
+            colors[i] = new Color((i*8) % 256, (i*8) % 256, (i*8) % 256);
         }
 //        Arrays.fill(colors, Color.black);
     }
@@ -97,6 +97,26 @@ public class Palette extends GenericNtrFile
     {
         i += 16*palIndex;
         setColor(i, color);
+    }
+
+    public int getNumColors()
+    {
+        return numColors;
+    }
+
+    public void setNumColors(int numColors)
+    {
+        this.numColors = numColors;
+    }
+
+    public int getBitDepth()
+    {
+        return bitDepth;
+    }
+
+    public void setBitDepth(int bitDepth)
+    {
+        this.bitDepth = bitDepth;
     }
 
     public int size()
@@ -207,12 +227,8 @@ public class Palette extends GenericNtrFile
         long colorStartOffset= reader.readUInt32();
 
         int numColors = 256;
-        if (bitDepth == 4)
-        {
-            numColors = 16;
-        }
 
-        if(paletteLength / 2 < numColors)
+        if (paletteLength / 2 < numColors)
             numColors = (int) (paletteLength / 2);
 
         Palette palette = new Palette(numColors);
@@ -221,16 +237,9 @@ public class Palette extends GenericNtrFile
         palette.compNum = compNum;
 
         reader.setPosition(0x18 + colorStartOffset);
-        for (int i = 0; i < 256; i++)
+        for (int i = 0; i < paletteLength / 2; i++)
         {
-            if (i < paletteLength / 2)
-            {
-                palette.setColor(i, NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte()));
-            }
-            else
-            {
-                palette.setColor(i, Color.black);
-            }
+            palette.setColor(i, NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte()));
         }
 
         if (palette.getColor((int) (paletteLength / 2) - 1).equals(NclrUtils.irColor)) //honestly no clue why this is a thing
@@ -270,10 +279,10 @@ public class Palette extends GenericNtrFile
         MemBuf dataBuf = MemBuf.create();
         MemBuf.MemBufWriter writer = dataBuf.writer();
 
-        int numColors = this.numColors > 16 ? 256 : 16;
+        int numColors = colors.length;
 
         int size = numColors * 2; // two bytes per color
-        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18);
+        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18) + NTR_HEADER_SIZE;
 
         writeGenericNtrHeader(writer, extSize, 1);
 
@@ -283,7 +292,7 @@ public class Palette extends GenericNtrFile
         int storedPos = writer.getPosition();
 
         writer.setPosition(NTR_HEADER_SIZE + 4);
-        writer.writeInt(extSize); // 0x14
+        writer.writeInt(extSize - NTR_HEADER_SIZE); // 0x14
 
         if (bitDepth <= 0)
             bitDepth = 4;
@@ -296,16 +305,17 @@ public class Palette extends GenericNtrFile
 
         writer.setPosition(storedPos);
 
-        for (int i = 0; i < numColors; i++)
+        for (int i = 0; i < colors.length; i++)
         {
-            if (i < this.numColors)
-            {
-                writer.write(NclrUtils.colorToBGR555(colors[i]));
-            }
-            else
-            {
-                writer.write(NclrUtils.colorToBGR555(Color.black));
-            }
+            writer.write(NclrUtils.colorToBGR555(colors[i]));
+//            if (i < this.numColors)
+//            {
+//
+//            }
+//            else
+//            {
+//                writer.write(NclrUtils.colorToBGR555(Color.black));
+//            }
         }
 
         return dataBuf.reader().getBuffer();
@@ -341,7 +351,9 @@ public class Palette extends GenericNtrFile
             int b = (color.getBlue() / 8) << 10;
 
             int bgr= r + g + b;
-            System.arraycopy(ByteBuffer.allocate(4).putInt(bgr).array(),0,d,0,2);
+
+            d[0] = (byte) (bgr & 0xff);
+            d[1] = (byte) ((bgr >> 8) & 0xff);
 
             return d;
         }

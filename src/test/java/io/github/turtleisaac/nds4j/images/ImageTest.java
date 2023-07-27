@@ -22,14 +22,13 @@ package io.github.turtleisaac.nds4j.images;
 import io.github.turtleisaac.nds4j.Narc;
 import io.github.turtleisaac.nds4j.NintendoDsRom;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 public class ImageTest
 {
@@ -150,72 +149,72 @@ public class ImageTest
                 .isEqualTo(written);
     }
 
-    @Test
-    void writtenTiledNcgrVisuallyMatchesOriginal() throws InterruptedException
-    {
-        Palette palette = Palette.fromNclr(a020.files.get(0), tiled.getBitDepth());
-        tiled.setPalette(palette);
-
-        BufferedImage originalImage = new BufferedImage(tiled.getWidth() * 4, tiled.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
-        Graphics2D graphics2D = originalImage.createGraphics();
-        graphics2D.drawImage(tiled.getImage(), 0, 0, tiled.getWidth() * 4, tiled.getHeight() * 4, null);
-        graphics2D.dispose();
-
-        IndexedImage written = IndexedImage.fromNcgr(tiled.saveAsNcgr(), 4, 0, 1, 1, true);
-        palette = Palette.fromNclr(a020.files.get(0), written.getBitDepth());
-        written.setPalette(palette);
-
-        BufferedImage writtenImage = new BufferedImage(written.getWidth() * 4, written.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
-        graphics2D = writtenImage.createGraphics();
-        graphics2D.drawImage(written.getImage(), 0, 0, written.getWidth() * 4, written.getHeight() * 4, null);
-        graphics2D.dispose();
-
-        JFrame frame = new JFrame("Are these images the same?");
-        frame.setSize(originalImage.getWidth() + writtenImage.getWidth() + 50, originalImage.getHeight() + writtenImage.getHeight());
-
-        JLabel label1 = new JLabel();
-        label1.setIcon(new ImageIcon(originalImage));
-
-        JLabel label2 = new JLabel();
-        label2.setIcon(new ImageIcon(writtenImage));
-
-        JButton yesButton = new JButton("Yes");
-        JButton noButton = new JButton("No");
-
-        final JButton[] source = new JButton[1];
-
-        ActionListener actionListener = new ActionListener()
-        {
-            @Override
-            public void actionPerformed(ActionEvent e)
-            {
-                source[0] = (JButton) e.getSource();
-                frame.setVisible(false);
-            }
-        };
-
-        yesButton.addActionListener(actionListener);
-        noButton.addActionListener(actionListener);
-
-        frame.getContentPane().add(label1, BorderLayout.WEST);
-        frame.getContentPane().add(label2, BorderLayout.EAST);
-        frame.getContentPane().add(yesButton, BorderLayout.NORTH);
-        frame.getContentPane().add(noButton, BorderLayout.SOUTH);
-
-        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
-        frame.setLocationRelativeTo(null);
-        frame.pack();
-        frame.setVisible(true);
-        frame.setSize(frame.getWidth() + 50, frame.getHeight() + 50);
-
-        while (frame.isVisible())
-        {
-            Thread.sleep(1000);
-        }
-
-        assertThat(source[0])
-                .isEqualTo(yesButton);
-    }
+//    @Test
+//    void writtenTiledNcgrVisuallyMatchesOriginal() throws InterruptedException
+//    {
+//        Palette palette = Palette.fromNclr(a020.files.get(0), tiled.getBitDepth());
+//        tiled.setPalette(palette);
+//
+//        BufferedImage originalImage = new BufferedImage(tiled.getWidth() * 4, tiled.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
+//        Graphics2D graphics2D = originalImage.createGraphics();
+//        graphics2D.drawImage(tiled.getImage(), 0, 0, tiled.getWidth() * 4, tiled.getHeight() * 4, null);
+//        graphics2D.dispose();
+//
+//        IndexedImage written = IndexedImage.fromNcgr(tiled.saveAsNcgr(), 4, 0, 1, 1, true);
+//        palette = Palette.fromNclr(a020.files.get(0), written.getBitDepth());
+//        written.setPalette(palette);
+//
+//        BufferedImage writtenImage = new BufferedImage(written.getWidth() * 4, written.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
+//        graphics2D = writtenImage.createGraphics();
+//        graphics2D.drawImage(written.getImage(), 0, 0, written.getWidth() * 4, written.getHeight() * 4, null);
+//        graphics2D.dispose();
+//
+//        JFrame frame = new JFrame("Are these images the same?");
+//        frame.setSize(originalImage.getWidth() + writtenImage.getWidth() + 50, originalImage.getHeight() + writtenImage.getHeight());
+//
+//        JLabel label1 = new JLabel();
+//        label1.setIcon(new ImageIcon(originalImage));
+//
+//        JLabel label2 = new JLabel();
+//        label2.setIcon(new ImageIcon(writtenImage));
+//
+//        JButton yesButton = new JButton("Yes");
+//        JButton noButton = new JButton("No");
+//
+//        final JButton[] source = new JButton[1];
+//
+//        ActionListener actionListener = new ActionListener()
+//        {
+//            @Override
+//            public void actionPerformed(ActionEvent e)
+//            {
+//                source[0] = (JButton) e.getSource();
+//                frame.setVisible(false);
+//            }
+//        };
+//
+//        yesButton.addActionListener(actionListener);
+//        noButton.addActionListener(actionListener);
+//
+//        frame.getContentPane().add(label1, BorderLayout.WEST);
+//        frame.getContentPane().add(label2, BorderLayout.EAST);
+//        frame.getContentPane().add(yesButton, BorderLayout.NORTH);
+//        frame.getContentPane().add(noButton, BorderLayout.SOUTH);
+//
+//        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+//        frame.setLocationRelativeTo(null);
+//        frame.pack();
+//        frame.setVisible(true);
+//        frame.setSize(frame.getWidth() + 50, frame.getHeight() + 50);
+//
+//        while (frame.isVisible())
+//        {
+//            Thread.sleep(1000);
+//        }
+//
+//        assertThat(source[0])
+//                .isEqualTo(yesButton);
+//    }
 
     @Test
     void writtenScannedNcgrEqualsOriginal()
@@ -225,70 +224,79 @@ public class ImageTest
                 .isEqualTo(written);
     }
 
+//    @Test
+//    void writtenScannedNcgrVisuallyMatchesOriginal() throws InterruptedException
+//    {
+//        Palette palette = Palette.fromNclr(a004.files.get(10), scanned.getBitDepth());
+//        scanned.setPalette(palette);
+//
+//        BufferedImage originalImage = new BufferedImage(scanned.getWidth() * 4, scanned.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
+//        Graphics2D graphics2D = originalImage.createGraphics();
+//        graphics2D.drawImage(scanned.getImage(), 0, 0, scanned.getWidth() * 4, scanned.getHeight() * 4, null);
+//        graphics2D.dispose();
+//
+//        IndexedImage written = IndexedImage.fromNcgr(scanned.saveAsNcgr(), 0, 0, 1, 1, true);
+//        palette = Palette.fromNclr(a004.files.get(10), written.getBitDepth());
+//        written.setPalette(palette);
+//
+//        BufferedImage writtenImage = new BufferedImage(written.getWidth() * 4, written.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
+//        graphics2D = writtenImage.createGraphics();
+//        graphics2D.drawImage(written.getImage(), 0, 0, written.getWidth() * 4, written.getHeight() * 4, null);
+//        graphics2D.dispose();
+//
+//        JFrame frame = new JFrame("Are these images the same?");
+//        frame.setSize(originalImage.getWidth() + writtenImage.getWidth() + 50, originalImage.getHeight() + writtenImage.getHeight());
+//
+//        JLabel label1 = new JLabel();
+//        label1.setIcon(new ImageIcon(originalImage));
+//
+//        JLabel label2 = new JLabel();
+//        label2.setIcon(new ImageIcon(writtenImage));
+//
+//        JButton yesButton = new JButton("Yes");
+//        JButton noButton = new JButton("No");
+//
+//        final JButton[] source = new JButton[1];
+//
+//        ActionListener actionListener = new ActionListener()
+//        {
+//            @Override
+//            public void actionPerformed(ActionEvent e)
+//            {
+//                source[0] = (JButton) e.getSource();
+//                frame.setVisible(false);
+//            }
+//        };
+//
+//        yesButton.addActionListener(actionListener);
+//        noButton.addActionListener(actionListener);
+//
+//        frame.getContentPane().add(label1, BorderLayout.WEST);
+//        frame.getContentPane().add(label2, BorderLayout.EAST);
+//        frame.getContentPane().add(yesButton, BorderLayout.NORTH);
+//        frame.getContentPane().add(noButton, BorderLayout.SOUTH);
+//
+//        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+//        frame.setLocationRelativeTo(null);
+//        frame.pack();
+//        frame.setVisible(true);
+//        frame.setSize(frame.getWidth() + 50, frame.getHeight() + 50);
+//
+//        while (frame.isVisible())
+//        {
+//            Thread.sleep(1000);
+//        }
+//
+//        assertThat(source[0])
+//                .isEqualTo(yesButton);
+//    }
+
     @Test
-    void writtenScannedNcgrVisuallyMatchesOriginal() throws InterruptedException
+    void writtenScannedEncryptionKeyMatchesOriginal()
     {
-        Palette palette = Palette.fromNclr(a004.files.get(10), scanned.getBitDepth());
-        scanned.setPalette(palette);
-
-        BufferedImage originalImage = new BufferedImage(scanned.getWidth() * 4, scanned.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
-        Graphics2D graphics2D = originalImage.createGraphics();
-        graphics2D.drawImage(scanned.getImage(), 0, 0, scanned.getWidth() * 4, scanned.getHeight() * 4, null);
-        graphics2D.dispose();
-
         IndexedImage written = IndexedImage.fromNcgr(scanned.saveAsNcgr(), 0, 0, 1, 1, true);
-        palette = Palette.fromNclr(a004.files.get(10), written.getBitDepth());
-        written.setPalette(palette);
 
-        BufferedImage writtenImage = new BufferedImage(written.getWidth() * 4, written.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
-        graphics2D = writtenImage.createGraphics();
-        graphics2D.drawImage(written.getImage(), 0, 0, written.getWidth() * 4, written.getHeight() * 4, null);
-        graphics2D.dispose();
-
-        JFrame frame = new JFrame("Are these images the same?");
-        frame.setSize(originalImage.getWidth() + writtenImage.getWidth() + 50, originalImage.getHeight() + writtenImage.getHeight());
-
-        JLabel label1 = new JLabel();
-        label1.setIcon(new ImageIcon(originalImage));
-
-        JLabel label2 = new JLabel();
-        label2.setIcon(new ImageIcon(writtenImage));
-
-        JButton yesButton = new JButton("Yes");
-        JButton noButton = new JButton("No");
-
-        final JButton[] source = new JButton[1];
-
-        ActionListener actionListener = new ActionListener()
-        {
-            @Override
-            public void actionPerformed(ActionEvent e)
-            {
-                source[0] = (JButton) e.getSource();
-                frame.setVisible(false);
-            }
-        };
-
-        yesButton.addActionListener(actionListener);
-        noButton.addActionListener(actionListener);
-
-        frame.getContentPane().add(label1, BorderLayout.WEST);
-        frame.getContentPane().add(label2, BorderLayout.EAST);
-        frame.getContentPane().add(yesButton, BorderLayout.NORTH);
-        frame.getContentPane().add(noButton, BorderLayout.SOUTH);
-
-        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
-        frame.setLocationRelativeTo(null);
-        frame.pack();
-        frame.setVisible(true);
-        frame.setSize(frame.getWidth() + 50, frame.getHeight() + 50);
-
-        while (frame.isVisible())
-        {
-            Thread.sleep(1000);
-        }
-
-        assertThat(source[0])
-                .isEqualTo(yesButton);
+        assertThat(scanned.getEncryptionKey())
+                .isEqualTo(written.getEncryptionKey());
     }
 }

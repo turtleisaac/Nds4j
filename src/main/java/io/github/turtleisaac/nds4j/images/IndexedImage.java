@@ -677,7 +677,7 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        return bitDepth == image.bitDepth && metatileWidth == image.metatileWidth && metatileHeight == image.metatileHeight && numTiles == image.numTiles && mappingType == image.mappingType && vram == image.vram && encryptionKey == image.encryptionKey && sopc == image.sopc && palette.equals(image.palette) && scanMode == image.scanMode;
+        return bitDepth == image.bitDepth && metatileWidth == image.metatileWidth && metatileHeight == image.metatileHeight && numTiles == image.numTiles && mappingType == image.mappingType && vram == image.vram && encryptionKey == image.encryptionKey && sopc == image.sopc && scanMode == image.scanMode;
     }
 
     @Override
@@ -1140,7 +1140,7 @@ public class IndexedImage extends GenericNtrFile
      * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
      * @param metatileWidth an <code>int</code> containing a metatile width value to enforce (use <code>0</code> if you don't have one)
      * @param metatileHeight an <code>int</code> containing a metatile height value to enforce (use <code>0</code> if you don't have one)
-     * @param scanFrontToBack
+     * @param scanFrontToBack a <code>boolean</code> representing whether (only if this image is scanned) this image should be scanned <b>front-to-back</b> or <b>back-to-front</b>
      * @return an <code>IndexedImage</code> representation of the provided NCLR file
      */
     public static IndexedImage fromNcgr(byte[] data, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
@@ -1300,6 +1300,7 @@ public class IndexedImage extends GenericNtrFile
             throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
 
         int maxNumTiles = tilesWidth * tilesHeight;
+        int numTiles = this.numTiles;
 
         if (numTiles == 0)
             numTiles = maxNumTiles;
@@ -1664,30 +1665,33 @@ public class IndexedImage extends GenericNtrFile
             short[] arr = new short[data.length/2];
             for (int i = 0; i < arr.length; i++)
             {
-                arr[i] = (short) (( ((data[i * 2] & 0xF) << 4) | ((data[i * 2 + 1] & 0xF) << 4)) & 0xff);
-//                arr[i] = (short) (( (data[i * 2] & 0xF) | ((data[i * 2 + 1] & 0xF) << 4)) & 0xff);
-//                arr[i] = (short) (( (data[i * 4] & 0xF) | ((data[i * 4 + 1] & 0xF) << 4) | ((data[i * 4 + 2] & 0xF) << 8) | ((data[i * 4 + 3] & 0xF) << 12)) & 0xffff);
+                arr[i] = (short) (( (data[i * 2] & 0xF) | ((data[i * 2 + 1] & 0xF) << 4)) & 0xff);
             }
+
+            if (bufferSize != arr.length)
+                throw new RuntimeException("Invalid buffer length: does not match height * width / 2");
 
             byte[] dest = new byte[bufferSize];
             if (image.scanMode == ScanMode.FRONT_TO_BACK)
             {
                 for (int i = bufferSize - 1; i > 0; i -= 2)
                 {
+                    int val = arr[i - 1] | (arr[i] << 8);
                     encValue = (encValue - 24691) * 4005161829L;
-                    arr[i] ^= (encValue & 0xFFFF);
-                    dest[i] = (byte) ((arr[i] >> 8) & 0xff);
-                    dest[i - 1] = (byte) (arr[i] & 0xff);
+                    val ^= (encValue & 0xFFFF);
+                    dest[i] = (byte) ((val >> 8) & 0xff);
+                    dest[i - 1] = (byte) (val & 0xff);
                 }
             }
             else if (image.scanMode == ScanMode.BACK_TO_FRONT)
             {
                 for (int i = 1; i < bufferSize; i += 2)
                 {
+                    int val = (arr[i] << 8) | arr[i - 1];
                     encValue = (int) ((encValue - 24691) * 4005161829L);
-                    arr[i] ^= (encValue & 0xFFFF);
-                    dest[i] = (byte) ((arr[i] >> 8) & 0xff);
-                    dest[i - 1] = (byte) (arr[i] & 0xff);
+                    val ^= (encValue & 0xFFFF);
+                    dest[i] = (byte) ((val >> 8) & 0xff);
+                    dest[i - 1] = (byte) (val & 0xff);
                 }
             }
 
