@@ -33,9 +33,8 @@ import java.util.Objects;
 /**
  * An object representation of a NARC file (Nitro-Archive)
  */
-public class Narc
+public class Narc extends GenericNtrFile
 {
-    public static final int NARC_HEADER_SIZE = 0x10;
     public static final int FATB_HEADER_SIZE = 0x0C;
     public static final int FIMG_HEADER_SIZE = 8;
     public static final int FNTB_HEADER_SIZE = 8;
@@ -46,6 +45,7 @@ public class Narc
 
     public Narc()
     {
+        super("NARC");
         filenames = new Fnt.Folder();
         files = new ArrayList<>();
         endiannessOfBeginning = Endianness.EndiannessType.LITTLE;
@@ -57,30 +57,14 @@ public class Narc
      */
     public Narc(byte[] data)
     {
+        super("NARC");
         filenames = new Fnt.Folder();
-        endiannessOfBeginning = Endianness.EndiannessType.LITTLE;
 
         MemBuf buf = MemBuf.create();
         buf.writer().write(data);
         MemBuf.MemBufReader reader = buf.reader();
 
-        String magic = reader.readString(4);
-
-        if (!magic.equals("NARC")) {
-            throw new RuntimeException("Not a NARC file.");
-        }
-
-        int bom = reader.readUInt16();
-        int version = reader.readUInt16();
-        long fileSize = reader.readUInt32();
-        int headerSize = reader.readUInt16();
-        int numBlocks = reader.readUInt16();
-
-        // some games use big endian, some use little - NSMB uses big for example, but Spirit Tracks uses little
-        if (bom == 0xFFFE) {
-            endiannessOfBeginning = Endianness.EndiannessType.BIG;
-            version = (version & 0xFF) << 8 | version >> 8;
-        }
+        readGenericNtrHeader(reader);
 
         if (version != 1)
             throw new RuntimeException("Unsupported NARC version: " + version);
@@ -97,7 +81,7 @@ public class Narc
         }
 
         // read the file name block
-        long fntbOffset = NARC_HEADER_SIZE + fatbSize;
+        long fntbOffset = NTR_HEADER_SIZE + fatbSize;
         reader.setPosition(fntbOffset);
         String fntbMagic = reader.readString(4);
         long fntbSize = reader.readUInt32();
@@ -316,28 +300,15 @@ public class Narc
         MemBuf narcBuf = MemBuf.create();
         MemBuf.MemBufWriter narcWriter = narcBuf.writer();
 
-        narcWriter.skip(NARC_HEADER_SIZE);
+        narcWriter.skip(NTR_HEADER_SIZE);
         narcWriter.write(fatbBuf.reader().getBuffer());
         narcWriter.write(fntbBuf.reader().getBuffer());
         narcWriter.write(fimgBuf.reader().getBuffer());
 
         int narcLength = narcWriter.getPosition();
 
-        int bom = 0xFEFF;
-        int version = 1;
-        if (endiannessOfBeginning == Endianness.EndiannessType.BIG)
-        {
-            bom = 0xFFFE;
-            version = 0x100;
-        }
-
         narcWriter.setPosition(0);
-        narcWriter.writeString("NARC");
-        narcWriter.writeShort((short) bom);
-        narcWriter.writeShort((short) version);
-        narcWriter.writeUInt32(narcLength);
-        narcWriter.writeShort((short) NARC_HEADER_SIZE);
-        narcWriter.writeShort((short) 3);
+        writeGenericNtrHeader(narcWriter, narcLength, 3);
 
         narcWriter.setPosition(narcLength);
         return narcBuf.reader().getBuffer();
