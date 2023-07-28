@@ -101,4 +101,64 @@ public class GenericNtrFile
         headerSize = file.headerSize;
         numBlocks = file.numBlocks;
     }
+
+    public Endianness.EndiannessType getEndiannessOfBeginning()
+    {
+        return endiannessOfBeginning;
+    }
+
+    public void setEndiannessOfBeginning(Endianness.EndiannessType endiannessOfBeginning)
+    {
+        this.endiannessOfBeginning = endiannessOfBeginning;
+    }
+
+    public int getBom()
+    {
+        return bom;
+    }
+
+    public void setBom(int bom)
+    {
+        this.bom = bom;
+    }
+
+    public int getVersion()
+    {
+        return version;
+    }
+
+    public void setVersion(int version)
+    {
+        this.version = version;
+    }
+
+    public long getFileSize()
+    {
+        return fileSize;
+    }
+
+    public void setFileSize(long fileSize)
+    {
+        this.fileSize = fileSize;
+    }
+
+    public int getHeaderSize()
+    {
+        return headerSize;
+    }
+
+    public void setHeaderSize(int headerSize)
+    {
+        this.headerSize = headerSize;
+    }
+
+    public int getNumBlocks()
+    {
+        return numBlocks;
+    }
+
+    public void setNumBlocks(int numBlocks)
+    {
+        this.numBlocks = numBlocks;
+    }
 }

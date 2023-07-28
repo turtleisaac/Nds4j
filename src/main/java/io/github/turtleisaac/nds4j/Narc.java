@@ -41,7 +41,6 @@ public class Narc extends GenericNtrFile
 
     Fnt.Folder filenames; // represents the root folder of the filesystem
     public ArrayList<byte[]> files;
-    Endianness.EndiannessType endiannessOfBeginning;
 
     public Narc()
     {
@@ -375,7 +374,9 @@ public class Narc extends GenericNtrFile
 
     public String toString()
     {
-        return String.format("(%s) NARC with %d files", endiannessOfBeginning.symbol, files.size());
+        if (files != null)
+            return String.format("(%s) NARC with %d files", endiannessOfBeginning.symbol, files.size());
+        return String.format("(%s) NARC", endiannessOfBeginning.symbol);
     }
 
     @Override

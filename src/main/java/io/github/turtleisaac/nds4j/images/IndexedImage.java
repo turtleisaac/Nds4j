@@ -40,6 +40,9 @@ import java.util.zip.InflaterInputStream;
 
 import static io.github.turtleisaac.nds4j.framework.Endianness.swapEndianness;
 
+/**
+ * An object representation of an NCGR file
+ */
 public class IndexedImage extends GenericNtrFile
 {
     private byte[][] pixels;
@@ -50,8 +53,8 @@ public class IndexedImage extends GenericNtrFile
 
     private int bitDepth;
     private NcgrUtils.ScanMode scanMode;
-    private int metatileWidth;
-    private int metatileHeight;
+    private int metatileWidth = -1;
+    private int metatileHeight = -1;
     private int numTiles;
     private int mappingType;
     private boolean vram;
@@ -74,27 +77,29 @@ public class IndexedImage extends GenericNtrFile
         width = 80;
 
         pixels = new byte[height][width];
-        byte[] arr = new byte[width];
-        Arrays.fill(arr, (byte) 0);
-        Arrays.fill(pixels,arr);
-
         this.palette = palette;
 
         update = true;
     }
 
+    /**
+     * Creates an <code>IndexedImage</code> with the provided height, width, bit-depth, and palette
+     * @param height an <code>int</code>
+     * @param width an <code>int</code>
+     * @param bitDepth an <code>int</code> with a value of 4 or 8 (defaults to 4 if another value is provided)
+     * @param palette a <code>Palette</code> object
+     */
     public IndexedImage(int height, int width, int bitDepth, Palette palette)
     {
         super("RGCN");
         this.height = height;
         this.width = width;
+
+        if (bitDepth != 4 && bitDepth != 8)
+            bitDepth = 4;
         this.bitDepth = bitDepth;
 
         pixels = new byte[height][width];
-        byte[] arr = new byte[width];
-        Arrays.fill(arr, (byte) 0);
-        Arrays.fill(pixels,arr);
-
         this.palette = palette;
 
         update = true;
@@ -256,6 +261,7 @@ public class IndexedImage extends GenericNtrFile
      * Creates a scaled <code>BufferedImage</code> using this <code>IndexedImage</code>
      * @return a scaled <code>BufferedImage</code> representation of this <code>IndexedImage</code>
      */
+    @Deprecated
     public BufferedImage getResizedImage()
     {
         BufferedImage image = new BufferedImage(width, height,BufferedImage.TYPE_INT_RGB);
@@ -267,13 +273,34 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        BufferedImage resizedImage = new BufferedImage(160, 160, BufferedImage.TYPE_INT_RGB);
+        BufferedImage resizedImage = new BufferedImage(width * 2, height * 2, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics2D = resizedImage.createGraphics();
-        graphics2D.drawImage(image, 0, 0, 160, 160, null);
+        graphics2D.drawImage(image, 0, 0, width * 2, height * 2, null);
         graphics2D.dispose();
         return resizedImage;
     }
 
+    @Deprecated
+    public BufferedImage getResizedImage(int newWidth, int newHeight)
+    {
+        BufferedImage image = new BufferedImage(width, height,BufferedImage.TYPE_INT_RGB);
+
+        for (int row = 0; row < height; row++)
+        {
+            for (int col = 0; col < width; col++)
+            {
+                image.setRGB(col,row,palette.getColor(pixels[row][col]).getRGB());
+            }
+        }
+
+        BufferedImage resizedImage = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics2D = resizedImage.createGraphics();
+        graphics2D.drawImage(image, 0, 0, newWidth, newHeight, null);
+        graphics2D.dispose();
+        return resizedImage;
+    }
+
+    @Deprecated
     public IndexedImage indexSelf(JPanel parent)
     {
         IndexedImage newSprite = new IndexedImage(getImage(),parent);
@@ -288,6 +315,7 @@ public class IndexedImage extends GenericNtrFile
      * @param replacement a <code>Color</code>
      * @return this
      */
+    @Deprecated
     public IndexedImage updateColor(int index, Color replacement)
     {
         palette.setColor(index, replacement);
@@ -301,6 +329,7 @@ public class IndexedImage extends GenericNtrFile
      * @param replacement a <code>Color</code>
      * @return this
      */
+    @Deprecated
     public IndexedImage replaceColor(Color toReplace, Color replacement)
     {
         for (int i = 0; i < palette.size(); i++)
@@ -314,6 +343,7 @@ public class IndexedImage extends GenericNtrFile
         return this;
     }
 
+    @Deprecated
     public IndexedImage replacePalette(Color[] paletteGuide, Color[] newPalette, JPanel parent)
     {
         indexSelf(parent);
@@ -346,7 +376,7 @@ public class IndexedImage extends GenericNtrFile
         return this;
     }
 
-
+    @Deprecated
     public IndexedImage alignPalette(Color[] paletteGuide, JPanel parent)
     {
         indexSelf(parent);
@@ -571,6 +601,10 @@ public class IndexedImage extends GenericNtrFile
         pixels[y][x] = (byte) colorIdx;
     }
 
+    /**
+     * Get the metatile width of this image
+     * @return an <code>int</code>, or <code>-1</code>
+     */
     public int getMetatileWidth()
     {
         return metatileWidth;
@@ -686,6 +720,27 @@ public class IndexedImage extends GenericNtrFile
         int result = Objects.hash(palette, height, width, bitDepth, scanMode, metatileWidth, metatileHeight, numTiles, mappingType, vram, encryptionKey, sopc);
         result = 31 * result + Arrays.hashCode(pixels);
         return result;
+    }
+
+    public String toString()
+    {
+        String s;
+        switch (scanMode)
+        {
+            case NOT_SCANNED:
+                s = "tiled";
+                break;
+            case FRONT_TO_BACK:
+                s = "scanned front-to-back";
+                break;
+            case BACK_TO_FRONT:
+                s = "scanned back-to-front";
+                break;
+            default:
+                s = "";
+        }
+
+        return String.format("%dbpp %s indexed image with size %dx%d", bitDepth, s, height, width);
     }
 
     /**
@@ -807,7 +862,7 @@ public class IndexedImage extends GenericNtrFile
             throw new PngUtils.PngParseException("Invalid interlace method: " + interlaceMethod);
         }
 
-        System.out.println("Bit Depth: " + bitDepth);
+//        System.out.println("Bit Depth: " + bitDepth);
         ArrayList<Color> colorList = new ArrayList<>();
         buffer.skipTo(paletteIdx-4);
 
@@ -1646,7 +1701,7 @@ public class IndexedImage extends GenericNtrFile
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00 };
         private static final byte[] sopcBuffer = new byte[] { 0x53, 0x4F, 0x50, 0x43, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
-        //todo not done with figuring out signature - method is incomplete
+
         private static byte[] convertToScanned4Bpp(IndexedImage image, int bufferSize)
         {
             long encValue = image.encryptionKey;
@@ -1700,7 +1755,7 @@ public class IndexedImage extends GenericNtrFile
 
         //todo convertToScanned8Bpp()
 
-        private static byte[] convertToTiles4Bpp(IndexedImage image, int numTiles, int metatilesWide, int metatileWidth, int metatileHeight)
+        protected static byte[] convertToTiles4Bpp(IndexedImage image, int numTiles, int metatilesWide, int metatileWidth, int metatileHeight)
         {
             MetatileManager metatileManager = new MetatileManager();
             int pitch = (metatilesWide * metatileWidth) * 4;
@@ -1736,114 +1791,119 @@ public class IndexedImage extends GenericNtrFile
             return dest;
         }
 
-//        private static void convertFromTiles4Bpp(byte[] src, IndexedImage image)
-//        {
-//            int bitDepth = 4;
-//            image.width = 32;
-//            image.height = 64;
-//
-//            byte[] tilePal = new byte[src.length * (8 / bitDepth)];
-////            if (tilesHeight < 8)
-////                tilesHeight = 8;
-//            byte[] img_tiles = NcgrUtils.linealToHorizontal(src, image.width, image.height, bitDepth, 8);
-//            tilePal = NcgrUtils.linealToHorizontal(tilePal, image.width, image.height, 8, 8);
-//
+        protected static void convertFromTiles4BppAlternate(byte[] src, IndexedImage image, int startOffset)
+        {
+            if (startOffset != 0)
+            {
+                byte[] newTiles = new byte[src.length - startOffset];
+                System.arraycopy(src, startOffset, newTiles, 0, newTiles.length);
+                src = newTiles;
+            }
+
+
+            int bitDepth = 4;
+
+            byte[] tilePal = new byte[src.length * (8 / bitDepth)];
+//            if (tilesHeight < 8)
+//                tilesHeight = 8;
+            byte[] img_tiles = NcgrUtils.linealToHorizontal(src, image.width, image.height, bitDepth, 8);
+            tilePal = NcgrUtils.linealToHorizontal(tilePal, image.width, image.height, 8, 8);
+
 //            System.out.println(src.length);
 //            for (int i = 0; i < img_tiles.length; i++)
 //            {
 //                if (img_tiles[i] != 0)
 //                    System.out.println(i);
 //            }
-//
-//            byte[] output = new byte[image.height * image.width];
-//
-//            int pos = 0;
-//            for (int row= 0; row < image.height; row++)
-//            {
-//                for (int col= 0; col < image.width; col++)
-//                {
-//                    int num_pal = 0;
-//                    if(tilePal.length > col + row * image.width)
-//                    {
-//                        num_pal = tilePal[col + row * image.width];
-//                    }
-//
-//                    if(num_pal >= image.palette.length)
-//                    {
-//                        num_pal = 0;
-//                    }
-//
-//                    int colorIdx = getColor(img_tiles, image.palette.length, pos++);
-//
-//                    if (colorIdx != 0)
-//                        System.out.println("moo");
-//
+
+            byte[] output = new byte[image.height * image.width];
+
+            byte[][] pixels = new byte[image.height][image.width];
+
+            int pos = 0;
+            for (int row= 0; row < image.height; row++)
+            {
+                for (int col= 0; col < image.width; col++)
+                {
+                    int num_pal = 0;
+                    if(tilePal.length > col + row * image.width)
+                    {
+                        num_pal = tilePal[col + row * image.width];
+                    }
+
+                    if(num_pal >= image.palette.getNumColors())
+                    {
+                        num_pal = 0;
+                    }
+
+                    int colorIdx = getColor(img_tiles, image.palette.getNumColors(), pos++);
+
 //                    output[row * image.width + col] = (byte) colorIdx;
-//                }
-//            }
-//
-//
-//            image.original = output;
-//            image.update = true;
-//        }
-//
-//        private static byte[] linealToHorizontal(byte[] lineal, int width, int height, int bpp, int tile_size)
-//        {
-//            byte[] horizontal = new byte[lineal.length];
-//            int tile_width = tile_size * bpp / 8;   // Calculate the number of byte per line in the tile
-//            // pixels per line * bits per pixel / 8 bits per byte
-//            int tilesX = width / tile_size;
-//            int tilesY = height / tile_size;
-//
-//            int pos = 0;
-//            for (int ht = 0; ht < tilesY; ht++)
-//            {
-//                for (int wt = 0; wt < tilesX; wt++)
-//                {
-//                    // Get the tile data
-//                    for (int h = 0; h < tile_size; h++)
-//                    {
-//                        for (int w = 0; w < tile_width; w++)
-//                        {
-//                            final int value = (w + h * tile_width * tilesX) + wt * tile_width + ht * tilesX * tile_size * tile_width;
-//                            if (value >= lineal.length)
-//                                continue;
-//                            if (pos >= lineal.length)
-//                                continue;
-//
-//                            horizontal[value] = lineal[pos++];
-//                        }
-//                    }
-//                }
-//            }
-//
-//            return horizontal;
-//        }
-//
-//        private static int getColor(byte[] data, int paletteLength, int pos)
-//        {
-//            int color = 0;
-//            int alpha, index;
-//
-//            if (data.length <= (pos / 2))
-//                return color;
-//            int bit4 = data[pos / 2] & 0xff;
-//            index = byteToBit4(bit4)[pos % 2];
-//            if (paletteLength > index)
-//                color = index;
-//
-//            return color;
-//        }
-//
-//        public static byte[] byteToBit4(int data)
-//        {
-//            byte[] bit4 = new byte[2];
-//
-//            bit4[0] = (byte)(data & 0x0F);
-//            bit4[1] = (byte)((data & 0xF0) >> 4);
-//
-//            return bit4;
-//        }
+                    pixels[row][col] = (byte) colorIdx;
+                }
+            }
+
+            image.pixels = pixels;
+            image.update = true;
+        }
+
+        private static byte[] linealToHorizontal(byte[] lineal, int width, int height, int bpp, int tile_size)
+        {
+            byte[] horizontal = new byte[lineal.length];
+            int tile_width = tile_size * bpp / 8;   // Calculate the number of byte per line in the tile
+            // pixels per line * bits per pixel / 8 bits per byte
+            int tilesX = width / tile_size;
+            int tilesY = height / tile_size;
+
+            int pos = 0;
+            for (int ht = 0; ht < tilesY; ht++)
+            {
+                for (int wt = 0; wt < tilesX; wt++)
+                {
+                    // Get the tile data
+                    for (int h = 0; h < tile_size; h++)
+                    {
+                        for (int w = 0; w < tile_width; w++)
+                        {
+                            final int value = (w + h * tile_width * tilesX) + wt * tile_width + ht * tilesX * tile_size * tile_width;
+                            if (value >= lineal.length)
+                                continue;
+                            if (pos >= lineal.length)
+                                continue;
+
+                            horizontal[value] = lineal[pos++];
+                        }
+                    }
+                }
+            }
+
+            return horizontal;
+        }
+
+        private static int getColor(byte[] data, int paletteLength, int pos)
+        {
+            int color = 0;
+            int alpha, index;
+
+            if (data.length <= (pos / 2))
+                return color;
+            int bit4 = data[pos / 2] & 0xff;
+            index = byteToBit4(bit4)[pos % 2];
+            if (paletteLength > index)
+                color = index;
+
+            return color;
+        }
+
+        public static byte[] byteToBit4(int data)
+        {
+            byte[] bit4 = new byte[2];
+
+            bit4[0] = (byte)(data & 0x0F);
+            bit4[1] = (byte)((data & 0xF0) >> 4);
+
+            return bit4;
+        }
 
         protected enum ScanMode {
             NOT_SCANNED,
