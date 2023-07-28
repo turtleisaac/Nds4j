@@ -12,7 +12,7 @@ Nintendo DS games, with many more coming soon.
 
 This project started off as a replacement for a few Java packages which are still used by Java tool developers in the Pokémon
 DS hacking community (aka pretty much only me), namely [jNdstool](https://github.com/JackHack96/jNdstool) by
-[JackHack96](https://github.com/JackHack96) and [Narctowl](https://github.com/turtleisaac/Narctowl) by myself. The
+[JackHack96](https://github.com/JackHack96) and [Narctowl](https://github.com/turtleisaac/Narctowl) by myself. Part of the
 codebase uses [ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master)
 by [RoadrunnerWMC](https://github.com/RoadrunnerWMC) as a reference and can be thought of as a Java counterpart to it.
 
@@ -23,6 +23,20 @@ Note that Java doesn't support the Nintendo DS itself; Nds4j is intended to be u
 **Note:** Code from the [Universal Pokémon Randomizer ZX](https://github.com/Ajarmar/universal-pokemon-randomizer-zx)
 is adapted for LZ decompression purposes under the rights provided by the GNU General Public License v3.0.
 If there are any complaints related to this, please create a new Issue in the Issues tab here on GitHub.
+
+Special thanks to [red031000](https://github.com/red031000) for helping me figure some particularly annoying formats out.
+
+Formats currently implemented
+---------------------------------
+
+| Format  | Corresponding Java Class | Reading | Writing | Full Editing Capability |
+|:--------|:-------------------------|:-------:|:-------:|:-----------------------:|
+| NDS ROM | `NintendoDsRom`          | &check; | &check; |         &check;         |
+| NARC    | `Narc`                   | &check; | &check; |         &check;         |
+| NCGR    | `images.IndexedImage`    | &check; | &check; |         &cross;         |
+| NCLR    | `images.Palette`         | &check; | &check; |         &cross;         |
+| NCER    | `images.CellBank`        | &check; | &check; |         &cross;         |
+
 
 A few examples of Nds4j in action
 ---------------------------------

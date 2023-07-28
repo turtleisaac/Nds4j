@@ -199,7 +199,7 @@ public class CellBank extends GenericNtrFile
         //cell bank data
         String cellBankMagic = reader.readString(4); // 0x10
 
-        if(! cellBankMagic.equals("KBEC")) {
+        if (!cellBankMagic.equals("KBEC")) {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -243,7 +243,7 @@ public class CellBank extends GenericNtrFile
 
             String tacuMagic = reader.readString(4);
 
-            if(!tacuMagic.equals("TACU")) {
+            if (!tacuMagic.equals("TACU")) {
                 throw new RuntimeException("Not a valid RECN file.");
             }
 
@@ -274,7 +274,7 @@ public class CellBank extends GenericNtrFile
 
         cells = new Cell[numBanks];
 
-        for(int i = 0; i < numBanks; i++)
+        for (int i = 0; i < numBanks; i++)
         {
             int cellCount = reader.readUInt16();
             cells[i] = new Cell(cellCount);
@@ -337,7 +337,7 @@ public class CellBank extends GenericNtrFile
         //label data
         String labelMagic = reader.readString(4); // 0x10
 
-        if(!labelMagic.equals("LBAL")) {
+        if (!labelMagic.equals("LBAL")) {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -366,7 +366,7 @@ public class CellBank extends GenericNtrFile
         //uext data
         String uextMagic = reader.readString(4); // (note: this isn't guaranteed to be 4-byte aligned)
 
-        if(!uextMagic.equals("TXEU")) {
+        if (!uextMagic.equals("TXEU")) {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -451,7 +451,7 @@ public class CellBank extends GenericNtrFile
             writer.writeShort((short) 1); //todo verify this?
             writer.writeInt(8); // pointer to attributes data (relative to start of TACU + 4)
 
-            for(Cell cell : cells) {
+            for (Cell cell : cells) {
                 writer.writeInt(cell.tacuData);
             }
 
@@ -607,20 +607,20 @@ public class CellBank extends GenericNtrFile
             g.drawImage(images[x].getImage(), oam.xCoord + output.getWidth() / 2, oam.yCoord + output.getHeight() / 2, null);
         }
 
-        for (int x = 0; x < images.length; x++)
-        {
-            Cell.OAM oam = cell.oams[x];
-
-            int xOrigin = oam.xCoord + output.getWidth() / 2;
-            int yOrigin = oam.yCoord + output.getHeight() / 2;
-
-            g.setColor(Color.black);
-            g.drawLine(xOrigin, yOrigin, xOrigin, yOrigin + images[x].getHeight());
-            g.drawLine(xOrigin, yOrigin, xOrigin + images[x].getImage().getWidth(), yOrigin);
+//        for (int x = 0; x < images.length; x++)
+//        {
+//            Cell.OAM oam = cell.oams[x];
 //
-            g.drawLine(xOrigin + images[x].getImage().getWidth(), yOrigin, xOrigin + images[x].getImage().getWidth(),yOrigin + images[x].getHeight());
-            g.drawLine(xOrigin, yOrigin + images[x].getHeight(), xOrigin + images[x].getImage().getWidth(), yOrigin + images[x].getHeight());
-        }
+//            int xOrigin = oam.xCoord + output.getWidth() / 2;
+//            int yOrigin = oam.yCoord + output.getHeight() / 2;
+//
+//            g.setColor(Color.black);
+//            g.drawLine(xOrigin, yOrigin, xOrigin, yOrigin + images[x].getHeight());
+//            g.drawLine(xOrigin, yOrigin, xOrigin + images[x].getImage().getWidth(), yOrigin);
+//
+//            g.drawLine(xOrigin + images[x].getImage().getWidth(), yOrigin, xOrigin + images[x].getImage().getWidth(),yOrigin + images[x].getHeight());
+//            g.drawLine(xOrigin, yOrigin + images[x].getHeight(), xOrigin + images[x].getImage().getWidth(), yOrigin + images[x].getHeight());
+//        }
         g.dispose();
 
         return output;
