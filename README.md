@@ -5,7 +5,7 @@ Nds4j
 [![javadoc](https://javadoc.io/badge2/io.github.turtleisaac/Nds4j/javadoc.svg?)](https://javadoc.io/doc/io.github.turtleisaac/Nds4j)
 [![License: GNU GPL 3.0](https://img.shields.io/github/license/RoadrunnerWMC/ndspy.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/gpl-3.0)
 
-**Nds4j** is a Java library that can help you read, modify and create a few types of files used in
+**Nds4j** is a <u>**WIP**</u> Java library that can help you read, modify and create a few types of files used in
 Nintendo DS games, with many more coming soon.
 
 > Author: Turtleisaac
@@ -27,7 +27,7 @@ If there are any complaints related to this, please create a new Issue in the Is
 Special thanks to [red031000](https://github.com/red031000) for helping me figure some particularly annoying formats out.
 
 Formats currently implemented
----------------------------------
+-----------------------------
 
 | Format  | Corresponding Java Class | Reading | Writing | Full Editing Capability |
 |:--------|:-------------------------|:-------:|:-------:|:-----------------------:|
@@ -36,6 +36,26 @@ Formats currently implemented
 | NCGR    | `images.IndexedImage`    | &check; | &check; |         &cross;         |
 | NCLR    | `images.Palette`         | &check; | &check; |         &cross;         |
 | NCER    | `images.CellBank`        | &check; | &check; |         &cross;         |
+
+Likely future supported formats
+--------------------------------
+
+These are sorted in order of their likely priority, but that order can and will change.
+
+* NANR
+* NSCR
+* NSBTX
+* NSBMD
+* NSBCA
+
+The following are themselves likely, but are not part of my immediate needs or goals due
+to very fleshed out solutions such as ndspy existing:
+
+* SDAT
+* SSEQ
+* SBNK
+* SWAR
+* SSAR
 
 
 A few examples of Nds4j in action
@@ -140,7 +160,7 @@ This section will try to answer some questions you may have.
     own Java code; Nds4j is essentially a tool your code can use. This may
     sound daunting -- especially if you're not very familiar with Java -- but
     if Python is what you are more familiar with, please check out
-    [ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master).
+    [ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master) <sup>**_(feature parity is not guaranteed)_**</sup>.
 - Nds4j runs on your PC, not on the Nintendo DS itself. You use it to create
     and modify game files, which can then be run on the console. DS games have
     to be written in a compiled language such as C or C++ to have any hope of
@@ -162,6 +182,12 @@ This section will try to answer some questions you may have.
     `MemBuf.MemBufReader`, and `BinaryWriter` can all be used by projects which
     use Nds4j and can provide easy reading/writing of binary data to/from files.
 
+Distribution
+------------
+
+The current version of Nds4j can be obtained from [Apache Maven](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j),
+or from the [Releases Page](https://github.com/turtleisaac/Nds4j/releases/latest) here on GitHub.
+
 Documentation
 -------------
 
@@ -180,3 +206,38 @@ Nds4j follows [semantic versioning](https://semver.org/) to the best of my
 ability. If a tool claims to work with Nds4j 1.0.2, it should also work with
 Nds4j 1.2.0, but not necessarily 2.0.0. (Please note that not all of those
 version numbers actually exist!)
+
+All releases prior to Nds4j 1.0.0 should be considered unstable, as the API can and will change.
+
+Sources
+-------
+
+A comprehensive list of sources will be maintained [here](Sources.md).
+
+Guidelines for contributing
+---------------------------
+
+If you plan on contributing to Nds4j, please ensure that your additions meet the following criteria:
+* All public methods and constructors have well-written Javadoc comments
+* Debug prints have been removed or at the very least commented out
+* Formats which begin with the generic NTR header should always extend `framework.GenericNtrFile`. See existing classes for examples.
+* The following classes in the `framework` package should be used for the following purposes and be consistent with existing code:
+  * `MemBuf` - Reading and writing binary data one value at a time.
+    * `MemBuf.MemBufReader` - Reading binary data one value at a time.
+    * `MemBuf.MemBufWriter` - Writing binary data one value at a time.
+  * `Buffer` - Reading entire binary data (bytes) from file. 
+  * `BinaryWriter` - Writing out completed binary data (bytes) to file.
+* A simple yet informative `toString()` method should be included in your classes where applicable.
+* An in-depth and **thoroughly tested** `equals()` method should be included in your classes where applicable.
+* Exceptions should be informative. That is, the message included in them should contain the nature of the exception (aka what caused it), and when applicable, the illegal value that triggered it. Use common sense, and make sure exceptions do not contain expletives.
+* Any sources you used should be added to [Sources.md](Sources.md)
+* Unit tests have been written and included in the path `src/test/java/` which mirrors the placement of your code in `src/main/java`.
+  * Your unit tests should test everything which you think needs to be tested. The most important test in my opinion is making sure that when you convert your object back to a `byte[]` to save it, that `byte[]` should be fed back to the constructor for the class and tested for equality.
+* Limit the member variables your classes include to only what is needed to represent the simplest form of the format while retaining all functionality.
+  * For example, if the file format includes offsets of some data within the file and that offset is only needed for the purpose of reading the data, you should not store it in a member variable. That offset can easily be recalculated upon writing out the file and will only serve to make things more confusing if you keep it.
+  * Any member variables which you want to expose to the user need to have accessor and mutator methods made available.
+* Any method, member variable, or inner class which does not need to be made available to the user should either be private or protected, depending on whether other classes need to be able to access them.
+* Eliminate redundancy.
+  * For example, if you need to perform compression operations for DS formats, use `framework.BLZCoder`, don't write your own redundant solution. If there is something missing from the framework class, fix the existing class instead of making a new class.
+  * If you have code which multiple of your classes share, don't rewrite it in each of your classes. Either put it in a protected inner class within one of your classes and import it into the other, or if the code is general enough to have other potential applications, put it in a class in the `framework` package.
+* Please do your best to make your code readable to other people! 

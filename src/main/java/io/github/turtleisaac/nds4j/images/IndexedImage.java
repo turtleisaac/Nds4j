@@ -41,13 +41,22 @@ import java.util.zip.InflaterInputStream;
 import static io.github.turtleisaac.nds4j.framework.Endianness.swapEndianness;
 
 /**
- * An object representation of an NCGR file
+ * An object representation of an NCGR file. <p>
+ * An NCGR file is a Nintendo proprietary DS format used for storing graphics (images).
  */
 public class IndexedImage extends GenericNtrFile
 {
     private byte[][] pixels;
     private Palette palette;
+    /**
+     * Based on how an NCER or NSCR is set to read an NCGR file, or how the game is programmed to read an NCGR file,
+     * it may use a specific palette index within the NCLR (palette) file. For example, elements of the opening sequence
+     * in Pokémon HeartGold share a single NCLR file with multiple 16 color palettes stored consecutively inside it.
+     * The tiles within the NSCR used to display them contain the palette index information.
+     */
+    private int paletteIdx;
 
+    //todo evaluate whether these really need to be final
     private final int height;
     private final int width;
 
@@ -68,7 +77,7 @@ public class IndexedImage extends GenericNtrFile
     /**
      * Creates an <code>IndexedImage</code> of size 80x80
      * (this image will default to all pixels with a value of 0)
-     * @param palette a <code>Color[]</code> containing the palette of the image
+     * @param palette a <code>Palette</code> containing the palette of the image
      */
     public IndexedImage(Palette palette)
     {
@@ -108,7 +117,7 @@ public class IndexedImage extends GenericNtrFile
     /**
      * Creates an <code>IndexedImage</code> using a predetermined assignment of color to pixel and the palette itself
      * @param pixels a <code>byte[][]</code> representing the index in the palette to pull the color from for each pixel in the sprite
-     * @param palette a <code>Color[]</code> of length 16 or less containing the colors to be used in the image
+     * @param palette a <code>Palette</code> containing the colors to be used in the image
      * @throws ImageException if the provided byte[][] does not contain rows of equal width
      */
     @Deprecated
