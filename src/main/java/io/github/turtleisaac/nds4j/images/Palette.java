@@ -42,6 +42,102 @@ public class Palette extends GenericNtrFile
     private boolean ir = false;
 
     /**
+     * Parses an NCLR file and returns a <code>Palette</code> representation of it
+     * @param data a <code>byte[]</code> containing a binary representation of an NCLR file
+     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
+     * @return a <code>Palette</code> representation of the provided NCLR file
+     */
+    public Palette(byte[] data, int bitDepth)
+    {
+        super("RLCN", "RPCN");
+
+        MemBuf dataBuf = MemBuf.create(data);
+        MemBuf.MemBufReader reader = dataBuf.reader();
+        int fileSize = dataBuf.writer().getPosition();
+
+        readGenericNtrHeader(reader);
+
+        // reader position is now 0x10
+
+        //palette data
+        String paletteMagic = reader.readString(4);
+
+        if (!paletteMagic.equals("TTLP")) {
+            throw new RuntimeException("Not a valid NCLR or NCPR file.");
+        }
+
+        if ((fileSize - 0x28) % 2 != 0)
+            throw new RuntimeException(String.format("The file size (%d) is not a multiple of 2.\n", fileSize));
+
+        long paletteSectionSize = reader.readUInt32();
+
+        if (bitDepth == 0)
+        {
+            bitDepth = reader.readUInt16() == 3 ? 4 : 8;  //4bpp if == 3, 8bpp if == 4
+        }
+        else
+        {
+            reader.skip(2);
+        }
+
+        int compNum = reader.readByte();
+        reader.skip(1);
+
+        int paletteUnknown1 = reader.readInt();
+        long paletteLength= reader.readUInt32();
+
+        if(paletteLength == 0 || paletteLength > paletteSectionSize)
+            paletteLength= paletteSectionSize - 0x18;
+
+        long colorStartOffset= reader.readUInt32();
+
+        int numColors = 256;
+
+        if (paletteLength / 2 < numColors)
+            numColors = (int) (paletteLength / 2);
+
+        this.numColors = numColors;
+        colors = new Color[numColors];
+        this.bitDepth = bitDepth;
+        this.compNum = compNum;
+
+        reader.setPosition(0x18 + colorStartOffset);
+        for (int i = 0; i < paletteLength / 2; i++)
+        {
+            colors[i] = NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte());
+        }
+
+        if (colors[ (int) (paletteLength / 2) - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
+        {
+            this.ir = true;
+        }
+    }
+
+    /**
+     * Parses an NCLR file on disk and returns a <code>Palette</code> representation of it
+     * @param file a <code>File</code> containing a path to an NCLR file on disk
+     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
+     * @return a <code>Palette</code> representation of the specified NCLR file
+     */
+    public static Palette fromFile(File file, int bitDepth)
+    {
+        return fromFile(file.getAbsolutePath(), bitDepth);
+    }
+
+    /**
+     * Parses an NCLR file on disk and returns a <code>Palette</code> representation of it
+     * @param file a <code>String</code> containing a path to an NCLR file on disk
+     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
+     * @return a <code>Palette</code> representation of the specified NCLR file
+     */
+    public static Palette fromFile(String file, int bitDepth)
+    {
+        return new Palette(Buffer.readFile(file), bitDepth);
+    }
+
+
+
+    /**
      * Creates a default grayscale palette with the given number of colors
      * @param numColors an <code>int</code>
      */
@@ -79,6 +175,72 @@ public class Palette extends GenericNtrFile
         numColors = arr.length;
         colors = arr;
     }
+
+
+    /**
+     * Generate a <code>byte[]</code> representation of this <code>Palette</code> as an NCLR
+     * @return a <code>byte[]</code>
+     */
+    public byte[] save()
+    {
+        MemBuf dataBuf = MemBuf.create();
+        MemBuf.MemBufWriter writer = dataBuf.writer();
+
+        int numColors = colors.length;
+
+        int size = numColors * 2; // two bytes per color
+        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18) + NTR_HEADER_SIZE;
+
+        writeGenericNtrHeader(writer, extSize, 1);
+
+        // writer position is now 0x10
+
+        writer.write(NclrUtils.palHeader);
+        int storedPos = writer.getPosition();
+
+        writer.setPosition(NTR_HEADER_SIZE + 4);
+        writer.writeInt(extSize - NTR_HEADER_SIZE); // 0x14
+
+        if (bitDepth <= 0)
+            bitDepth = 4;
+
+        writer.writeShort((short) (bitDepth == 4 ? 0x3 : 0x4)); // 0x18
+        writer.writeByte((byte) (compNum)); // 0x1A
+
+        writer.setPosition(NTR_HEADER_SIZE + 0x10);
+        writer.writeInt(size);
+
+        writer.setPosition(storedPos);
+
+        for(Color color : colors) {
+            writer.write(NclrUtils.colorToBGR555(color));
+        }
+
+        return dataBuf.reader().getBuffer();
+    }
+
+    /**
+     * Exports an NCLR file to disk from this <code>Palette</code>
+     * @param file a <code>File</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToFile(File file) throws IOException
+    {
+        BinaryWriter.writeFile(file, save());
+    }
+
+    /**
+     * Exports an NCLR file to disk from this <code>Palette</code>
+     * @param file a <code>String</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToFile(String file) throws IOException
+    {
+        BinaryWriter.writeFile(file, save());
+    }
+
+
+
 
     /**
      * Returns a <code>Color[]</code> containing this <code>Palette</code>'s colors
@@ -237,166 +399,6 @@ public class Palette extends GenericNtrFile
         return result;
     }
 
-    /* BEGIN SECTION: NCLR */
-
-    /**
-     * Parses an NCLR file on disk and returns a <code>Palette</code> representation of it
-     * @param file a <code>File</code> containing a path to an NCLR file on disk
-     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @return a <code>Palette</code> representation of the specified NCLR file
-     */
-    public static Palette fromNclrFile(File file, int bitDepth)
-    {
-        return fromNclrFile(file.getAbsolutePath(), bitDepth);
-    }
-
-    /**
-     * Parses an NCLR file on disk and returns a <code>Palette</code> representation of it
-     * @param file a <code>String</code> containing a path to an NCLR file on disk
-     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @return a <code>Palette</code> representation of the specified NCLR file
-     */
-    public static Palette fromNclrFile(String file, int bitDepth)
-    {
-        return fromNclr(Buffer.readFile(file), bitDepth);
-    }
-
-    /**
-     * Parses an NCLR file and returns a <code>Palette</code> representation of it
-     * @param data a <code>byte[]</code> containing a binary representation of an NCLR file
-     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @return a <code>Palette</code> representation of the provided NCLR file
-     */
-    public static Palette fromNclr(byte[] data, int bitDepth)
-    {
-        MemBuf dataBuf = MemBuf.create(data);
-        MemBuf.MemBufReader reader = dataBuf.reader();
-        int fileSize = dataBuf.writer().getPosition();
-
-        GenericNtrFile tempData = new GenericNtrFile("RLCN", "RPCN");
-        tempData.readGenericNtrHeader(reader);
-
-        // reader position is now 0x10
-
-        //palette data
-        String paletteMagic = reader.readString(4);
-
-        if (!paletteMagic.equals("TTLP")) {
-            throw new RuntimeException("Not a valid NCLR or NCPR file.");
-        }
-
-        if ((fileSize - 0x28) % 2 != 0)
-            throw new RuntimeException(String.format("The file size (%d) is not a multiple of 2.\n", fileSize));
-
-        long paletteSectionSize = reader.readUInt32();
-
-        if (bitDepth == 0)
-        {
-            bitDepth = reader.readUInt16() == 3 ? 4 : 8;  //4bpp if == 3, 8bpp if == 4
-        }
-        else
-        {
-            reader.skip(2);
-        }
-
-        int compNum = reader.readByte();
-        reader.skip(1);
-
-
-        int paletteUnknown1 = reader.readInt();
-        long paletteLength= reader.readUInt32();
-
-        if(paletteLength == 0 || paletteLength > paletteSectionSize)
-            paletteLength= paletteSectionSize - 0x18;
-
-        long colorStartOffset= reader.readUInt32();
-
-        int numColors = 256;
-
-        if (paletteLength / 2 < numColors)
-            numColors = (int) (paletteLength / 2);
-
-        Palette palette = new Palette(numColors);
-        palette.copyValuesFromTemp(tempData);
-        palette.bitDepth = bitDepth;
-        palette.compNum = compNum;
-
-        reader.setPosition(0x18 + colorStartOffset);
-        for (int i = 0; i < paletteLength / 2; i++)
-        {
-            palette.setColor(i, NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte()));
-        }
-
-        if (palette.getColor((int) (paletteLength / 2) - 1).equals(NclrUtils.irColor)) //honestly no clue why this is a thing
-        {
-            palette.ir = true;
-        }
-
-        return palette;
-    }
-
-    /**
-     * Exports an NCLR file to disk from this <code>Palette</code>
-     * @param file a <code>File</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToNclrFile(File file) throws IOException
-    {
-        BinaryWriter.writeFile(file, saveAsNclr());
-    }
-
-    /**
-     * Exports an NCLR file to disk from this <code>Palette</code>
-     * @param file a <code>String</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToNclrFile(String file) throws IOException
-    {
-        BinaryWriter.writeFile(file, saveAsNclr());
-    }
-
-    /**
-     * Generate a <code>byte[]</code> representation of this <code>Palette</code> as an NCLR
-     * @return a <code>byte[]</code>
-     */
-    public byte[] saveAsNclr()
-    {
-        MemBuf dataBuf = MemBuf.create();
-        MemBuf.MemBufWriter writer = dataBuf.writer();
-
-        int numColors = colors.length;
-
-        int size = numColors * 2; // two bytes per color
-        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18) + NTR_HEADER_SIZE;
-
-        writeGenericNtrHeader(writer, extSize, 1);
-
-        // writer position is now 0x10
-
-        writer.write(NclrUtils.palHeader);
-        int storedPos = writer.getPosition();
-
-        writer.setPosition(NTR_HEADER_SIZE + 4);
-        writer.writeInt(extSize - NTR_HEADER_SIZE); // 0x14
-
-        if (bitDepth <= 0)
-            bitDepth = 4;
-
-        writer.writeShort((short) (bitDepth == 4 ? 0x3 : 0x4)); // 0x18
-        writer.writeByte((byte) (compNum)); // 0x1A
-
-        writer.setPosition(NTR_HEADER_SIZE + 0x10);
-        writer.writeInt(size);
-
-        writer.setPosition(storedPos);
-
-        for(Color color : colors) {
-            writer.write(NclrUtils.colorToBGR555(color));
-        }
-
-        return dataBuf.reader().getBuffer();
-    }
-
     private static class NclrUtils {
         protected static final byte[] palHeader = new byte[] {
             0x54, 0x54, 0x4C, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -435,6 +437,7 @@ public class Palette extends GenericNtrFile
         }
     }
 
+
     /* BEGIN SECTION: PNG */
 
     /**
@@ -462,6 +465,37 @@ public class Palette extends GenericNtrFile
     }
 
     /**
+     * Generate a <code>byte[]</code> representation of this <code>Palette</code> as an indexed PNG
+     * @return a <code>byte[]</code>
+     * @throws IOException if an I/O error occurs
+     */
+    public byte[] saveAsIndexedPng() throws IOException
+    {
+        IndexedImage image = new IndexedImage(numColors / 16, 16, bitDepth, this);
+
+        int idx = 0;
+        int row;
+        int col;
+        for (row = 0; row < numColors / 16; row++)
+        {
+            for (col = 0; col < 16; col++)
+            {
+                image.setPixelValue(col, row, idx++);
+            }
+        }
+
+        if (numColors % 16 != 0)
+        {
+            for (col = 0; col < numColors % 16; col++)
+            {
+                image.setPixelValue(col, row, idx++);
+            }
+        }
+
+        return image.saveAsIndexedPng();
+    }
+
+    /**
      * Exports an indexed PNG file to disk from this <code>Palette</code>
      * @param file a <code>File</code> containing the path to the target file on disk
      * @throws IOException if an I/O error occurs
@@ -481,36 +515,7 @@ public class Palette extends GenericNtrFile
         BinaryWriter.writeFile(file, saveAsIndexedPng());
     }
 
-    /**
-     * Generate a <code>byte[]</code> representation of this <code>Palette</code> as an indexed PNG
-     * @return a <code>byte[]</code>
-     * @throws IOException if an I/O error occurs
-     */
-    public byte[] saveAsIndexedPng() throws IOException
-    {
-        IndexedImage image = new IndexedImage(numColors / 16, 16, bitDepth, this);
-
-        int idx = 0;
-        int row;
-        int col;
-        for (row = 0; row < numColors / 16; row++)
-        {
-            for (col = 0; col < 16; col++)
-            {
-                image.setCoordinateValue(col, row, idx++);
-            }
-        }
-
-        if (numColors % 16 != 0)
-        {
-            for (col = 0; col < numColors % 16; col++)
-            {
-                image.setCoordinateValue(col, row, idx++);
-            }
-        }
-
-        return image.saveAsIndexedPng();
-    }
-
     /* END SECTION: PNG */
+
+    public static final Palette defaultPalette = new Palette(256);
 }

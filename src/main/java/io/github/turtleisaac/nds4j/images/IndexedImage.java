@@ -50,11 +50,12 @@ public class IndexedImage extends GenericNtrFile
     private Palette palette;
     /**
      * Based on how an NCER or NSCR is set to read an NCGR file, or how the game is programmed to read an NCGR file,
-     * it may use a specific palette index within the NCLR (palette) file. For example, elements of the opening sequence
+     * it may use a specific palette index within the NCLR (palette) file. <p>
+     * For example, elements of the opening sequence
      * in Pokémon HeartGold share a single NCLR file with multiple 16 color palettes stored consecutively inside it.
      * The tiles within the NSCR used to display them contain the palette index information.
      */
-    private int paletteIdx;
+    private int paletteIdx = 0;
 
     //todo evaluate whether these really need to be final
     private final int height;
@@ -75,21 +76,165 @@ public class IndexedImage extends GenericNtrFile
     boolean update;
 
     /**
-     * Creates an <code>IndexedImage</code> of size 80x80
-     * (this image will default to all pixels with a value of 0)
-     * @param palette a <code>Palette</code> containing the palette of the image
+     * Parses an NCGR file and returns an <code>IndexedImage</code> representation of it
+     * @param data a <code>byte[]</code> containing a binary representation of an NCGR file
+     * @param tilesWidth an <code>int</code> containing a tile width value to enforce (use <code>0</code> if you don't have one)
+     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
+     * @param metatileWidth an <code>int</code> containing a metatile width value to enforce (use <code>0</code> if you don't have one)
+     * @param metatileHeight an <code>int</code> containing a metatile height value to enforce (use <code>0</code> if you don't have one)
+     * @param scanFrontToBack a <code>boolean</code> representing whether (only if this image is scanned) this image should be scanned <b>front-to-back</b> or <b>back-to-front</b>
      */
-    public IndexedImage(Palette palette)
+    public IndexedImage(byte[] data, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
     {
         super("RGCN");
-        height = 80;
-        width = 80;
+        MemBuf dataBuf = MemBuf.create(data);
+        MemBuf.MemBufReader reader = dataBuf.reader();
+        int fileSize = dataBuf.writer().getPosition();
 
-        pixels = new byte[height][width];
-        this.palette = palette;
+        readGenericNtrHeader(reader);
 
-        update = true;
+        this.sopc = this.numBlocks == 2;
+
+        // reader position is now 0x10
+
+        //character data
+        String charMagic = reader.readString(4);
+
+        if (!charMagic.equals("RAHC")) {
+            throw new RuntimeException("Not a valid NCGR file.");
+        }
+
+        long charSectionSize = reader.readUInt32();
+
+        int tilesHeight = reader.readShort(); //0x18
+
+        if (tilesWidth == 0) //0x1A
+        {
+            tilesWidth = reader.readShort();
+            if (tilesWidth < 0)
+                tilesWidth = 1;
+        }
+        else
+        {
+            reader.skip(2);
+        }
+
+        //0x1C
+        if (bitDepth == 0)
+        {
+            bitDepth = reader.readInt() == 3 ? 4 : 8;  //4bpp if == 3, 8bpp if == 4
+        }
+        else
+        {
+            reader.skip(4);
+        }
+
+        this.bitDepth = bitDepth;
+
+        int numColors = 256;
+        if (bitDepth == 4)
+        {
+            numColors = 16;
+        }
+        reader.skip(2);
+
+        this.mappingType = reader.readUInt16(); // 0x22
+
+        boolean scanned = reader.readByte() == 1; // 0x24
+        reader.skip(2);
+
+        this.scanMode = NcgrUtils.ScanMode.getMode(scanned, scanFrontToBack);
+        this.vram = reader.readByte() == 1;
+
+        int tileSize = bitDepth * 8;
+
+        this.numTiles = reader.readInt() / (64 / (8 / bitDepth)); // 0x28
+
+        if (tilesHeight < 0)
+            tilesHeight = (numTiles + tilesWidth - 1) / tilesWidth;
+
+        if (tilesWidth % metatileWidth != 0)
+            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
+
+        if (tilesHeight % metatileHeight != 0)
+            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
+
+        this.height = tilesHeight * 8;
+        this.width = tilesWidth * 8;
+        this.pixels = new byte[this.height][this.width];
+        this.palette = new Palette(numColors);
+        this.metatileHeight = metatileHeight;
+        this.metatileWidth = metatileWidth;
+
+        int metatilesWide = tilesWidth / metatileWidth;
+
+        reader.setPosition(0x30);
+        byte[] imageData = reader.getBuffer();
+
+        if (scanned) // scanned images
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    this.encryptionKey = NcgrUtils.convertFromScanned4Bpp(imageData, this, scanFrontToBack);
+                    break;
+                case 8:
+                    this.encryptionKey = NcgrUtils.convertFromScanned8Bpp(imageData, this, scanFrontToBack);
+                    break;
+            }
+        }
+        else // tiled images
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    NcgrUtils.convertFromTiles4Bpp(imageData, this, numTiles, metatilesWide, metatileWidth, metatileHeight);
+                    break;
+                case 8:
+                    NcgrUtils.convertFromTiles8Bpp(imageData, this, numTiles, metatilesWide, metatileWidth, metatileHeight);
+                    break;
+            }
+        }
+
+        this.update = true;
     }
+
+    /**
+     * Generates an object representation of an NCER file from a file on disk
+     * @param file a <code>File</code> containing the path to a NCGR file on disk
+     * @return an <code>IndexedImage</code> object
+     */
+    public static IndexedImage fromFile(File file, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
+    {
+        return fromFile(file.getAbsolutePath(), tilesWidth, bitDepth, metatileWidth, metatileHeight, scanFrontToBack);
+    }
+
+    /**
+     * Generates an object representation of an NCER file from a file on disk
+     * @param file a <code>String</code> containing the path to a NCGR file on disk
+     * @return an <code>IndexedImage</code> object
+     */
+    public static IndexedImage fromFile(String file, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
+    {
+        return new IndexedImage(Buffer.readFile(file), tilesWidth, bitDepth, metatileWidth, metatileHeight, scanFrontToBack);
+    }
+
+//    /**
+//     * Creates an <code>IndexedImage</code> of size 80x80
+//     * (this image will default to all pixels with a value of 0)
+//     * @param palette a <code>Palette</code> containing the palette of the image
+//     */
+//    public IndexedImage(Palette palette)
+//    {
+//        super("RGCN");
+//        height = 80;
+//        width = 80;
+//
+//        pixels = new byte[height][width];
+//        this.palette = palette;
+//
+//        update = true;
+//    }
 
     /**
      * Creates an <code>IndexedImage</code> with the provided height, width, bit-depth, and palette
@@ -135,17 +280,17 @@ public class IndexedImage extends GenericNtrFile
         update = true;
     }
 
-    private boolean allRowsHaveSameWidth(byte[][] indexGuide)
+    private boolean allRowsHaveSameWidth(byte[][] pixels)
     {
-        if (indexGuide.length == 0)
+        if (pixels.length == 0)
             return false;
-        if (indexGuide.length == 1)
+        if (pixels.length == 1)
             return true;
 
-        int width = indexGuide[0].length;
-        for (int i = 1; i < indexGuide.length; i++)
+        int width = pixels[0].length;
+        for (int i = 1; i < pixels.length; i++)
         {
-            if (indexGuide[i].length != width)
+            if (pixels[i].length != width)
                 return false;
         }
 
@@ -224,6 +369,166 @@ public class IndexedImage extends GenericNtrFile
     }
 
     /**
+     * Generate a <code>byte[]</code> representation of this <code>IndexedImage</code> as an NCGR
+     * @return a <code>byte[]</code>
+     */
+    public byte[] save()
+    {
+        int tileSize = bitDepth * 8;
+
+        if (width % 8 != 0)
+            throw new RuntimeException(String.format("The width in pixels (%d) isn't a multiple of 8.", width));
+
+        if (height % 8 != 0)
+            throw new RuntimeException(String.format("The height in pixels (%d) isn't a multiple of 8.", height));
+
+        int tilesWidth = width / 8;
+        int tilesHeight = height / 8;
+
+        if (tilesWidth % metatileWidth != 0)
+            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
+
+        if (tilesHeight % metatileHeight != 0)
+            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
+
+        int maxNumTiles = tilesWidth * tilesHeight;
+        int numTiles = this.numTiles;
+
+        if (numTiles == 0)
+            numTiles = maxNumTiles;
+        else if (numTiles > maxNumTiles)
+            throw new RuntimeException(String.format("The specified number of tiles (%d) is greater than the maximum possible value (%d).", numTiles, maxNumTiles));
+
+        int bufferSize = numTiles * tileSize;
+        MemBuf pixelsBuf = MemBuf.create();
+        MemBuf.MemBufWriter writer = pixelsBuf.writer();
+
+        int metatilesWide = tilesWidth / metatileWidth;
+
+        if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    writer.write(NcgrUtils.convertToScanned4Bpp(this, bufferSize));
+                    break;
+                case 8:
+                    throw new RuntimeException("8bpp not supported yet.");
+            }
+        }
+        else
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    writer.write(NcgrUtils.convertToTiles4Bpp(this, numTiles, metatilesWide, metatileWidth, metatileHeight));
+                    break;
+                case 8:
+//                    NcgrUtils.ConvertToTiles8Bpp(image->pixels, pixelBuffer, numTiles, metatilesWide, metatileWidth, metatileHeight,
+//                            invertColors);
+                    break;
+            }
+        }
+
+        MemBuf dataBuf = MemBuf.create();
+        writer = dataBuf.writer();
+
+        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x30 : 0x20), sopc ? 2 : 1);
+
+        writer.write(NcgrUtils.charHeader);
+        writer.setPosition(NcgrUtils.charHeaderPos + 8);
+
+        if (mappingType == 0)
+        {
+            writer.writeShort((short) tilesHeight); // 0x18
+            writer.writeShort((short) tilesWidth); // 0x1A
+        }
+        else // if mappingType > 0
+        {
+            writer.writeBytes(0xFF, 0xFF, 0xFF, 0xFF);
+            writer.skip(4);
+            writer.writeByte((byte) 0x10);
+        }
+
+        writer.setPosition(NcgrUtils.charHeaderPos + 12);
+        writer.writeByte((byte) (bitDepth == 4 ? 3 : 4));
+
+        writer.setPosition(NcgrUtils.charHeaderPos + 18);
+        if (mappingType != 0) {
+            short val = 0;
+            switch (mappingType) {
+                case 32:
+                    break;
+                case 64:
+                    val = 0x10;
+                    break;
+                case 128:
+                    val = 0x20;
+                    break;
+                case 256:
+                    val = 0x30;
+                    break;
+                default:
+                    throw new RuntimeException(String.format("Invalid mapping type %d", mappingType));
+            }
+
+            writer.writeShort(val); // 0x22
+        }
+        else
+        {
+            writer.skip(2);
+        }
+
+        writer.writeByte((byte) (scanMode != NcgrUtils.ScanMode.NOT_SCANNED ? 1 : 0)); // 0x24
+        writer.writeByte((byte) (vram ? 1 : 0)); // 0x25
+        writer.skip(2);
+
+        writer.writeInt(bufferSize);
+        writer.setPosition(NcgrUtils.pixelsPos);
+
+        writer.write(pixelsBuf.reader().getBuffer());
+
+        if (sopc)
+        {
+            MemBuf sopcBuf = MemBuf.create(NcgrUtils.sopcBuffer);
+            MemBuf.MemBufWriter sopcWriter = sopcBuf.writer();
+            int endPos = sopcWriter.getPosition();
+
+            sopcWriter.setPosition(12);
+            sopcWriter.writeShort((short) tilesWidth);
+            sopcWriter.writeShort((short) tilesHeight);
+            sopcWriter.setPosition(endPos);
+
+            writer.write(sopcBuf.reader().getBuffer());
+        }
+
+        return dataBuf.reader().getBuffer();
+    }
+
+    /**
+     * Exports an NCGR file to disk from this <code>IndexedImage</code>
+     * @param file a <code>File</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToFile(File file) throws IOException
+    {
+        saveToFile(file.getAbsolutePath());
+    }
+
+    /**
+     * Exports an NCGR file to disk from this <code>IndexedImage</code>
+     * @param file a <code>String</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToFile(String file) throws IOException
+    {
+        BinaryWriter.writeFile(file, save());
+    }
+
+
+
+
+    /**
      * Creates a <code>BufferedImage</code> using this <code>IndexedImage</code>
      * @return a <code>BufferedImage</code> representation of this <code>IndexedImage</code>
      */
@@ -236,7 +541,7 @@ public class IndexedImage extends GenericNtrFile
             {
                 for (int col = 0; col < width; col++)
                 {
-                    storedImage.setRGB(col,row,palette.getColor(getCoordinateValue(col, row)).getRGB());
+                    storedImage.setRGB(col,row,palette.getColor(getPixelValue(col, row), paletteIdx).getRGB());
                 }
             }
             update = false;
@@ -257,7 +562,7 @@ public class IndexedImage extends GenericNtrFile
             for (int col = 0; col < width; col++)
             {
                 if (pixels[row][col] != 0)
-                    ret.setRGB(col,row,palette.getColor(pixels[row][col]).getRGB());
+                    ret.setRGB(col,row,palette.getColor(pixels[row][col], paletteIdx).getRGB());
             }
         }
 
@@ -550,6 +855,32 @@ public class IndexedImage extends GenericNtrFile
         if (!allRowsHaveSameWidth(pixels))
             throw new RuntimeException("Not all rows have the same width");
         this.pixels = pixels;
+        update = true;
+    }
+
+    /**
+     * Gets the palette index specified at coordinate (x,y) in this <code>IndexedImage</code>, where (0,0) is the top-left corner.
+     * <p>NOTE: Was previously named getCoordinateValue()
+     * @param x an <code>int</code> containing the column value
+     * @param y an <code>int</code> containing the row value
+     * @return an <code>int</code>
+     */
+    public int getPixelValue(int x, int y)
+    {
+        return pixels[y][x];
+    }
+
+    /**
+     * Sets the palette index specified at coordinate (x,y) in this <code>IndexedImage</code>, where (0,0) is the top-left corner
+     * <p>NOTE: Was previously named setCoordinateValue()
+     * @param x an <code>int</code> containing the column value
+     * @param y an <code>int</code> containing the row value
+     * @param colorIdx an <code>int</code> containing the color index in the palette
+     */
+    public void setPixelValue(int x, int y, int colorIdx)
+    {
+        pixels[y][x] = (byte) colorIdx;
+        update = true;
     }
 
     /**
@@ -586,28 +917,6 @@ public class IndexedImage extends GenericNtrFile
     public void setScanMode(NcgrUtils.ScanMode scanMode)
     {
         this.scanMode = scanMode;
-    }
-
-    /**
-     * Gets the palette index specified at coordinate (x,y) in this <code>IndexedImage</code>, where (0,0) is the top-left corner
-     * @param x an <code>int</code> containing the column value
-     * @param y an <code>int</code> containing the row value
-     * @return an <code>int</code>
-     */
-    public int getCoordinateValue(int x, int y)
-    {
-        return pixels[y][x];
-    }
-
-    /**
-     * Sets the palette index specified at coordinate (x,y) in this <code>IndexedImage</code>, where (0,0) is the top-left corner
-     * @param x an <code>int</code> containing the column value
-     * @param y an <code>int</code> containing the row value
-     * @param colorIdx an <code>int</code> containing the color index in the palette
-     */
-    public void setCoordinateValue(int x, int y, int colorIdx)
-    {
-        pixels[y][x] = (byte) colorIdx;
     }
 
     /**
@@ -672,6 +981,16 @@ public class IndexedImage extends GenericNtrFile
     public void setSopc(boolean sopc)
     {
         this.sopc = sopc;
+    }
+
+    public int getPaletteIdx()
+    {
+        return paletteIdx;
+    }
+
+    public void setPaletteIdx(int paletteIdx)
+    {
+        this.paletteIdx = paletteIdx;
     }
 
     /**
@@ -774,714 +1093,14 @@ public class IndexedImage extends GenericNtrFile
     }
 
 
-    /* BEGIN SECTION: PNG */
-
-    private static final byte[] imageChunkHeader = new byte[] {0x49,0x48,0x44,0x52}; //IHDR
-    private static final byte[] paletteChunkHeader = new byte[] {0x50,0x4C,0x54,0x45}; //PLTE
-    private static final byte[] dataChunkHeader = new byte[] {0x49,0x44,0x41,0x54}; //IDAT
-    private static final byte[] endChunkHeader = new byte[] {0x49,0x45,0x4E,0x44}; //IEND
-    private static final byte[] pngHeader = new byte[] {(byte) 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A}; //PNG
-
-    // PNG importing code
-
-    /**
-     * Parses an indexed PNG file on disk and creates a <code>IndexedImage</code> representation of it
-     * @param file a <code>File</code> containing the path to an indexed PNG file on disk
-     * @return an <code>IndexedImage</code> containing an exact representation of the original indexed PNG file
-     * @throws IOException if an I/O error occurs
-     * @exception PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
-     */
-    public static IndexedImage fromIndexedPngFile(File file) throws IOException
-    {
-        return fromIndexedPngFile(file.getAbsolutePath());
-    }
-
-    /**
-     * Parses an indexed PNG file on disk and creates a <code>IndexedImage</code> representation of it
-     * If you're interested in how this works, please read the <a href="https://www.w3.org/TR/png/">PNG Technical Specification</a>
-     * @param file a <code>String</code> containing a path to an indexed PNG file on disk
-     * @return an <code>IndexedImage</code> containing an exact representation of the original indexed PNG file
-     * @throws IOException if an I/O error occurs
-     * @exception PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
-     */
-    public static IndexedImage fromIndexedPngFile(String file) throws IOException
-    {
-        byte[] fileContents = Buffer.readFile(file);
-
-        int paletteIdx = 0;
-        int imageDataIdx = 0;
-
-        for (int i = 0; i < fileContents.length - 4; i++)
-        {
-            byte[] thisFour = Arrays.copyOfRange(fileContents,i,i+4);
-
-            if (Arrays.equals(thisFour,paletteChunkHeader))
-            {
-                paletteIdx = i;
-            }
-
-            if (Arrays.equals(thisFour,dataChunkHeader))
-            {
-                imageDataIdx = i;
-            }
-
-            if (Arrays.equals(thisFour,endChunkHeader))
-            {
-                break;
-            }
-        }
-
-        Buffer buffer = new Buffer(file);
-        byte[] first8 = buffer.readBytes(8);
-        if (!Arrays.equals(pngHeader, first8))
-        {
-            throw new PngUtils.PngParseException("\"" + file + "\" is not a PNG file");
-        }
-
-        buffer.skipBytes(8); //jumps to IHDR chunk
-
-        int width = swapEndianness(buffer.readInt());
-        int height = swapEndianness(buffer.readInt());
-
-        int bitDepth = buffer.readByte();
-        int colorType = buffer.readByte();
-        int compressionMethod = buffer.readByte();
-        int filterMethod = buffer.readByte();
-        int interlaceMethod = buffer.readByte();
-
-
-        //todo create enums for these to increase readability
-        if (colorType != 3)
-        {
-            throw new PngUtils.PngParseException("Not an indexed image: " + colorType);
-        }
-
-        if (compressionMethod != 0)
-        {
-            throw new PngUtils.PngParseException("Invalid image compression method: " + compressionMethod);
-        }
-
-        if (filterMethod != 0)
-        {
-            throw new PngUtils.PngParseException("Invalid filter method: " + filterMethod);
-        }
-
-        if (interlaceMethod < 0 || interlaceMethod > 1)
-        {
-            throw new PngUtils.PngParseException("Invalid interlace method: " + interlaceMethod);
-        }
-
-//        System.out.println("Bit Depth: " + bitDepth);
-        ArrayList<Color> colorList = new ArrayList<>();
-        buffer.skipTo(paletteIdx-4);
-
-        int chunkLength = swapEndianness(buffer.readInt());
-        buffer.skipBytes(4);
-
-        for (int i = 0; i < chunkLength/3; i++)
-        {
-            int r = buffer.readByte();
-            r -= r%8;
-
-            int g = buffer.readByte();
-            g -= g%8;
-
-            int b = buffer.readByte();
-            b -= b%8;
-
-            colorList.add(new Color(r,g,b));
-        }
-
-        buffer.skipTo(imageDataIdx-4);
-        chunkLength = swapEndianness(buffer.readInt());
-        buffer.skipBytes(4);
-
-        byte[] imageData = buffer.readBytes(chunkLength);
-        imageData = PngUtils.decompress(imageData);
-
-        Palette palette = new Palette(colorList.toArray(new Color[0]));
-        IndexedImage ret = new IndexedImage(height, width, bitDepth, palette);
-        ret.setPixels(PngUtils.createScanlines(imageData,bitDepth,filterMethod,width,height));
-        ret.bitDepth = bitDepth;
-        ret.scanMode = NcgrUtils.ScanMode.NOT_SCANNED;
-
-        return ret;
-    }
-
-    // PNG exporting code
-
-    /**
-     * Exports an indexed PNG file to disk from this <code>IndexedImage</code>
-     * @param file a <code>File</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToIndexedPngFile(File file) throws IOException
-    {
-        saveToIndexedPngFile(file.getAbsolutePath());
-    }
-
-    /**
-     * Exports an indexed PNG file to disk from this <code>IndexedImage</code>
-     * @param file a <code>String</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToIndexedPngFile(String file) throws IOException
-    {
-        BinaryWriter.writeFile(file, saveAsIndexedPng());
-    }
-
-    /**
-     * Generate a <code>byte[]</code> representation of this <code>IndexedImage</code> as a PNG
-     * @return a <code>byte[]</code>
-     * @throws IOException if an I/O error occurs
-     */
-    public byte[] saveAsIndexedPng() throws IOException
-    {
-        //Image Header Chunk (IHDR)
-        MemBuf imageHeaderBuf = MemBuf.create();
-        MemBuf.MemBufWriter writer = imageHeaderBuf.writer().write(imageChunkHeader);
-
-        if (palette.size() > 16)
-        {
-            bitDepth = 8;
-        }
-        else if (palette.size() > 4)
-        {
-            bitDepth = 4;
-        }
-        else
-        {
-            bitDepth = 2;
-        }
-
-        int colorType = 3;
-        int compressionMethod = 0;
-        int filterMethod = 0;
-        int interlaceMethod = 0;
-
-        writer.writeInt(swapEndianness(width));
-        writer.writeInt(swapEndianness(height));
-        writer.writeBytes(bitDepth,colorType,compressionMethod,filterMethod,interlaceMethod);
-
-        //Palette Chunk (PLTE)
-        MemBuf paletteBuf = MemBuf.create();
-        writer = paletteBuf.writer().write(paletteChunkHeader);
-
-        for (Color c : palette.getColors())
-        {
-            writer.writeBytes(c.getRed(),c.getGreen(),c.getBlue());
-        }
-
-        //Image Data Chunk (IDAT)
-        MemBuf dataBuf = MemBuf.create();
-        writer = dataBuf.writer().write(dataChunkHeader);
-
-        byte[] imageData = PngUtils.convertScanlines(pixels,bitDepth,filterMethod);
-        imageData = PngUtils.compress(imageData);
-
-        writer.write(imageData);
-
-        //Image End Chunk (IEND)
-        MemBuf endBuf = MemBuf.create();
-        writer = endBuf.writer();
-
-        writer.write(endChunkHeader);
-
-        //Writing image
-        MemBuf imageBuf = MemBuf.create();
-        MemBuf.MemBufWriter imageWriter = imageBuf.writer();
-
-        imageWriter.write(pngHeader);
-
-        imageWriter.writeInt(swapEndianness(imageHeaderBuf.reader().getBuffer().length-4));
-        imageWriter.write(imageHeaderBuf.reader().getBuffer());
-        imageWriter.writeInt(PngUtils.getCrc32(imageHeaderBuf.reader().getBuffer()));
-
-        imageWriter.writeInt(swapEndianness(paletteBuf.reader().getBuffer().length-4));
-        imageWriter.write(paletteBuf.reader().getBuffer());
-        imageWriter.writeInt(PngUtils.getCrc32(paletteBuf.reader().getBuffer()));
-
-        imageWriter.writeInt(swapEndianness(dataBuf.reader().getBuffer().length-4));
-        imageWriter.write(dataBuf.reader().getBuffer());
-        imageWriter.writeInt(PngUtils.getCrc32(dataBuf.reader().getBuffer()));
-
-        imageWriter.writeInt(swapEndianness(endBuf.reader().getBuffer().length-4));
-        imageWriter.write(endBuf.reader().getBuffer());
-        imageWriter.writeInt(PngUtils.getCrc32(endBuf.reader().getBuffer()));
-
-        return imageBuf.reader().getBuffer();
-    }
-
-    private static class PngUtils {
-        private static byte[] compress(byte[] arr) throws IOException
-        {
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            DeflaterOutputStream deflaterOutputStream = new DeflaterOutputStream(byteArrayOutputStream);
-            deflaterOutputStream.write(arr);
-            deflaterOutputStream.flush();
-            deflaterOutputStream.close();
-
-            return byteArrayOutputStream.toByteArray();
-        }
-
-        private static byte[] convertScanlines(byte[][] table, int bitDepth, int filterMethod)
-        {
-            ArrayList<Byte> retList = new ArrayList<>();
-
-            for (byte[] scanline : table)
-            {
-                if(scanline.length % 2 != 0)
-                    scanline = Arrays.copyOf(scanline,scanline.length+1);
-
-                retList.add((byte) filterMethod);
-
-                for (int x = 0; x < scanline.length; x+= 2)
-                {
-                    switch (bitDepth)
-                    {
-                        case 2:
-                            retList.add((byte) ( ( (scanline[x] << 2) | (scanline[x + 1] & 0x3) ) << 4) );
-                            break;
-
-                        case 4:
-                            retList.add((byte) ( (scanline[x] << 4) | (scanline[x + 1] & 0xf) ) );
-                            break;
-
-                        case 8:
-                            retList.add(scanline[x]);
-                            x -= 1;
-                            break;
-                    }
-                }
-            }
-
-            byte[] ret = new byte[retList.size()];
-
-            for (int x = 0; x < ret.length; x++)
-            {
-                ret[x]= retList.get(x);
-            }
-
-            return ret;
-        }
-
-        private static int getCrc32(byte[] arr)
-        {
-            CRC32 crc32 = new CRC32();
-
-            crc32.reset();
-            crc32.update(arr);
-
-            return swapEndianness((int) crc32.getValue());
-        }
-
-        // PNG importing code
-
-        private static byte[] decompress(byte[] arr) throws IOException
-        {
-            ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(arr);
-            InflaterInputStream inflaterInputStream = new InflaterInputStream(byteArrayInputStream);
-
-            byte[] ret = new byte[0];
-            byte[] buf = new byte[1024];
-            int rlen = -1;
-            while ((rlen = inflaterInputStream.read(buf)) != -1)
-            {
-                int current = ret.length;
-                ret = Arrays.copyOf(ret,ret.length + rlen);
-                System.arraycopy(buf,0,ret,current,rlen);
-            }
-
-            return ret;
-        }
-
-        private static byte[][] createScanlines(byte[] arr, int bitDepth, int filterMethod,int width, int height)
-        {
-            byte[][] ret = new byte[height][width];
-            int numBytes = (int) Math.ceil((double) bitDepth*width/8);
-
-            int idx = 0;
-            for (int i = 0; i < ret.length; i++)
-            {
-                byte[] scanline = Arrays.copyOfRange(arr,idx,idx+numBytes+1);
-//            System.out.println(hexToString(scanline));
-                idx += numBytes+1;
-
-                ArrayList<Byte> byteList = new ArrayList<>();
-
-                if (filterMethod != 0)
-                {
-                    byteList.add(scanline[0]);
-                }
-
-
-                for (byte b : Arrays.copyOfRange(scanline,1,scanline.length))
-                {
-                    switch (bitDepth)
-                    {
-                        case 2:
-                            int section = (b >> 4) & 0xf;
-                            byteList.add((byte) ((section >> 2) & 0x3));
-                            byteList.add((byte) (section & 0x3));
-                            break;
-
-                        case 4:
-                            byteList.add((byte) ((b >> 4) & 0xf));
-                            byteList.add((byte) (b & 0xf));
-                            break;
-
-                        case 8:
-                            byteList.add(b);
-                            break;
-                    }
-                }
-
-
-                scanline = new byte[byteList.size()];
-                for (int x = 0; x < byteList.size(); x++)
-                {
-                    scanline[x] = byteList.get(x);
-                }
-
-                ret[i] = scanline;
-
-                if (ret[i].length > width)
-                {
-                    ret[i] = Arrays.copyOf(ret[i],width);
-                }
-            }
-
-            return ret;
-        }
-
-        private static String hexToString(byte[] arr)
-        {
-            StringBuilder ret = new StringBuilder("[");
-            for (byte b : arr)
-            {
-                String s = Integer.toHexString(b & 0xff);
-                if (s.length() == 1)
-                    s = 0 + s;
-
-                ret.append("0x").append(s).append(",");
-            }
-            ret.deleteCharAt(ret.length()-1);
-            ret.append("]");
-
-            return ret.toString();
-        }
-
-        /**
-         * An unchecked exception to be used when errors occur during the process of parsing a PNG file
-         */
-        public static class PngParseException extends RuntimeException
-        {
-            public PngParseException(String message, Throwable cause)
-            {
-                super(message, cause);
-            }
-
-            public PngParseException(String message)
-            {
-                super(message);
-            }
-
-            public PngParseException(Throwable cause)
-            {
-                super(cause);
-            }
-        }
-    }
-
-    /* END SECTION: PNG */
-
-    /* BEGIN SECTION: NCGR */
-
-    /**
-     * Parses an NCGR file and returns an <code>IndexedImage</code> representation of it
-     * @param data a <code>byte[]</code> containing a binary representation of an NCGR file
-     * @param tilesWidth an <code>int</code> containing a tile width value to enforce (use <code>0</code> if you don't have one)
-     * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @param metatileWidth an <code>int</code> containing a metatile width value to enforce (use <code>0</code> if you don't have one)
-     * @param metatileHeight an <code>int</code> containing a metatile height value to enforce (use <code>0</code> if you don't have one)
-     * @param scanFrontToBack a <code>boolean</code> representing whether (only if this image is scanned) this image should be scanned <b>front-to-back</b> or <b>back-to-front</b>
-     * @return an <code>IndexedImage</code> representation of the provided NCLR file
-     */
-    public static IndexedImage fromNcgr(byte[] data, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
-    {
-        MemBuf dataBuf = MemBuf.create(data);
-        MemBuf.MemBufReader reader = dataBuf.reader();
-        int fileSize = dataBuf.writer().getPosition();
-
-        GenericNtrFile tempData = new GenericNtrFile("RGCN");
-        tempData.readGenericNtrHeader(reader);
-
-        // reader position is now 0x10
-
-        //character data
-        String charMagic = reader.readString(4);
-
-        if (!charMagic.equals("RAHC")) {
-            throw new RuntimeException("Not a valid NCGR file.");
-        }
-
-        long charSectionSize = reader.readUInt32();
-
-        int tilesHeight = reader.readShort(); //0x18
-
-        if (tilesWidth == 0) //0x1A
-        {
-            tilesWidth = reader.readShort();
-            if (tilesWidth < 0)
-                tilesWidth = 1;
-        }
-        else
-        {
-            reader.skip(2);
-        }
-
-        //0x1C
-        if (bitDepth == 0)
-        {
-            bitDepth = reader.readInt() == 3 ? 4 : 8;  //4bpp if == 3, 8bpp if == 4
-        }
-        else
-        {
-            reader.skip(4);
-        }
-
-        int numColors = 256;
-        if (bitDepth == 4)
-        {
-            numColors = 16;
-        }
-        reader.skip(2);
-
-        int mappingType = reader.readUInt16(); // 0x22
-
-        boolean scanned = reader.readByte() == 1; // 0x24
-        boolean vram = reader.readByte() == 1;
-        reader.skip(2);
-        int tileSize = bitDepth * 8;
-
-        int numTiles = reader.readInt() / (64 / (8 / bitDepth)); // 0x28
-
-        if (tilesHeight < 0)
-            tilesHeight = (numTiles + tilesWidth - 1) / tilesWidth;
-
-        if (tilesWidth % metatileWidth != 0)
-            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
-
-        if (tilesHeight % metatileHeight != 0)
-            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
-
-        IndexedImage image = new IndexedImage(tilesHeight * 8, tilesWidth * 8, bitDepth, new Palette(numColors));
-        image.scanMode = NcgrUtils.ScanMode.getMode(scanned, scanFrontToBack);
-        image.metatileHeight = metatileHeight;
-        image.metatileWidth = metatileWidth;
-        image.numTiles = numTiles;
-        image.mappingType = mappingType;
-        image.vram = vram;
-        image.copyValuesFromTemp(tempData);
-        image.sopc = image.numBlocks == 2;
-
-        int metatilesWide = tilesWidth / metatileWidth;
-
-        reader.setPosition(0x30);
-        byte[] imageData = reader.getBuffer();
-
-        int key;
-        if (scanned)
-        {
-            switch (bitDepth)
-            {
-                case 4:
-                    key = NcgrUtils.convertFromScanned4Bpp(imageData, image, tilesWidth * 8, tilesHeight * 8, scanFrontToBack);
-                    image.setEncryptionKey(key);
-                    break;
-                case 8:
-                    key = NcgrUtils.convertFromScanned8Bpp(imageData, image, tilesWidth * 8, tilesHeight * 8, scanFrontToBack);
-                    image.setEncryptionKey(key);
-            }
-        }
-        else
-        {
-            switch (bitDepth)
-            {
-                case 4:
-                    NcgrUtils.convertFromTiles4Bpp(imageData, image, numTiles, metatilesWide, metatileWidth, metatileHeight);
-                    break;
-                case 8:
-                    break;
-            }
-        }
-
-        image.update = true;
-        return image;
-    }
-
-    /**
-     * Exports an NCGR file to disk from this <code>IndexedImage</code>
-     * @param file a <code>File</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToNcgrFile(File file) throws IOException
-    {
-        saveToNcgrFile(file.getAbsolutePath());
-    }
-
-    /**
-     * Exports an NCGR file to disk from this <code>IndexedImage</code>
-     * @param file a <code>String</code> containing the path to the target file on disk
-     * @throws IOException if an I/O error occurs
-     */
-    public void saveToNcgrFile(String file) throws IOException
-    {
-        BinaryWriter.writeFile(file, saveAsNcgr());
-    }
-
-    /**
-     * Generate a <code>byte[]</code> representation of this <code>IndexedImage</code> as an NCGR
-     * @return a <code>byte[]</code>
-     */
-    public byte[] saveAsNcgr()
-    {
-        int tileSize = bitDepth * 8;
-
-        if (width % 8 != 0)
-            throw new RuntimeException(String.format("The width in pixels (%d) isn't a multiple of 8.", width));
-
-        if (height % 8 != 0)
-            throw new RuntimeException(String.format("The height in pixels (%d) isn't a multiple of 8.", height));
-
-        int tilesWidth = width / 8;
-        int tilesHeight = height / 8;
-
-        if (tilesWidth % metatileWidth != 0)
-            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
-
-        if (tilesHeight % metatileHeight != 0)
-            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
-
-        int maxNumTiles = tilesWidth * tilesHeight;
-        int numTiles = this.numTiles;
-
-        if (numTiles == 0)
-            numTiles = maxNumTiles;
-        else if (numTiles > maxNumTiles)
-            throw new RuntimeException(String.format("The specified number of tiles (%d) is greater than the maximum possible value (%d).", numTiles, maxNumTiles));
-
-        int bufferSize = numTiles * tileSize;
-        MemBuf pixelsBuf = MemBuf.create();
-        MemBuf.MemBufWriter writer = pixelsBuf.writer();
-
-        int metatilesWide = tilesWidth / metatileWidth;
-
-        if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
-        {
-            switch (bitDepth)
-            {
-                case 4:
-                    writer.write(NcgrUtils.convertToScanned4Bpp(this, bufferSize));
-                    break;
-                case 8:
-                    throw new RuntimeException("8bpp not supported yet.");
-            }
-        }
-        else
-        {
-            switch (bitDepth)
-            {
-                case 4:
-                    writer.write(NcgrUtils.convertToTiles4Bpp(this, numTiles, metatilesWide, metatileWidth, metatileHeight));
-                    break;
-                case 8:
-//                    NcgrUtils.ConvertToTiles8Bpp(image->pixels, pixelBuffer, numTiles, metatilesWide, metatileWidth, metatileHeight,
-//                            invertColors);
-                    break;
-            }
-        }
-
-        MemBuf dataBuf = MemBuf.create();
-        writer = dataBuf.writer();
-
-        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x30 : 0x20), sopc ? 2 : 1);
-
-        writer.write(NcgrUtils.charHeader);
-        writer.setPosition(NcgrUtils.charHeaderPos + 8);
-
-        if (mappingType == 0)
-        {
-            writer.writeShort((short) tilesHeight); // 0x18
-            writer.writeShort((short) tilesWidth); // 0x1A
-        }
-        else // if mappingType > 0
-        {
-            writer.writeBytes(0xFF, 0xFF, 0xFF, 0xFF);
-            writer.skip(4);
-            writer.writeByte((byte) 0x10);
-        }
-
-        writer.setPosition(NcgrUtils.charHeaderPos + 12);
-        writer.writeByte((byte) (bitDepth == 4 ? 3 : 4));
-
-        writer.setPosition(NcgrUtils.charHeaderPos + 18);
-        if (mappingType != 0) {
-            short val = 0;
-            switch (mappingType) {
-                case 32:
-                    break;
-                case 64:
-                    val = 0x10;
-                    break;
-                case 128:
-                    val = 0x20;
-                    break;
-                case 256:
-                    val = 0x30;
-                    break;
-                default:
-                    throw new RuntimeException(String.format("Invalid mapping type %d", mappingType));
-            }
-
-            writer.writeShort(val); // 0x22
-        }
-        else
-        {
-            writer.skip(2);
-        }
-
-        writer.writeByte((byte) (scanMode != NcgrUtils.ScanMode.NOT_SCANNED ? 1 : 0)); // 0x24
-        writer.writeByte((byte) (vram ? 1 : 0)); // 0x25
-        writer.skip(2);
-
-        writer.writeInt(bufferSize);
-        writer.setPosition(NcgrUtils.pixelsPos);
-
-        writer.write(pixelsBuf.reader().getBuffer());
-
-        if (sopc)
-        {
-            MemBuf sopcBuf = MemBuf.create(NcgrUtils.sopcBuffer);
-            MemBuf.MemBufWriter sopcWriter = sopcBuf.writer();
-            int endPos = sopcWriter.getPosition();
-
-            sopcWriter.setPosition(12);
-            sopcWriter.writeShort((short) tilesWidth);
-            sopcWriter.writeShort((short) tilesHeight);
-            sopcWriter.setPosition(endPos);
-
-            writer.write(sopcBuf.reader().getBuffer());
-        }
-
-        return dataBuf.reader().getBuffer();
-    }
-
     protected static class NcgrUtils {
         // reading ncgr code
 
-        private static int convertFromScanned4Bpp(byte[] src, IndexedImage image, int width, int height, boolean scanFrontToBack)
+        private static int convertFromScanned4Bpp(byte[] src, IndexedImage image, boolean scanFrontToBack)
         {
+            int width = image.width;
+            int height = image.height;
+
             int encValue;
 
             MemBuf dataBuf = MemBuf.create(src);
@@ -1539,8 +1158,11 @@ public class IndexedImage extends GenericNtrFile
             return encValue;
         }
 
-        private static int convertFromScanned8Bpp(byte[] src, IndexedImage image, int width, int height, boolean scanFrontToBack)
+        private static int convertFromScanned8Bpp(byte[] src, IndexedImage image, boolean scanFrontToBack)
         {
+            int width = image.width;
+            int height = image.height;
+
             int encValue;
 
             MemBuf dataBuf = MemBuf.create(src);
@@ -1939,5 +1561,425 @@ public class IndexedImage extends GenericNtrFile
 
     }
 
-    /* END SECTION: NCGR */
+
+    /* BEGIN SECTION: PNG */
+
+    private static final byte[] imageChunkHeader = new byte[] {0x49,0x48,0x44,0x52}; //IHDR
+    private static final byte[] paletteChunkHeader = new byte[] {0x50,0x4C,0x54,0x45}; //PLTE
+    private static final byte[] dataChunkHeader = new byte[] {0x49,0x44,0x41,0x54}; //IDAT
+    private static final byte[] endChunkHeader = new byte[] {0x49,0x45,0x4E,0x44}; //IEND
+    private static final byte[] pngHeader = new byte[] {(byte) 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A}; //PNG
+
+    // PNG importing code
+
+    /**
+     * Parses an indexed PNG file on disk and creates a <code>IndexedImage</code> representation of it
+     * @param file a <code>File</code> containing the path to an indexed PNG file on disk
+     * @return an <code>IndexedImage</code> containing an exact representation of the original indexed PNG file
+     * @throws IOException if an I/O error occurs
+     * @exception PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     */
+    public static IndexedImage fromIndexedPngFile(File file) throws IOException
+    {
+        return fromIndexedPngFile(file.getAbsolutePath());
+    }
+
+    /**
+     * Parses an indexed PNG file on disk and creates a <code>IndexedImage</code> representation of it
+     * If you're interested in how this works, please read the <a href="https://www.w3.org/TR/png/">PNG Technical Specification</a>
+     * @param file a <code>String</code> containing a path to an indexed PNG file on disk
+     * @return an <code>IndexedImage</code> containing an exact representation of the original indexed PNG file
+     * @throws IOException if an I/O error occurs
+     * @exception PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     */
+    public static IndexedImage fromIndexedPngFile(String file) throws IOException
+    {
+        byte[] fileContents = Buffer.readFile(file);
+
+        int paletteIdx = 0;
+        int imageDataIdx = 0;
+
+        for (int i = 0; i < fileContents.length - 4; i++)
+        {
+            byte[] thisFour = Arrays.copyOfRange(fileContents,i,i+4);
+
+            if (Arrays.equals(thisFour,paletteChunkHeader))
+            {
+                paletteIdx = i;
+            }
+
+            if (Arrays.equals(thisFour,dataChunkHeader))
+            {
+                imageDataIdx = i;
+            }
+
+            if (Arrays.equals(thisFour,endChunkHeader))
+            {
+                break;
+            }
+        }
+
+        Buffer buffer = new Buffer(file);
+        byte[] first8 = buffer.readBytes(8);
+        if (!Arrays.equals(pngHeader, first8))
+        {
+            throw new PngUtils.PngParseException("\"" + file + "\" is not a PNG file");
+        }
+
+        buffer.skipBytes(8); //jumps to IHDR chunk
+
+        int width = swapEndianness(buffer.readInt());
+        int height = swapEndianness(buffer.readInt());
+
+        int bitDepth = buffer.readByte();
+        int colorType = buffer.readByte();
+        int compressionMethod = buffer.readByte();
+        int filterMethod = buffer.readByte();
+        int interlaceMethod = buffer.readByte();
+
+
+        //todo create enums for these to increase readability
+        if (colorType != 3)
+        {
+            throw new PngUtils.PngParseException("Not an indexed image: " + colorType);
+        }
+
+        if (compressionMethod != 0)
+        {
+            throw new PngUtils.PngParseException("Invalid image compression method: " + compressionMethod);
+        }
+
+        if (filterMethod != 0)
+        {
+            throw new PngUtils.PngParseException("Invalid filter method: " + filterMethod);
+        }
+
+        if (interlaceMethod < 0 || interlaceMethod > 1)
+        {
+            throw new PngUtils.PngParseException("Invalid interlace method: " + interlaceMethod);
+        }
+
+//        System.out.println("Bit Depth: " + bitDepth);
+        ArrayList<Color> colorList = new ArrayList<>();
+        buffer.skipTo(paletteIdx-4);
+
+        int chunkLength = swapEndianness(buffer.readInt());
+        buffer.skipBytes(4);
+
+        for (int i = 0; i < chunkLength/3; i++)
+        {
+            int r = buffer.readByte();
+            r -= r%8;
+
+            int g = buffer.readByte();
+            g -= g%8;
+
+            int b = buffer.readByte();
+            b -= b%8;
+
+            colorList.add(new Color(r,g,b));
+        }
+
+        buffer.skipTo(imageDataIdx-4);
+        chunkLength = swapEndianness(buffer.readInt());
+        buffer.skipBytes(4);
+
+        byte[] imageData = buffer.readBytes(chunkLength);
+        imageData = PngUtils.decompress(imageData);
+
+        Palette palette = new Palette(colorList.toArray(new Color[0]));
+        IndexedImage ret = new IndexedImage(height, width, bitDepth, palette);
+        ret.setPixels(PngUtils.createScanlines(imageData,bitDepth,filterMethod,width,height));
+        ret.bitDepth = bitDepth;
+        ret.scanMode = NcgrUtils.ScanMode.NOT_SCANNED;
+
+        return ret;
+    }
+
+    // PNG exporting code
+
+    /**
+     * Generate a <code>byte[]</code> representation of this <code>IndexedImage</code> as a PNG
+     * @return a <code>byte[]</code>
+     * @throws IOException if an I/O error occurs
+     */
+    public byte[] saveAsIndexedPng() throws IOException
+    {
+        //Image Header Chunk (IHDR)
+        MemBuf imageHeaderBuf = MemBuf.create();
+        MemBuf.MemBufWriter writer = imageHeaderBuf.writer().write(imageChunkHeader);
+
+        if (palette.size() > 16)
+        {
+            bitDepth = 8;
+        }
+        else if (palette.size() > 4)
+        {
+            bitDepth = 4;
+        }
+        else
+        {
+            bitDepth = 2;
+        }
+
+        int colorType = 3;
+        int compressionMethod = 0;
+        int filterMethod = 0;
+        int interlaceMethod = 0;
+
+        writer.writeInt(swapEndianness(width));
+        writer.writeInt(swapEndianness(height));
+        writer.writeBytes(bitDepth,colorType,compressionMethod,filterMethod,interlaceMethod);
+
+        //Palette Chunk (PLTE)
+        MemBuf paletteBuf = MemBuf.create();
+        writer = paletteBuf.writer().write(paletteChunkHeader);
+
+        for (Color c : palette.getColors())
+        {
+            writer.writeBytes(c.getRed(),c.getGreen(),c.getBlue());
+        }
+
+        //Image Data Chunk (IDAT)
+        MemBuf dataBuf = MemBuf.create();
+        writer = dataBuf.writer().write(dataChunkHeader);
+
+        byte[] imageData = PngUtils.convertScanlines(pixels,bitDepth,filterMethod);
+        imageData = PngUtils.compress(imageData);
+
+        writer.write(imageData);
+
+        //Image End Chunk (IEND)
+        MemBuf endBuf = MemBuf.create();
+        writer = endBuf.writer();
+
+        writer.write(endChunkHeader);
+
+        //Writing image
+        MemBuf imageBuf = MemBuf.create();
+        MemBuf.MemBufWriter imageWriter = imageBuf.writer();
+
+        imageWriter.write(pngHeader);
+
+        imageWriter.writeInt(swapEndianness(imageHeaderBuf.reader().getBuffer().length-4));
+        imageWriter.write(imageHeaderBuf.reader().getBuffer());
+        imageWriter.writeInt(PngUtils.getCrc32(imageHeaderBuf.reader().getBuffer()));
+
+        imageWriter.writeInt(swapEndianness(paletteBuf.reader().getBuffer().length-4));
+        imageWriter.write(paletteBuf.reader().getBuffer());
+        imageWriter.writeInt(PngUtils.getCrc32(paletteBuf.reader().getBuffer()));
+
+        imageWriter.writeInt(swapEndianness(dataBuf.reader().getBuffer().length-4));
+        imageWriter.write(dataBuf.reader().getBuffer());
+        imageWriter.writeInt(PngUtils.getCrc32(dataBuf.reader().getBuffer()));
+
+        imageWriter.writeInt(swapEndianness(endBuf.reader().getBuffer().length-4));
+        imageWriter.write(endBuf.reader().getBuffer());
+        imageWriter.writeInt(PngUtils.getCrc32(endBuf.reader().getBuffer()));
+
+        return imageBuf.reader().getBuffer();
+    }
+
+    /**
+     * Exports an indexed PNG file to disk from this <code>IndexedImage</code>
+     * @param file a <code>File</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToIndexedPngFile(File file) throws IOException
+    {
+        saveToIndexedPngFile(file.getAbsolutePath());
+    }
+
+    /**
+     * Exports an indexed PNG file to disk from this <code>IndexedImage</code>
+     * @param file a <code>String</code> containing the path to the target file on disk
+     * @throws IOException if an I/O error occurs
+     */
+    public void saveToIndexedPngFile(String file) throws IOException
+    {
+        BinaryWriter.writeFile(file, saveAsIndexedPng());
+    }
+
+    private static class PngUtils {
+        private static byte[] compress(byte[] arr) throws IOException
+        {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            DeflaterOutputStream deflaterOutputStream = new DeflaterOutputStream(byteArrayOutputStream);
+            deflaterOutputStream.write(arr);
+            deflaterOutputStream.flush();
+            deflaterOutputStream.close();
+
+            return byteArrayOutputStream.toByteArray();
+        }
+
+        private static byte[] convertScanlines(byte[][] table, int bitDepth, int filterMethod)
+        {
+            ArrayList<Byte> retList = new ArrayList<>();
+
+            for (byte[] scanline : table)
+            {
+                if(scanline.length % 2 != 0)
+                    scanline = Arrays.copyOf(scanline,scanline.length+1);
+
+                retList.add((byte) filterMethod);
+
+                for (int x = 0; x < scanline.length; x+= 2)
+                {
+                    switch (bitDepth)
+                    {
+                        case 2:
+                            retList.add((byte) ( ( (scanline[x] << 2) | (scanline[x + 1] & 0x3) ) << 4) );
+                            break;
+
+                        case 4:
+                            retList.add((byte) ( (scanline[x] << 4) | (scanline[x + 1] & 0xf) ) );
+                            break;
+
+                        case 8:
+                            retList.add(scanline[x]);
+                            x -= 1;
+                            break;
+                    }
+                }
+            }
+
+            byte[] ret = new byte[retList.size()];
+
+            for (int x = 0; x < ret.length; x++)
+            {
+                ret[x]= retList.get(x);
+            }
+
+            return ret;
+        }
+
+        private static int getCrc32(byte[] arr)
+        {
+            CRC32 crc32 = new CRC32();
+
+            crc32.reset();
+            crc32.update(arr);
+
+            return swapEndianness((int) crc32.getValue());
+        }
+
+        // PNG importing code
+
+        private static byte[] decompress(byte[] arr) throws IOException
+        {
+            ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(arr);
+            InflaterInputStream inflaterInputStream = new InflaterInputStream(byteArrayInputStream);
+
+            byte[] ret = new byte[0];
+            byte[] buf = new byte[1024];
+            int rlen = -1;
+            while ((rlen = inflaterInputStream.read(buf)) != -1)
+            {
+                int current = ret.length;
+                ret = Arrays.copyOf(ret,ret.length + rlen);
+                System.arraycopy(buf,0,ret,current,rlen);
+            }
+
+            return ret;
+        }
+
+        private static byte[][] createScanlines(byte[] arr, int bitDepth, int filterMethod,int width, int height)
+        {
+            byte[][] ret = new byte[height][width];
+            int numBytes = (int) Math.ceil((double) bitDepth*width/8);
+
+            int idx = 0;
+            for (int i = 0; i < ret.length; i++)
+            {
+                byte[] scanline = Arrays.copyOfRange(arr,idx,idx+numBytes+1);
+//            System.out.println(hexToString(scanline));
+                idx += numBytes+1;
+
+                ArrayList<Byte> byteList = new ArrayList<>();
+
+                if (filterMethod != 0)
+                {
+                    byteList.add(scanline[0]);
+                }
+
+
+                for (byte b : Arrays.copyOfRange(scanline,1,scanline.length))
+                {
+                    switch (bitDepth)
+                    {
+                        case 2:
+                            int section = (b >> 4) & 0xf;
+                            byteList.add((byte) ((section >> 2) & 0x3));
+                            byteList.add((byte) (section & 0x3));
+                            break;
+
+                        case 4:
+                            byteList.add((byte) ((b >> 4) & 0xf));
+                            byteList.add((byte) (b & 0xf));
+                            break;
+
+                        case 8:
+                            byteList.add(b);
+                            break;
+                    }
+                }
+
+
+                scanline = new byte[byteList.size()];
+                for (int x = 0; x < byteList.size(); x++)
+                {
+                    scanline[x] = byteList.get(x);
+                }
+
+                ret[i] = scanline;
+
+                if (ret[i].length > width)
+                {
+                    ret[i] = Arrays.copyOf(ret[i],width);
+                }
+            }
+
+            return ret;
+        }
+
+        private static String hexToString(byte[] arr)
+        {
+            StringBuilder ret = new StringBuilder("[");
+            for (byte b : arr)
+            {
+                String s = Integer.toHexString(b & 0xff);
+                if (s.length() == 1)
+                    s = 0 + s;
+
+                ret.append("0x").append(s).append(",");
+            }
+            ret.deleteCharAt(ret.length()-1);
+            ret.append("]");
+
+            return ret.toString();
+        }
+
+        /**
+         * An unchecked exception to be used when errors occur during the process of parsing a PNG file
+         */
+        public static class PngParseException extends RuntimeException
+        {
+            public PngParseException(String message, Throwable cause)
+            {
+                super(message, cause);
+            }
+
+            public PngParseException(String message)
+            {
+                super(message);
+            }
+
+            public PngParseException(Throwable cause)
+            {
+                super(cause);
+            }
+        }
+    }
+
+    /* END SECTION: PNG */
 }

@@ -24,12 +24,6 @@ import io.github.turtleisaac.nds4j.NintendoDsRom;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.image.BufferedImage;
-
 public class ImageTest
 {
     // rom
@@ -42,11 +36,11 @@ public class ImageTest
     private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = IndexedImage.fromNcgr(a020.files.get(399), 4, 0, 1, 1, true);
+    private static final IndexedImage tiled = new IndexedImage(a020.files.get(399), 4, 0, 1, 1, true);
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = IndexedImage.fromNcgr(a004.files.get(6), 0, 0, 1, 1, true);
-    private static final IndexedImage scanned2 = IndexedImage.fromNcgr(a004.files.get(6), 0, 0, 1, 1, false);
+    private static final IndexedImage scanned = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, true);
+    private static final IndexedImage scanned2 = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, false);
 
     @Test
     void bitDepth()
@@ -144,7 +138,7 @@ public class ImageTest
     @Test
     void writtenTiledNcgrEqualsOriginal()
     {
-        IndexedImage written = IndexedImage.fromNcgr(tiled.saveAsNcgr(), 4, 0, 1, 1, true);
+        IndexedImage written = new IndexedImage(tiled.save(), 4, 0, 1, 1, true);
         assertThat(tiled)
                 .isEqualTo(written);
     }
@@ -219,7 +213,7 @@ public class ImageTest
     @Test
     void writtenScannedNcgrEqualsOriginal()
     {
-        IndexedImage written = IndexedImage.fromNcgr(scanned.saveAsNcgr(), 0, 0, 1, 1, true);
+        IndexedImage written = new IndexedImage(scanned.save(), 0, 0, 1, 1, true);
         assertThat(scanned)
                 .isEqualTo(written);
     }
@@ -294,7 +288,7 @@ public class ImageTest
     @Test
     void writtenScannedEncryptionKeyMatchesOriginal()
     {
-        IndexedImage written = IndexedImage.fromNcgr(scanned.saveAsNcgr(), 0, 0, 1, 1, true);
+        IndexedImage written = new IndexedImage(scanned.save(), 0, 0, 1, 1, true);
 
         assertThat(scanned.getEncryptionKey())
                 .isEqualTo(written.getEncryptionKey());

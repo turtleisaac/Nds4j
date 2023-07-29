@@ -23,11 +23,7 @@ import io.github.turtleisaac.nds4j.Narc;
 import io.github.turtleisaac.nds4j.NintendoDsRom;
 import org.junit.jupiter.api.Test;
 
-import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.image.BufferedImage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,16 +39,16 @@ public class PaletteTest
     private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
 
     // party icon palette
-    private static final Palette partyPalette = Palette.fromNclr(a020.files.get(0), 0);
+    private static final Palette partyPalette = new Palette(a020.files.get(0), 0);
 
     // bulbasaur battle sprite regular palette
-    private static final Palette bulbasaurPalette = Palette.fromNclr(a004.files.get(10), 0);
+    private static final Palette bulbasaurPalette = new Palette(a004.files.get(10), 0);
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = IndexedImage.fromNcgr(a020.files.get(399), 4, 0, 1, 1, true);
+    private static final IndexedImage tiled = new IndexedImage(a020.files.get(399), 4, 0, 1, 1, true);
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = IndexedImage.fromNcgr(a004.files.get(6), 0, 0, 1, 1, true);
+    private static final IndexedImage scanned = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, true);
 
     @Test
     void length()
@@ -69,16 +65,26 @@ public class PaletteTest
     }
 
     @Test
+    void setColor()
+    {
+        Palette partyPaletteDuplicate = new Palette(a020.files.get(0), 0);
+        partyPaletteDuplicate.setColor(0, Color.MAGENTA);
+
+        assertThat(partyPaletteDuplicate.getColor(0))
+                .isEqualTo(Color.MAGENTA);
+    }
+
+    @Test
     void writtenMultiPaletteEquals()
     {
-        assertThat(Palette.fromNclr(partyPalette.saveAsNclr(), 0))
+        assertThat(new Palette(partyPalette.save(), 0))
                 .isEqualTo(partyPalette);
     }
 
     @Test
     void writtenSinglePaletteEquals()
     {
-        assertThat(Palette.fromNclr(bulbasaurPalette.saveAsNclr(), 0))
+        assertThat(new Palette(bulbasaurPalette.save(), 0))
                 .isEqualTo(bulbasaurPalette);
     }
 }
