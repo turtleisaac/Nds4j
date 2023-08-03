@@ -19,11 +19,9 @@
 
 package io.github.turtleisaac.nds4j.images;
 
-import io.github.turtleisaac.nds4j.framework.Endianness;
 import io.github.turtleisaac.nds4j.framework.GenericNtrFile;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 
@@ -32,225 +30,6 @@ import java.awt.image.BufferedImage;
  */
 public class CellBank extends GenericNtrFile
 {
-    /**
-     * An individual "Cell", or "Bank" within an NCER.
-     * In theory, this represents one assembled image.
-     */
-    public static class Cell {
-        static class CellAttribute {
-            boolean hFlip;
-            boolean vFlip;
-            boolean hvFlip;
-            boolean boundingRectangle;
-            int boundingSphereRadius;
-        }
-
-        /**
-         * An individual OAM within an NCER (CellBank).
-         * This represents the sub-images that make up a Cell/Bank, or more accurately,
-         * the data used to generate them from an NCGR (IndexedImage).
-         */
-        public static class OAM {
-            // attr0
-            int yCoord;
-            boolean rotation;
-            boolean sizeDisable;
-            int mode;
-            boolean mosaic;
-            int colors;
-            int shape;
-
-            // attr1
-            int xCoord;
-            int rotationScaling;
-            int size;
-
-            // attr2
-            int tileOffset;
-            int priority;
-            int palette;
-
-
-            public CellImage getImage(IndexedImage parent, int mappingType, int[] index, int i, int partitionDataOffset)
-            {
-                boolean draw = false;
-                if (index == null)
-                    draw = true;
-                else
-                    for (int j : index)
-                        if (j == i)
-                        {
-                            draw = true;
-                            break;
-                        }
-
-                if (!draw)
-                    return null;
-
-                int tileOffset = this.tileOffset;
-                tileOffset = (tileOffset << (byte) mappingType);
-
-                int num_pal = palette;
-                if (num_pal >= parent.getPalette().getNumColors())
-                    num_pal = 0;
-//                Arrays.fill(cell_img.tilePal, num_pal);
-
-                return new CellImage(parent, getOamSize(this)[0], getOamSize(this)[1], tileOffset, partitionDataOffset);
-            }
-
-            public static int[] getOamSize(OAM oam)
-            {
-                return oamSize[oam.shape][oam.size];
-            }
-
-            // format is (width, height)
-            protected static final int[][][] oamSize = new int[][][] {
-                    { // square
-                            {8, 8}, {16, 16}, {32, 32}, {64, 64}
-                    },
-                    { // horizontal
-                            {16, 8}, {32, 8}, {32, 16}, {64, 32}
-                    },
-                    { // vertical
-                            {8, 16}, {8, 32}, {16, 32}, {32, 64}
-                    }
-            };
-        }
-
-        String name;
-        int tacuData;
-
-        CellAttribute attributes;
-        short maxX;
-        short maxY;
-        short minX;
-        short minY;
-        OAM[] oams;
-
-        private int partitionOffset;
-        private int partitionSize;
-
-        /**
-         * Creates a new Cell for use in a CellBank
-         * @param oamCount an <code>int</code> representing the number of OAMs in the cell
-         */
-        public Cell(int oamCount)
-        {
-            attributes = new CellAttribute();
-            oams = new OAM[oamCount];
-            for (int i = 0; i < oamCount; i++)
-            {
-                oams[i] = new OAM();
-            }
-            name = "";
-            tacuData = -1;
-        }
-
-        public CellImage[] getImages(IndexedImage parent, int mappingType, int partitionOffset)
-        {
-            int[] index = null;
-
-            CellImage[] images = new CellImage[oams.length];
-
-            for (int i = 0; i < oams.length; i++)
-            {
-                OAM oam = oams[i];
-
-                if (oam == null)
-                    break;
-
-                images[i] = oam.getImage(parent, mappingType, index, i, partitionOffset);
-            }
-
-            return images;
-        }
-
-        public String getName()
-        {
-            return name;
-        }
-
-        public void setName(String name)
-        {
-            this.name = name;
-        }
-
-        public int getTacuData()
-        {
-            return tacuData;
-        }
-
-        public void setTacuData(int tacuData)
-        {
-            this.tacuData = tacuData;
-        }
-
-        public CellAttribute getAttributes()
-        {
-            return attributes;
-        }
-
-        public void setAttributes(CellAttribute attributes)
-        {
-            this.attributes = attributes;
-        }
-
-        public short getMaxX()
-        {
-            return maxX;
-        }
-
-        public void setMaxX(short maxX)
-        {
-            this.maxX = maxX;
-        }
-
-        public short getMaxY()
-        {
-            return maxY;
-        }
-
-        public void setMaxY(short maxY)
-        {
-            this.maxY = maxY;
-        }
-
-        public short getMinX()
-        {
-            return minX;
-        }
-
-        public void setMinX(short minX)
-        {
-            this.minX = minX;
-        }
-
-        public short getMinY()
-        {
-            return minY;
-        }
-
-        public void setMinY(short minY)
-        {
-            this.minY = minY;
-        }
-
-        public OAM[] getOams()
-        {
-            return oams;
-        }
-
-        public void setOams(OAM[] oams)
-        {
-            this.oams = oams;
-        }
-
-        public String toString()
-        {
-            return name;
-        }
-    }
-
     private int bankType;
     private int mappingType;
     private boolean vramTransfer;
@@ -664,10 +443,10 @@ public class CellBank extends GenericNtrFile
         this.image = image;
     }
 
-    public CellImage[] getCellImages(int i)
+    public Cell.OAM.OamImage[] getCellImages(int i)
     {
         Cell cell = cells[i];
-        return cell.getImages(image, mappingType, cell.partitionOffset);
+        return cell.getImages();
     }
 
     public BufferedImage getNcerImage(int i)
@@ -679,7 +458,7 @@ public class CellBank extends GenericNtrFile
         BufferedImage output = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = (Graphics2D) output.getGraphics();
 
-        CellImage[] images = cell.getImages(image, mappingType, cell.partitionOffset);
+        Cell.OAM.OamImage[] images = cell.getImages();
         for (int x = 0; x < images.length; x++)
         {
             Cell.OAM oam = cell.oams[x];
@@ -706,309 +485,311 @@ public class CellBank extends GenericNtrFile
         return output;
     }
 
-
     /**
-     * This is the image constructed by the data contained in an OAM, the Cell it is inside of,
-     * and its parent NCGR (IndexedImage).
-     * <p> NOTE: This is basically a shadow of an <code>IndexedImage</code>. It lacks much of the original functionality of
-     * the <code>IndexedImage</code> class, as it isn't really its own image, but a subsection of a specific <code>IndexedImage</code>.
+     * An individual "Cell", or "Bank" within an NCER.
+     * In theory, this represents one assembled image.
      */
-    public static class CellImage extends IndexedImage
-    {
-        private IndexedImage parent;
-        /**
-         * A <code>byte[]</code> representing a 4bpp or 8bpp stream of the parent NCGR (IndexedImage) data.
-         */
-        private byte[] imageData;
-        int startByte;
+    public class Cell {
+        String name;
+        int tacuData;
 
-        public CellImage(IndexedImage image, int width, int height, int tileOffset, int partitionOffset)
+        CellAttribute attributes;
+        short maxX;
+        short maxY;
+        short minX;
+        short minY;
+        OAM[] oams;
+
+        private int partitionOffset;
+        private int partitionSize;
+
+        /**
+         * Creates a new Cell for use in a CellBank
+         * @param oamCount an <code>int</code> representing the number of OAMs in the cell
+         */
+        public Cell(int oamCount)
         {
-            super(height, width, image.getBitDepth(), image.getPalette());
-            int metatilesWide = (image.getWidth() / 8) / image.getMetatileWidth();
-            imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image, image.getNumTiles(), metatilesWide, image.getMetatileWidth(), image.getMetatileHeight());
-            startByte = tileOffset * (image.getBitDepth() * 8) + partitionOffset;
-            NcgrUtils.convertFromTiles4BppAlternate(imageData, this, startByte);
+            attributes = new CellAttribute();
+            oams = new OAM[oamCount];
+            for (int i = 0; i < oamCount; i++)
+            {
+                oams[i] = new OAM();
+            }
+            name = "";
+            tacuData = -1;
         }
 
+        public OAM.OamImage[] getImages()
+        {
+            int[] index = null;
 
+            OAM.OamImage[] images = new OAM.OamImage[oams.length];
 
-        @Override
+            for (int i = 0; i < oams.length; i++)
+            {
+                OAM oam = oams[i];
+
+                if (oam == null)
+                    break;
+
+                images[i] = oam.getImage(i, index);
+            }
+
+            return images;
+        }
+
+        public String getName()
+        {
+            return name;
+        }
+
+        public void setName(String name)
+        {
+            this.name = name;
+        }
+
+        public int getTacuData()
+        {
+            return tacuData;
+        }
+
+        public void setTacuData(int tacuData)
+        {
+            this.tacuData = tacuData;
+        }
+
+        public CellAttribute getAttributes()
+        {
+            return attributes;
+        }
+
+        public void setAttributes(CellAttribute attributes)
+        {
+            this.attributes = attributes;
+        }
+
+        public short getMaxX()
+        {
+            return maxX;
+        }
+
+        public void setMaxX(short maxX)
+        {
+            this.maxX = maxX;
+        }
+
+        public short getMaxY()
+        {
+            return maxY;
+        }
+
+        public void setMaxY(short maxY)
+        {
+            this.maxY = maxY;
+        }
+
+        public short getMinX()
+        {
+            return minX;
+        }
+
+        public void setMinX(short minX)
+        {
+            this.minX = minX;
+        }
+
+        public short getMinY()
+        {
+            return minY;
+        }
+
+        public void setMinY(short minY)
+        {
+            this.minY = minY;
+        }
+
+        public OAM[] getOams()
+        {
+            return oams;
+        }
+
+        public void setOams(OAM[] oams)
+        {
+            this.oams = oams;
+        }
+
         public String toString()
         {
-            return String.format("%dx%d shadow with start byte %d of %s", super.getHeight(), super.getHeight(), startByte, super.toString());
+            return name;
         }
 
-        // The following methods are all not supported by this subclass
-
-        @Override
-        public BufferedImage getResizedImage()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
+        class CellAttribute {
+            boolean hFlip;
+            boolean vFlip;
+            boolean hvFlip;
+            boolean boundingRectangle;
+            int boundingSphereRadius;
         }
 
-        @Override
-        public BufferedImage getResizedImage(int newWidth, int newHeight)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+        /**
+         * An individual OAM within an NCER (CellBank).
+         * This represents the sub-images that make up a Cell/Bank, or more accurately,
+         * the data used to generate them from an NCGR (IndexedImage).
+         */
+        public class OAM {
+            // attr0
+            int yCoord;
+            boolean rotation;
+            boolean sizeDisable;
+            int mode;
+            boolean mosaic;
+            int colors;
+            int shape;
 
-        @Override
-        public IndexedImage indexSelf(JPanel parent)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+            // attr1
+            int xCoord;
+            int rotationScaling;
+            int size;
 
-        @Override
-        public IndexedImage updateColor(int index, Color replacement)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+            // attr2
+            int tileOffset;
+            int priority;
+            int palette;
 
-        @Override
-        public IndexedImage replaceColor(Color toReplace, Color replacement)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+            public OamImage getImage(int i, int[] index)
+            {
+                boolean draw = false;
+                if (index == null)
+                    draw = true;
+                else
+                    for (int j : index)
+                        if (j == i)
+                        {
+                            draw = true;
+                            break;
+                        }
 
-        @Override
-        public IndexedImage replacePalette(Color[] paletteGuide, Color[] newPalette, JPanel parent)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                if (!draw)
+                    return null;
 
-        @Override
-        public IndexedImage alignPalette(Color[] paletteGuide, JPanel parent)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                int num_pal = palette;
+                if (num_pal >= image.getPalette().getNumColors())
+                    num_pal = 0;
+//                Arrays.fill(cell_img.tilePal, num_pal);
 
-        @Override
-        public IndexedImage createCopyWithPalette(IndexedImage image)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                return new OamImage();
+            }
 
-        @Override
-        public IndexedImage copyOfSelf()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+            /**
+             * This is a visual representation of a given OAM within its parent NCGR (IndexedImage)
+             */
+            private class OamImage
+            {
+                private IndexedImage cell;
+                int storedWidth = 0;
+                int storedHeight = 0;
+                private boolean update;
 
-        @Override
-        public IndexedImage createCopyWithImage(Color[] palette)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                private OamImage()
+                {
+                    generateImageData();
+                    update = false;
+                }
 
-        @Override
-        public Palette getPalette()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                private void generateImageData()
+                {
+                    if (oamSize[shape][size][0] != storedWidth || oamSize[shape][size][1] != storedHeight)
+                    {
+                        storedHeight = oamSize[shape][size][1];
+                        storedWidth = oamSize[shape][size][0];
+                        cell = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
+                    }
 
-        @Override
-        public void setPalette(Palette palette)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                    int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
+                    int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
+                    byte[] imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image, image.getNumTiles(), chunksWide);
+                    IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, cell, chunksWide, startByte);
+//                    NcgrUtils.convertOffsetToCoordinate(startByte, getWidth() * getHeight(), image, image.getNumTiles(), chunksWide, image.getColsPerChunk(), image.getRowsPerChunk());
+                }
 
-        @Override
-        public int getEncryptionKey()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public BufferedImage getImage()
+                {
+                    if (update)
+                    {
+                        generateImageData();
+                    }
+                    update = false;
+                    return cell.getImage();
+                }
 
-        @Override
-        public void setEncryptionKey(int encryptionKey)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public BufferedImage getTransparentImage()
+                {
+                    if (update)
+                    {
+                        generateImageData();
+                    }
+                    update = false;
+                    return cell.getTransparentImage();
+                }
 
-        @Override
-        public void readGenericNtrHeader(MemBuf.MemBufReader reader)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public byte[][] getPixels()
+                {
+                    return cell.getPixels();
+                }
 
-        @Override
-        public void writeGenericNtrHeader(MemBuf.MemBufWriter writer, long length, int numSections)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public void setPixels(byte[][] pixels)
+                {
+                    cell.setPixels(pixels);
+                    update = true;
+                }
 
-        @Override
-        protected void copyValuesFromTemp(GenericNtrFile file)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public int getPixelValue(int x, int y)
+                {
+                    return cell.getPixelValue(x, y);
+                }
 
-        @Override
-        public Endianness.EndiannessType getEndiannessOfBeginning()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                public void setPixelValue(int x, int y, int colorIdx)
+                {
+                    cell.setPixelValue(x, y, colorIdx);
+                    update = true;
+                }
 
-        @Override
-        public void setEndiannessOfBeginning(Endianness.EndiannessType endiannessOfBeginning)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                @Override
+                public boolean equals(Object o)
+                {
+                    return cell.equals(o);
+                }
 
-        @Override
-        public int getBom()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+                @Override
+                public int hashCode()
+                {
+                    return cell.hashCode();
+                }
 
-        @Override
-        public void setBom(int bom)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
+                @Override
+                public String toString()
+                {
+                    return String.format("%dx%d shadow with tile offset %d of %s", cell.getHeight(), cell.getWidth(), tileOffset, cell.toString());
+                }
+            }
         }
+    }
 
-        @Override
-        public int getVersion()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+    //format is (width, height)
+    protected static final int[][][] oamSize = new int[][][] {
+            { // square
+                    {8, 8}, {16, 16}, {32, 32}, {64, 64}
+            },
+            { // horizontal
+                    {16, 8}, {32, 8}, {32, 16}, {64, 32}
+            },
+            { // vertical
+                    {8, 16}, {8, 32}, {16, 32}, {32, 64}
+            }
+    };
 
-        @Override
-        public void setVersion(int version)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public long getFileSize()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setFileSize(long fileSize)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getHeaderSize()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setHeaderSize(int headerSize)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getNumBlocks()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setNumBlocks(int numBlocks)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getBitDepth()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setBitDepth(int bitDepth)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public NcgrUtils.ScanMode getScanMode()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setScanMode(NcgrUtils.ScanMode scanMode)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getMetatileWidth()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setMetatileWidth(int metatileWidth)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getMetatileHeight()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setMetatileHeight(int metatileHeight)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getNumTiles()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setNumTiles(int numTiles)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public int getMappingType()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setMappingType(int mappingType)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public boolean isVram()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setVram(boolean vram)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public boolean hasSopc()
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
-
-        @Override
-        public void setSopc(boolean sopc)
-        {
-            throw new UnsupportedOperationException("This operation is not supported for CellImage objects, as they are merely a shadow of an existing IndexedImage.");
-        }
+    public static int[] getOamSize(Cell.OAM oam)
+    {
+        return oamSize[oam.shape][oam.size];
     }
 }

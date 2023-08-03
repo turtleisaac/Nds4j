@@ -63,8 +63,8 @@ public class IndexedImage extends GenericNtrFile
 
     private int bitDepth;
     private NcgrUtils.ScanMode scanMode;
-    private int metatileWidth = -1;
-    private int metatileHeight = -1;
+    private int colsPerChunk = -1;
+    private int rowsPerChunk = -1;
     private int numTiles;
     private int mappingType;
     private boolean vram;
@@ -80,11 +80,11 @@ public class IndexedImage extends GenericNtrFile
      * @param data a <code>byte[]</code> containing a binary representation of an NCGR file
      * @param tilesWidth an <code>int</code> containing a tile width value to enforce (use <code>0</code> if you don't have one)
      * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @param metatileWidth an <code>int</code> containing a metatile width value to enforce (use <code>0</code> if you don't have one)
-     * @param metatileHeight an <code>int</code> containing a metatile height value to enforce (use <code>0</code> if you don't have one)
+     * @param colsPerChunk an <code>int</code> containing the number of tiles per row (columns per row) for each chunk. (use <code>0</code> if you don't have one)
+     * @param rowsPerChunk an <code>int</code> containing the number of rows per chunk. (use <code>0</code> if you don't have one)
      * @param scanFrontToBack a <code>boolean</code> representing whether (only if this image is scanned) this image should be scanned <b>front-to-back</b> or <b>back-to-front</b>
      */
-    public IndexedImage(byte[] data, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
+    public IndexedImage(byte[] data, int tilesWidth, int bitDepth, int colsPerChunk, int rowsPerChunk, boolean scanFrontToBack)
     {
         super("RGCN");
         MemBuf dataBuf = MemBuf.create(data);
@@ -153,20 +153,20 @@ public class IndexedImage extends GenericNtrFile
         if (tilesHeight < 0)
             tilesHeight = (numTiles + tilesWidth - 1) / tilesWidth;
 
-        if (tilesWidth % metatileWidth != 0)
-            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
+        if (tilesWidth % colsPerChunk != 0)
+            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified columns per chunk (%d)", tilesWidth, colsPerChunk));
 
-        if (tilesHeight % metatileHeight != 0)
-            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
+        if (tilesHeight % rowsPerChunk != 0)
+            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified rows per chunk (%d)", tilesHeight, rowsPerChunk));
 
         this.height = tilesHeight * 8;
         this.width = tilesWidth * 8;
         this.pixels = new byte[this.height][this.width];
-        this.palette = new Palette(numColors);
-        this.metatileHeight = metatileHeight;
-        this.metatileWidth = metatileWidth;
+        this.palette = Palette.defaultPalette;
+        this.rowsPerChunk = rowsPerChunk;
+        this.colsPerChunk = colsPerChunk;
 
-        int metatilesWide = tilesWidth / metatileWidth;
+        int chunksWide = tilesWidth / colsPerChunk;
 
         reader.setPosition(0x30);
         byte[] imageData = reader.getBuffer();
@@ -188,10 +188,10 @@ public class IndexedImage extends GenericNtrFile
             switch (bitDepth)
             {
                 case 4:
-                    NcgrUtils.convertFromTiles4Bpp(imageData, this, numTiles, metatilesWide, metatileWidth, metatileHeight);
+                    NcgrUtils.convertFromTiles4Bpp(imageData, this, chunksWide, 0);
                     break;
                 case 8:
-                    NcgrUtils.convertFromTiles8Bpp(imageData, this, numTiles, metatilesWide, metatileWidth, metatileHeight);
+                    NcgrUtils.convertFromTiles8Bpp(imageData, this, numTiles, chunksWide, colsPerChunk, rowsPerChunk);
                     break;
             }
         }
@@ -204,9 +204,9 @@ public class IndexedImage extends GenericNtrFile
      * @param file a <code>File</code> containing the path to a NCGR file on disk
      * @return an <code>IndexedImage</code> object
      */
-    public static IndexedImage fromFile(File file, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
+    public static IndexedImage fromFile(File file, int tilesWidth, int bitDepth, int colsPerChunk, int rowsPerChunk, boolean scanFrontToBack)
     {
-        return fromFile(file.getAbsolutePath(), tilesWidth, bitDepth, metatileWidth, metatileHeight, scanFrontToBack);
+        return fromFile(file.getAbsolutePath(), tilesWidth, bitDepth, colsPerChunk, rowsPerChunk, scanFrontToBack);
     }
 
     /**
@@ -214,9 +214,9 @@ public class IndexedImage extends GenericNtrFile
      * @param file a <code>String</code> containing the path to a NCGR file on disk
      * @return an <code>IndexedImage</code> object
      */
-    public static IndexedImage fromFile(String file, int tilesWidth, int bitDepth, int metatileWidth, int metatileHeight, boolean scanFrontToBack)
+    public static IndexedImage fromFile(String file, int tilesWidth, int bitDepth, int colsPerChunk, int rowsPerChunk, boolean scanFrontToBack)
     {
-        return new IndexedImage(Buffer.readFile(file), tilesWidth, bitDepth, metatileWidth, metatileHeight, scanFrontToBack);
+        return new IndexedImage(Buffer.readFile(file), tilesWidth, bitDepth, colsPerChunk, rowsPerChunk, scanFrontToBack);
     }
 
 //    /**
@@ -385,11 +385,11 @@ public class IndexedImage extends GenericNtrFile
         int tilesWidth = width / 8;
         int tilesHeight = height / 8;
 
-        if (tilesWidth % metatileWidth != 0)
-            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified metatile width (%d)", tilesWidth, metatileWidth));
+        if (tilesWidth % colsPerChunk != 0)
+            throw new RuntimeException(String.format("The width in tiles (%d) isn't a multiple of the specified columns per chunk (%d)", tilesWidth, colsPerChunk));
 
-        if (tilesHeight % metatileHeight != 0)
-            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified metatile height (%d)", tilesHeight, metatileHeight));
+        if (tilesHeight % rowsPerChunk != 0)
+            throw new RuntimeException(String.format("The height in tiles (%d) isn't a multiple of the specified rows per chunk (%d)", tilesHeight, rowsPerChunk));
 
         int maxNumTiles = tilesWidth * tilesHeight;
         int numTiles = this.numTiles;
@@ -403,7 +403,7 @@ public class IndexedImage extends GenericNtrFile
         MemBuf pixelsBuf = MemBuf.create();
         MemBuf.MemBufWriter writer = pixelsBuf.writer();
 
-        int metatilesWide = tilesWidth / metatileWidth;
+        int chunksWide = tilesWidth / colsPerChunk;
 
         if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
         {
@@ -421,10 +421,10 @@ public class IndexedImage extends GenericNtrFile
             switch (bitDepth)
             {
                 case 4:
-                    writer.write(NcgrUtils.convertToTiles4Bpp(this, numTiles, metatilesWide, metatileWidth, metatileHeight));
+                    writer.write(NcgrUtils.convertToTiles4Bpp(this, numTiles, chunksWide));
                     break;
                 case 8:
-//                    NcgrUtils.ConvertToTiles8Bpp(image->pixels, pixelBuffer, numTiles, metatilesWide, metatileWidth, metatileHeight,
+//                    NcgrUtils.ConvertToTiles8Bpp(image->pixels, pixelBuffer, numTiles, chunksWide, colsPerChunk, rowsPerChunk,
 //                            invertColors);
                     break;
             }
@@ -920,27 +920,27 @@ public class IndexedImage extends GenericNtrFile
     }
 
     /**
-     * Get the metatile width of this image
-     * @return an <code>int</code>, or <code>-1</code>
+     * Get the columns per chunk for this image
+     * @return an <code>int</code>
      */
-    public int getMetatileWidth()
+    public int getColsPerChunk()
     {
-        return metatileWidth;
+        return colsPerChunk;
     }
 
-    public void setMetatileWidth(int metatileWidth)
+    public void setColsPerChunk(int colsPerChunk)
     {
-        this.metatileWidth = metatileWidth;
+        this.colsPerChunk = colsPerChunk;
     }
 
-    public int getMetatileHeight()
+    public int getRowsPerChunk()
     {
-        return metatileHeight;
+        return rowsPerChunk;
     }
 
-    public void setMetatileHeight(int metatileHeight)
+    public void setRowsPerChunk(int rowsPerChunk)
     {
-        this.metatileHeight = metatileHeight;
+        this.rowsPerChunk = rowsPerChunk;
     }
 
     public int getNumTiles()
@@ -1039,13 +1039,13 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        return bitDepth == image.bitDepth && metatileWidth == image.metatileWidth && metatileHeight == image.metatileHeight && numTiles == image.numTiles && mappingType == image.mappingType && vram == image.vram && encryptionKey == image.encryptionKey && sopc == image.sopc && scanMode == image.scanMode;
+        return bitDepth == image.bitDepth && colsPerChunk == image.colsPerChunk && rowsPerChunk == image.rowsPerChunk && numTiles == image.numTiles && mappingType == image.mappingType && vram == image.vram && encryptionKey == image.encryptionKey && sopc == image.sopc && scanMode == image.scanMode;
     }
 
     @Override
     public int hashCode()
     {
-        int result = Objects.hash(palette, height, width, bitDepth, scanMode, metatileWidth, metatileHeight, numTiles, mappingType, vram, encryptionKey, sopc);
+        int result = Objects.hash(palette, height, width, bitDepth, scanMode, colsPerChunk, rowsPerChunk, numTiles, mappingType, vram, encryptionKey, sopc);
         result = 31 * result + Arrays.hashCode(pixels);
         return result;
     }
@@ -1218,79 +1218,99 @@ public class IndexedImage extends GenericNtrFile
             return encValue;
         }
 
-        private static class MetatileManager {
-            int subTileX = 0;
-            int subTileY = 0;
-            int metatileX = 0;
-            int metatileY = 0;
+        private static class ChunkManager
+        {
+            int tilesSoFar = 0;
+            int rowsSoFar = 0;
+            int chunkStartX = 0;
+            int chunkStartY = 0;
 
-            MetatileManager() {}
+            ChunkManager() {}
 
-            void advanceMetatilePosition(int metatilesWide, int metatileWidth, int metatileHeight)
+            void advanceTilePosition(int chunksWide, int colsPerChunk, int rowsPerChunk)
             {
-                subTileX++;
-                if (subTileX == metatileWidth)
+                tilesSoFar++;
+                if (tilesSoFar == colsPerChunk)
                 {
-                    subTileX = 0;
-                    subTileY++;
-                    if (subTileY == metatileHeight)
+                    tilesSoFar = 0;
+                    rowsSoFar++;
+                    if (rowsSoFar == rowsPerChunk)
                     {
-                        subTileY = 0;
-                        metatileX++;
-                        if (metatileX == metatilesWide)
+                        rowsSoFar = 0;
+                        chunkStartX++;
+                        if (chunkStartX == chunksWide)
                         {
-                            metatileX = 0;
-                            metatileY++;
+                            chunkStartX = 0;
+                            chunkStartY++;
                         }
                     }
                 }
             }
         }
 
-        private static void convertFromTiles4Bpp(byte[] src, IndexedImage image, int numTiles, int metatilesWide, int metatileWidth, int metatileHeight)
+        protected static void convertFromTiles4Bpp(byte[] src, IndexedImage image, int chunksWide, int startOffset)
         {
-            MetatileManager metatileManager = new MetatileManager();
-            int pitch = (metatilesWide * metatileWidth) * 4;
+            if (startOffset != 0)
+            {
+                byte[] newTiles = new byte[src.length - startOffset];
+                System.arraycopy(src, startOffset, newTiles, 0, newTiles.length);
+                src = newTiles;
+            }
 
-            byte[] dest = new byte[image.height * image.width];
+            ChunkManager chunkManager = new ChunkManager();
+            int pitch = (chunksWide * image.colsPerChunk) * 4;
+
+//            image.palette.setColor(127, Color.MAGENTA);
+//            for (int row = 0; row < image.getHeight(); row++)
+//            {
+//                for (int col = 0; col < image.getWidth(); col++)
+//                {
+//                    image.setPixelValue(col, row, 127);
+//                }
+//            }
+//
+//            for (int i = 0; i < 127; i++)
+//            {
+//                image.palette.setColor(i, new Color((int) (Math.random() * 255), (int) (Math.random() * 255), (int) (Math.random() * 255)));
+//            }
+
+//            prepareImageTest(image);
+
             int idx = 0;
-            for (int i = 0; i < numTiles; i++)
+            for (int i = 0; i < image.numTiles; i++)
             {
                 for (int j = 0; j < 8; j++)
                 {
-                    int destY = (metatileManager.metatileY * metatileHeight + metatileManager.subTileY) * 8 + j;
-
+                    int idxComponentY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
                     for (int k = 0; k < 4; k++)
                     {
-                        int destX = (metatileManager.metatileX * metatileWidth + metatileManager.subTileX) * 4 + k;
+                        int idxComponentX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
+
+                        int compositeIdx = 2 * (idxComponentY * pitch + idxComponentX);
+
+                        int destX = compositeIdx % image.getWidth();
+                        int destY = compositeIdx / image.getWidth();
+
                         byte srcPixelPair = src[idx++];
                         byte leftPixel = (byte) (srcPixelPair & 0xF);
                         byte rightPixel = (byte) ((srcPixelPair >> 4) & 0xF);
 
-                        dest[2 * (destY * pitch + destX)] = leftPixel;
-                        dest[2 * (destY * pitch + destX) + 1] = rightPixel;
+//                        image.setPixelValue(destX, destY, i % 127);
+//                        image.setPixelValue(destX + 1, destY, i % 127);
+                        image.setPixelValue(destX, destY, leftPixel);
+                        image.setPixelValue(destX + 1, destY, rightPixel);
+//                        testImage(image);
                     }
                 }
 
-                metatileManager.advanceMetatilePosition(metatilesWide, metatileWidth, metatileHeight);
+                chunkManager.advanceTilePosition(chunksWide, image.colsPerChunk, image.rowsPerChunk);
             }
-
-            idx = 0;
-            byte[][] pixels = new byte[image.height][image.width];
-            for (int row = 0; row < image.height; row++)
-            {
-                for (int col = 0; col < image.width; col++)
-                {
-                    pixels[row][col] = dest[idx++];
-                }
-            }
-            image.setPixels(pixels);
         }
 
-        private static void convertFromTiles8Bpp(byte[] src, IndexedImage image, int numTiles, int metatilesWide, int metatileWidth, int metatileHeight)
+        private static void convertFromTiles8Bpp(byte[] src, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk)
         {
-            MetatileManager metatileManager = new MetatileManager();
-            int pitch = (metatilesWide * metatileWidth) * 4;
+            ChunkManager chunkManager = new ChunkManager();
+            int pitch = (chunksWide * colsPerChunk) * 4;
 
             byte[] dest = new byte[image.height * image.width];
             int idx = 0;
@@ -1298,18 +1318,18 @@ public class IndexedImage extends GenericNtrFile
             {
                 for (int j = 0; j < 8; j++)
                 {
-                    int destY = (metatileManager.metatileY * metatileHeight + metatileManager.subTileY) * 8 + j;
+                    int destY = (chunkManager.chunkStartY * rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
-                    for (int k = 0; k < 4; k++)
+                    for (int k = 0; k < 8; k++)
                     {
-                        int destX = (metatileManager.metatileX * metatileWidth + metatileManager.subTileX) * 4 + k;
+                        int destX = (chunkManager.chunkStartX * colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
                         byte srcPixel = src[idx++];
 
                         dest[destY * pitch + destX] = srcPixel;
                     }
                 }
 
-                metatileManager.advanceMetatilePosition(metatilesWide, metatileWidth, metatileHeight);
+                chunkManager.advanceTilePosition(chunksWide, colsPerChunk, rowsPerChunk);
             }
 
             idx = 0;
@@ -1386,10 +1406,10 @@ public class IndexedImage extends GenericNtrFile
 
         //todo convertToScanned8Bpp()
 
-        protected static byte[] convertToTiles4Bpp(IndexedImage image, int numTiles, int metatilesWide, int metatileWidth, int metatileHeight)
+        protected static byte[] convertToTiles4Bpp(IndexedImage image, int numTiles, int chunksWide)
         {
-            MetatileManager metatileManager = new MetatileManager();
-            int pitch = (metatilesWide * metatileWidth) * 4;
+            ChunkManager chunkManager = new ChunkManager();
+            int pitch = (chunksWide * image.colsPerChunk) * 4;
 
             byte[] src = new byte[image.height * image.width];
             int idx = 0;
@@ -1405,10 +1425,10 @@ public class IndexedImage extends GenericNtrFile
             idx = 0;
             for (int i = 0; i < numTiles; i++) {
                 for (int j = 0; j < 8; j++) {
-                    int srcY = (metatileManager.metatileY * metatileHeight + metatileManager.subTileY) * 8 + j;
+                    int srcY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
                     for (int k = 0; k < 4; k++) {
-                        int srcX = (metatileManager.metatileX * metatileWidth + metatileManager.subTileX) * 4 + k;
+                        int srcX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
                         byte leftPixel = (byte) (src[2 * (srcY * pitch + srcX)] & 0xF);
                         byte rightPixel = (byte) (src[2 * (srcY * pitch + srcX) + 1] & 0xF);
 
@@ -1416,7 +1436,7 @@ public class IndexedImage extends GenericNtrFile
                     }
                 }
 
-                metatileManager.advanceMetatilePosition(metatilesWide, metatileWidth, metatileHeight);
+                chunkManager.advanceTilePosition(chunksWide, image.colsPerChunk, image.rowsPerChunk);
             }
 
             return dest;
@@ -1559,6 +1579,91 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
+        private static JFrame frame;
+        private static JLabel label;
+
+        private static void prepareImageTest(IndexedImage image)
+        {
+            frame = new JFrame("Test");
+            frame.setSize(image.getWidth(), image.getHeight());
+            frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+            label = new JLabel();
+            testImage(image);
+            frame.getContentPane().add(label, BorderLayout.CENTER);
+            frame.setLocationRelativeTo(null);
+            frame.pack();
+            frame.setVisible(true);
+            frame.repaint();
+        }
+
+        protected static void testImage(IndexedImage image)
+        {
+            BufferedImage resizedImage = new BufferedImage(image.getWidth() * 4, image.getHeight() * 4, BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics2D = resizedImage.createGraphics();
+            graphics2D.drawImage(image.getImage(), 0, 0, image.getWidth() * 4, image.getHeight() * 4, null);
+            graphics2D.dispose();
+
+            label.setIcon(new ImageIcon(resizedImage));
+
+            frame.repaint();
+        }
+
+        private static int called = 0;
+        private static Color[] testColors = {Color.MAGENTA, Color.CYAN, Color.RED, Color.YELLOW, Color.PINK, Color.ORANGE};
+
+        protected static void convertOffsetToCoordinate(int startByte, int numPixels, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk)
+        {
+            ChunkManager chunkManager = new ChunkManager();
+            int pitch = (chunksWide * colsPerChunk) * 4;
+
+
+            image.palette.setColor(120 + (called % testColors.length), testColors[(called % testColors.length)]);
+
+            int idx = 0;
+            int numCounted = 0;
+            for (int i = 0; i < numTiles; i++)
+            {
+                for (int j = 0; j < 8; j++)
+                {
+                    int idxComponentY = (chunkManager.chunkStartY * rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int idxComponentX = (chunkManager.chunkStartX * colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
+
+                        int compositeIdx = 2 * (idxComponentY * pitch + idxComponentX);
+
+                        int destX = compositeIdx % image.getWidth();
+                        int destY = compositeIdx / image.getWidth();
+
+                        idx++;
+                        if (idx >= startByte && numCounted < numPixels && called != 0)
+                        {
+                            numCounted += 2;
+                            image.setPixelValue(destX, destY, 120 + (called % testColors.length));
+                            image.setPixelValue(destX + 1, destY, 120 + (called % testColors.length));
+                            testImage(image);
+                            try
+                            {
+                                Thread.sleep(100);
+                            }
+                            catch(InterruptedException e)
+                            {
+                                e.printStackTrace();
+                            }
+                        }
+                        else if (numCounted >= numPixels)
+                        {
+                            called++;
+                            return;
+                        }
+                    }
+                }
+
+                chunkManager.advanceTilePosition(chunksWide, colsPerChunk, rowsPerChunk);
+            }
+
+            called++;
+        }
     }
 
 
