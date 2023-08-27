@@ -46,7 +46,7 @@ import static io.github.turtleisaac.nds4j.framework.Endianness.swapEndianness;
  */
 public class IndexedImage extends GenericNtrFile
 {
-    private byte[][] pixels;
+    private int[][] pixels;
     private Palette palette;
     /**
      * Based on how an NCER or NSCR is set to read an NCGR file, or how the game is programmed to read an NCGR file,
@@ -63,8 +63,8 @@ public class IndexedImage extends GenericNtrFile
 
     private int bitDepth;
     private NcgrUtils.ScanMode scanMode;
-    private int colsPerChunk = -1;
-    private int rowsPerChunk = -1;
+    private int colsPerChunk = 1;
+    private int rowsPerChunk = 1;
     private int numTiles;
     private int mappingType;
     private boolean vram;
@@ -140,6 +140,23 @@ public class IndexedImage extends GenericNtrFile
 
         this.mappingType = reader.readUInt16(); // 0x22
 
+        switch(mappingType) {
+            case 0:
+                mappingType = 32;
+                break;
+            case 0x10:
+                mappingType = 64;
+                break;
+            case 0x20:
+                mappingType = 128;
+                break;
+            case 0x30:
+                mappingType = 256;
+                break;
+            default:
+                throw new RuntimeException(String.format("Invalid mapping type %d", mappingType));
+        }
+
         boolean scanned = reader.readByte() == 1; // 0x24
         reader.skip(2);
 
@@ -161,12 +178,10 @@ public class IndexedImage extends GenericNtrFile
 
         this.height = tilesHeight * 8;
         this.width = tilesWidth * 8;
-        this.pixels = new byte[this.height][this.width];
+        this.pixels = new int[this.height][this.width];
         this.palette = Palette.defaultPalette;
         this.rowsPerChunk = rowsPerChunk;
         this.colsPerChunk = colsPerChunk;
-
-        int chunksWide = tilesWidth / colsPerChunk;
 
         reader.setPosition(0x30);
         byte[] imageData = reader.getBuffer();
@@ -188,10 +203,10 @@ public class IndexedImage extends GenericNtrFile
             switch (bitDepth)
             {
                 case 4:
-                    NcgrUtils.convertFromTiles4Bpp(imageData, this, chunksWide, 0);
+                    NcgrUtils.convertFromTiles4Bpp(imageData, this, 0);
                     break;
                 case 8:
-                    NcgrUtils.convertFromTiles8Bpp(imageData, this, numTiles, chunksWide, colsPerChunk, rowsPerChunk);
+                    NcgrUtils.convertFromTiles8Bpp(imageData, this, 0);
                     break;
             }
         }
@@ -230,7 +245,7 @@ public class IndexedImage extends GenericNtrFile
 //        height = 80;
 //        width = 80;
 //
-//        pixels = new byte[height][width];
+//        pixels = new int[height][width];
 //        this.palette = palette;
 //
 //        update = true;
@@ -238,14 +253,21 @@ public class IndexedImage extends GenericNtrFile
 
     /**
      * Creates an <code>IndexedImage</code> with the provided height, width, bit-depth, and palette
-     * @param height an <code>int</code>
-     * @param width an <code>int</code>
+     * @param height an <code>int</code> which is a multiple of 8
+     * @param width an <code>int</code> which is a multiple of 8
      * @param bitDepth an <code>int</code> with a value of 4 or 8 (defaults to 4 if another value is provided)
      * @param palette a <code>Palette</code> object
      */
     public IndexedImage(int height, int width, int bitDepth, Palette palette)
     {
         super("RGCN");
+
+        if (height % 8 != 0)
+            throw new RuntimeException(String.format("%d was provided for image height, but a multiple of 8 is required.", height));
+
+        if (width % 8 != 0)
+            throw new RuntimeException(String.format("%d was provided for image width, but a multiple of 8 is required.", width));
+
         this.height = height;
         this.width = width;
 
@@ -253,7 +275,9 @@ public class IndexedImage extends GenericNtrFile
             bitDepth = 4;
         this.bitDepth = bitDepth;
 
-        pixels = new byte[height][width];
+        numTiles = (height / 8) * (width / 8);
+
+        pixels = new int[height][width];
         this.palette = palette;
 
         update = true;
@@ -261,26 +285,26 @@ public class IndexedImage extends GenericNtrFile
 
     /**
      * Creates an <code>IndexedImage</code> using a predetermined assignment of color to pixel and the palette itself
-     * @param pixels a <code>byte[][]</code> representing the index in the palette to pull the color from for each pixel in the sprite
+     * @param pixels a <code>int[][]</code> representing the index in the palette to pull the color from for each pixel in the sprite
      * @param palette a <code>Palette</code> containing the colors to be used in the image
-     * @throws ImageException if the provided byte[][] does not contain rows of equal width
+     * @throws ImageException if the provided int[][] does not contain rows of equal width
      */
     @Deprecated
-    public IndexedImage(byte[][] pixels, Palette palette) throws ImageException
+    public IndexedImage(int[][] pixels, Palette palette) throws ImageException
     {
         super("RGCN");
         height = pixels.length;
         if (allRowsHaveSameWidth(pixels))
             width = pixels[0].length;
         else
-            throw new ImageException("The provided byte[][] does not contain rows of equal width");
+            throw new ImageException("The provided int[][] does not contain rows of equal width");
         this.pixels = Arrays.copyOf(pixels, pixels.length);
         this.palette = palette.copyOf();
 
         update = true;
     }
 
-    private boolean allRowsHaveSameWidth(byte[][] pixels)
+    private boolean allRowsHaveSameWidth(int[][] pixels)
     {
         if (pixels.length == 0)
             return false;
@@ -353,13 +377,13 @@ public class IndexedImage extends GenericNtrFile
 
         height = 80;
         width = 80;
-        pixels = new byte[height][width];
+        pixels = new int[height][width];
 
         for (int row = 0; row < height; row++)
         {
             for (int col = 0; col < width; col++)
             {
-                pixels[row][col] = (byte) colorList.indexOf(new Color(bufferedImage.getRGB(col,row)));
+                pixels[row][col] = colorList.indexOf(new Color(bufferedImage.getRGB(col,row)));
             }
         }
 
@@ -403,8 +427,6 @@ public class IndexedImage extends GenericNtrFile
         MemBuf pixelsBuf = MemBuf.create();
         MemBuf.MemBufWriter writer = pixelsBuf.writer();
 
-        int chunksWide = tilesWidth / colsPerChunk;
-
         if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
         {
             switch (bitDepth)
@@ -421,11 +443,10 @@ public class IndexedImage extends GenericNtrFile
             switch (bitDepth)
             {
                 case 4:
-                    writer.write(NcgrUtils.convertToTiles4Bpp(this, numTiles, chunksWide));
+                    writer.write(NcgrUtils.convertToTiles4Bpp(this));
                     break;
                 case 8:
-//                    NcgrUtils.ConvertToTiles8Bpp(image->pixels, pixelBuffer, numTiles, chunksWide, colsPerChunk, rowsPerChunk,
-//                            invertColors);
+                    writer.write(NcgrUtils.convertToTiles8Bpp(this));
                     break;
             }
         }
@@ -671,7 +692,7 @@ public class IndexedImage extends GenericNtrFile
                 for (int col = 0; col < width; col++)
                 {
                     if (pixels[row][col] == i)
-                        pixels[row][col] = (byte) -colorGuideList.indexOf(palette.getColor(i));
+                        pixels[row][col] = -colorGuideList.indexOf(palette.getColor(i));
                 }
             }
         }
@@ -680,7 +701,7 @@ public class IndexedImage extends GenericNtrFile
         {
             for (int col = 0; col < width; col++)
             {
-                pixels[row][col] = (byte) Math.abs(pixels[row][col]);
+                pixels[row][col] = Math.abs(pixels[row][col]);
             }
         }
 
@@ -704,7 +725,7 @@ public class IndexedImage extends GenericNtrFile
                 for (int col = 0; col < width; col++)
                 {
                     if (pixels[row][col] == i)
-                        pixels[row][col] = (byte) -colorGuideList.indexOf(palette.getColor(i));
+                        pixels[row][col] = -colorGuideList.indexOf(palette.getColor(i));
                 }
             }
         }
@@ -713,7 +734,7 @@ public class IndexedImage extends GenericNtrFile
         {
             for (int col = 0; col < width; col++)
             {
-                pixels[row][col] = (byte) Math.abs(pixels[row][col]);
+                pixels[row][col] = Math.abs(pixels[row][col]);
             }
         }
 
@@ -723,58 +744,58 @@ public class IndexedImage extends GenericNtrFile
 
     // TODO figure out what is going on with the following three methods - why did I write these and give them such shitty names
 
-    /**
-     * Creates a copy of the provided image using the palette of the <code>IndexedImage</code> object this method is executed from
-     * @param image a <code>IndexedImage</code> to apply a palette to
-     * @return a <code>IndexedImage</code> identical to the provided one except with a different palette
-     */
-    @Deprecated
-    public IndexedImage createCopyWithPalette(IndexedImage image)
-    {
-        //realistically this should never throw because image.getIndexGuide() was checked when image was created
-        try {
-            return new IndexedImage(image.getPixels(),palette);
-        }
-        catch(ImageException ignored) {
-
-        }
-        return null;
-    }
-
-    /**
-     * Creates a copy of this <code>IndexedImage</code>
-     * @return an <code>IndexedImage</code> identical to this one
-     */
-    @Deprecated
-    public IndexedImage copyOfSelf()
-    {
-        //realistically this should never throw because indexGuide was checked when this was created
-        try {
-            return new IndexedImage(pixels, palette);
-        }
-        catch(ImageException ignored) {
-
-        }
-        return null;
-    }
-
-    /**
-     * Creates a copy of the provided image using the provided palette and the <code>IndexedImage</code> the method is executed from
-     * @param palette a Color[] to apply to the copy of this <code>IndexedImage</code>
-     * @return a <code>IndexedImage</code> with the image of the <code>IndexedImage</code> object this method is executed from but the provided palette applied
-     */
-    @Deprecated
-    public IndexedImage createCopyWithImage(Color[] palette)
-    {
-        //realistically this should never throw because indexGuide was checked when this was created
+//    /**
+//     * Creates a copy of the provided image using the palette of the <code>IndexedImage</code> object this method is executed from
+//     * @param image a <code>IndexedImage</code> to apply a palette to
+//     * @return a <code>IndexedImage</code> identical to the provided one except with a different palette
+//     */
+//    @Deprecated
+//    public IndexedImage createCopyWithPalette(IndexedImage image)
+//    {
+//        //realistically this should never throw because image.getIndexGuide() was checked when image was created
 //        try {
-//            return new IndexedImage(pixels,palette);
+//            return new IndexedImage(image.getPixels(),palette);
 //        }
 //        catch(ImageException ignored) {
 //
 //        }
-        return null;
-    }
+//        return null;
+//    }
+//
+//    /**
+//     * Creates a copy of this <code>IndexedImage</code>
+//     * @return an <code>IndexedImage</code> identical to this one
+//     */
+//    @Deprecated
+//    public IndexedImage copyOfSelf()
+//    {
+//        //realistically this should never throw because indexGuide was checked when this was created
+//        try {
+//            return new IndexedImage(pixels, palette);
+//        }
+//        catch(ImageException ignored) {
+//
+//        }
+//        return null;
+//    }
+//
+//    /**
+//     * Creates a copy of the provided image using the provided palette and the <code>IndexedImage</code> the method is executed from
+//     * @param palette a Color[] to apply to the copy of this <code>IndexedImage</code>
+//     * @return a <code>IndexedImage</code> with the image of the <code>IndexedImage</code> object this method is executed from but the provided palette applied
+//     */
+//    @Deprecated
+//    public IndexedImage createCopyWithImage(Color[] palette)
+//    {
+//        //realistically this should never throw because indexGuide was checked when this was created
+////        try {
+////            return new IndexedImage(pixels,palette);
+////        }
+////        catch(ImageException ignored) {
+////
+////        }
+//        return null;
+//    }
 
     /**
      * Gets the width of this <code>IndexedImage</code>
@@ -837,18 +858,18 @@ public class IndexedImage extends GenericNtrFile
 
     /**
      * Gets the pixels of this <code>IndexedImage</code>
-     * @return a <code>byte[][]</code>
+     * @return a <code>int[][]</code>
      */
-    public byte[][] getPixels()
+    public int[][] getPixels()
     {
         return pixels;
     }
 
     /**
      * Sets the pixels of this <code>IndexedImage</code>
-     * @param pixels a <code>byte[][]</code>
+     * @param pixels a <code>int[][]</code>
      */
-    public void setPixels(byte[][] pixels)
+    public void setPixels(int[][] pixels)
     {
         if (height != pixels.length)
             throw new RuntimeException("Height does not match");
@@ -879,7 +900,9 @@ public class IndexedImage extends GenericNtrFile
      */
     public void setPixelValue(int x, int y, int colorIdx)
     {
-        pixels[y][x] = (byte) colorIdx;
+        if (y >= pixels.length || x >= pixels[y].length)
+            System.out.println("moo");
+        pixels[y][x] = colorIdx;
         update = true;
     }
 
@@ -1004,7 +1027,7 @@ public class IndexedImage extends GenericNtrFile
         if (image1.height != image2.height) //todo revisit this and see if you can make it address this discrepancy
             throw new ImageException("The two images you are trying to composite do not have the same height");
 
-        byte[][] ret = new byte[image1.getHeight()][image1.getWidth() + image2.getWidth()];
+        int[][] ret = new int[image1.getHeight()][image1.getWidth() + image2.getWidth()];
 
         for (int row = 0; row < image1.getHeight(); row++)
         {
@@ -1143,7 +1166,7 @@ public class IndexedImage extends GenericNtrFile
                 arr[i*4+3] = (byte)((data[i] >> 12) & 0xf);
             }
 
-            byte[][] pixelTable= new byte[height][width];
+            int[][] pixelTable= new int[height][width];
             int idx = 0;
             for (int row = 0; row < height; row++)
             {
@@ -1203,7 +1226,7 @@ public class IndexedImage extends GenericNtrFile
                 arr[i*2+1] = (byte) ((data[i] >> 8) & 0xff);
             }
 
-            byte[][] pixelTable= new byte[height][width];
+            int[][] pixelTable= new int[height][width];
             int idx = 0;
             for (int row = 0; row < height; row++)
             {
@@ -1248,7 +1271,7 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        protected static void convertFromTiles4Bpp(byte[] src, IndexedImage image, int chunksWide, int startOffset)
+        protected static void convertFromTiles4Bpp(byte[] src, IndexedImage image, int startOffset)
         {
             if (startOffset != 0)
             {
@@ -1258,6 +1281,7 @@ public class IndexedImage extends GenericNtrFile
             }
 
             ChunkManager chunkManager = new ChunkManager();
+            int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
             int pitch = (chunksWide * image.colsPerChunk) * 4;
 
 //            image.palette.setColor(127, Color.MAGENTA);
@@ -1292,13 +1316,19 @@ public class IndexedImage extends GenericNtrFile
                         int destY = compositeIdx / image.getWidth();
 
                         byte srcPixelPair = src[idx++];
-                        byte leftPixel = (byte) (srcPixelPair & 0xF);
-                        byte rightPixel = (byte) ((srcPixelPair >> 4) & 0xF);
+                        int leftPixel = srcPixelPair & 0xF;
+                        int rightPixel = (srcPixelPair >> 4) & 0xF;
+
+                        if (destX >= image.getWidth() || destY >= image.getHeight())
+                            System.out.println("moo");
 
 //                        image.setPixelValue(destX, destY, i % 127);
 //                        image.setPixelValue(destX + 1, destY, i % 127);
+
                         image.setPixelValue(destX, destY, leftPixel);
                         image.setPixelValue(destX + 1, destY, rightPixel);
+//                        System.out.printf("(%d, %d), (%d, %d)\n", destX, destY, destX + 1, destY);
+
 //                        testImage(image);
                     }
                 }
@@ -1307,41 +1337,41 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        private static void convertFromTiles8Bpp(byte[] src, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk)
+        protected static void convertFromTiles8Bpp(byte[] src, IndexedImage image, int startOffset)
         {
-            ChunkManager chunkManager = new ChunkManager();
-            int pitch = (chunksWide * colsPerChunk) * 4;
+            if (startOffset != 0)
+            {
+                byte[] newTiles = new byte[src.length - startOffset];
+                System.arraycopy(src, startOffset, newTiles, 0, newTiles.length);
+                src = newTiles;
+            }
 
-            byte[] dest = new byte[image.height * image.width];
+            ChunkManager chunkManager = new ChunkManager();
+            int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
+            int pitch = (chunksWide * image.colsPerChunk) * 8;
+
             int idx = 0;
-            for (int i = 0; i < numTiles; i++)
+            for (int i = 0; i < image.numTiles; i++)
             {
                 for (int j = 0; j < 8; j++)
                 {
-                    int destY = (chunkManager.chunkStartY * rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
+                    int idxComponentY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
                     for (int k = 0; k < 8; k++)
                     {
-                        int destX = (chunkManager.chunkStartX * colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
+                        int idxComponentX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 8 + k;
                         byte srcPixel = src[idx++];
 
-                        dest[destY * pitch + destX] = srcPixel;
+                        int compositeIdx = idxComponentY * pitch + idxComponentX;
+                        int destX = compositeIdx % image.getWidth();
+                        int destY = compositeIdx / image.getWidth();
+
+                        image.setPixelValue(destX, destY, srcPixel);
                     }
                 }
 
-                chunkManager.advanceTilePosition(chunksWide, colsPerChunk, rowsPerChunk);
+                chunkManager.advanceTilePosition(chunksWide, image.colsPerChunk, image.rowsPerChunk);
             }
-
-            idx = 0;
-            byte[][] pixels = new byte[image.height][image.width];
-            for (int row = 0; row < image.height; row++)
-            {
-                for (int col = 0; col < image.width; col++)
-                {
-                    pixels[row][col] = dest[idx++];
-                }
-            }
-            image.setPixels(pixels);
         }
 
         // writing ncgr code
@@ -1406,9 +1436,10 @@ public class IndexedImage extends GenericNtrFile
 
         //todo convertToScanned8Bpp()
 
-        protected static byte[] convertToTiles4Bpp(IndexedImage image, int numTiles, int chunksWide)
+        protected static byte[] convertToTiles4Bpp(IndexedImage image)
         {
             ChunkManager chunkManager = new ChunkManager();
+            int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
             int pitch = (chunksWide * image.colsPerChunk) * 4;
 
             byte[] src = new byte[image.height * image.width];
@@ -1417,13 +1448,13 @@ public class IndexedImage extends GenericNtrFile
             {
                 for (int col = 0; col < image.width; col++)
                 {
-                    src[idx++] = image.pixels[row][col];
+                    src[idx++] = (byte) (image.pixels[row][col] & 0xff);
                 }
             }
 
             byte[] dest = new byte[src.length / 2];
             idx = 0;
-            for (int i = 0; i < numTiles; i++) {
+            for (int i = 0; i < image.numTiles; i++) {
                 for (int j = 0; j < 8; j++) {
                     int srcY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
@@ -1442,119 +1473,156 @@ public class IndexedImage extends GenericNtrFile
             return dest;
         }
 
-        protected static void convertFromTiles4BppAlternate(byte[] src, IndexedImage image, int startOffset)
+        protected static byte[] convertToTiles8Bpp(IndexedImage image)
         {
-            if (startOffset != 0)
+            ChunkManager chunkManager = new ChunkManager();
+            int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
+            int pitch = (chunksWide * image.colsPerChunk) * 8;
+
+            byte[] src = new byte[image.height * image.width];
+            int idx = 0;
+            for (int row = 0; row < image.height; row++)
             {
-                byte[] newTiles = new byte[src.length - startOffset];
-                System.arraycopy(src, startOffset, newTiles, 0, newTiles.length);
-                src = newTiles;
+                for (int col = 0; col < image.width; col++)
+                {
+                    src[idx++] = (byte) (image.pixels[row][col] & 0xff);
+                }
             }
 
+            byte[] dest = new byte[src.length];
+            idx = 0;
+            for (int i = 0; i < image.numTiles; i++) {
+                for (int j = 0; j < 8; j++) {
+                    int srcY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
-            int bitDepth = 4;
+                    for (int k = 0; k < 8; k++) {
+                        int srcX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 8 + k;
+                        byte pixel = (byte) (src[srcY * pitch + srcX] & 0xFF);
 
-            byte[] tilePal = new byte[src.length * (8 / bitDepth)];
-//            if (tilesHeight < 8)
-//                tilesHeight = 8;
-            byte[] img_tiles = NcgrUtils.linealToHorizontal(src, image.width, image.height, bitDepth, 8);
-            tilePal = NcgrUtils.linealToHorizontal(tilePal, image.width, image.height, 8, 8);
+                        dest[idx++] = pixel;
+                    }
+                }
 
-//            System.out.println(src.length);
-//            for (int i = 0; i < img_tiles.length; i++)
+                chunkManager.advanceTilePosition(chunksWide, image.colsPerChunk, image.rowsPerChunk);
+            }
+
+            return dest;
+        }
+
+//        protected static void convertFromTiles4BppAlternate(byte[] src, IndexedImage image, int startOffset)
+//        {
+//            if (startOffset != 0)
 //            {
-//                if (img_tiles[i] != 0)
-//                    System.out.println(i);
+//                byte[] newTiles = new byte[src.length - startOffset];
+//                System.arraycopy(src, startOffset, newTiles, 0, newTiles.length);
+//                src = newTiles;
 //            }
-
-            byte[] output = new byte[image.height * image.width];
-
-            byte[][] pixels = new byte[image.height][image.width];
-
-            int pos = 0;
-            for (int row= 0; row < image.height; row++)
-            {
-                for (int col= 0; col < image.width; col++)
-                {
-                    int num_pal = 0;
-                    if(tilePal.length > col + row * image.width)
-                    {
-                        num_pal = tilePal[col + row * image.width];
-                    }
-
-                    if(num_pal >= image.palette.getNumColors())
-                    {
-                        num_pal = 0;
-                    }
-
-                    int colorIdx = getColor(img_tiles, image.palette.getNumColors(), pos++);
-
-//                    output[row * image.width + col] = (byte) colorIdx;
-                    pixels[row][col] = (byte) colorIdx;
-                }
-            }
-
-            image.pixels = pixels;
-            image.update = true;
-        }
-
-        private static byte[] linealToHorizontal(byte[] lineal, int width, int height, int bpp, int tile_size)
-        {
-            byte[] horizontal = new byte[lineal.length];
-            int tile_width = tile_size * bpp / 8;   // Calculate the number of byte per line in the tile
-            // pixels per line * bits per pixel / 8 bits per byte
-            int tilesX = width / tile_size;
-            int tilesY = height / tile_size;
-
-            int pos = 0;
-            for (int ht = 0; ht < tilesY; ht++)
-            {
-                for (int wt = 0; wt < tilesX; wt++)
-                {
-                    // Get the tile data
-                    for (int h = 0; h < tile_size; h++)
-                    {
-                        for (int w = 0; w < tile_width; w++)
-                        {
-                            final int value = (w + h * tile_width * tilesX) + wt * tile_width + ht * tilesX * tile_size * tile_width;
-                            if (value >= lineal.length)
-                                continue;
-                            if (pos >= lineal.length)
-                                continue;
-
-                            horizontal[value] = lineal[pos++];
-                        }
-                    }
-                }
-            }
-
-            return horizontal;
-        }
-
-        private static int getColor(byte[] data, int paletteLength, int pos)
-        {
-            int color = 0;
-            int alpha, index;
-
-            if (data.length <= (pos / 2))
-                return color;
-            int bit4 = data[pos / 2] & 0xff;
-            index = byteToBit4(bit4)[pos % 2];
-            if (paletteLength > index)
-                color = index;
-
-            return color;
-        }
-
-        public static byte[] byteToBit4(int data)
-        {
-            byte[] bit4 = new byte[2];
-
-            bit4[0] = (byte)(data & 0x0F);
-            bit4[1] = (byte)((data & 0xF0) >> 4);
-
-            return bit4;
-        }
+//
+//
+//            int bitDepth = 4;
+//
+//            byte[] tilePal = new byte[src.length * (8 / bitDepth)];
+////            if (tilesHeight < 8)
+////                tilesHeight = 8;
+//            byte[] img_tiles = NcgrUtils.linealToHorizontal(src, image.width, image.height, bitDepth, 8);
+//            tilePal = NcgrUtils.linealToHorizontal(tilePal, image.width, image.height, 8, 8);
+//
+////            System.out.println(src.length);
+////            for (int i = 0; i < img_tiles.length; i++)
+////            {
+////                if (img_tiles[i] != 0)
+////                    System.out.println(i);
+////            }
+//
+//            byte[] output = new byte[image.height * image.width];
+//
+//            int[][] pixels = new int[image.height][image.width];
+//
+//            int pos = 0;
+//            for (int row= 0; row < image.height; row++)
+//            {
+//                for (int col= 0; col < image.width; col++)
+//                {
+//                    int num_pal = 0;
+//                    if(tilePal.length > col + row * image.width)
+//                    {
+//                        num_pal = tilePal[col + row * image.width];
+//                    }
+//
+//                    if(num_pal >= image.palette.getNumColors())
+//                    {
+//                        num_pal = 0;
+//                    }
+//
+//                    int colorIdx = getColor(img_tiles, image.palette.getNumColors(), pos++);
+//
+////                    output[row * image.width + col] = (byte) colorIdx;
+//                    pixels[row][col] = colorIdx;
+//                }
+//            }
+//
+//            image.pixels = pixels;
+//            image.update = true;
+//            called++;
+//        }
+//
+//        private static byte[] linealToHorizontal(byte[] lineal, int width, int height, int bpp, int tile_size)
+//        {
+//            byte[] horizontal = new byte[lineal.length];
+//            int tile_width = tile_size * bpp / 8;   // Calculate the number of byte per line in the tile
+//            // pixels per line * bits per pixel / 8 bits per byte
+//            int tilesX = width / tile_size;
+//            int tilesY = height / tile_size;
+//
+//            int pos = 0;
+//            for (int ht = 0; ht < tilesY; ht++)
+//            {
+//                for (int wt = 0; wt < tilesX; wt++)
+//                {
+//                    // Get the tile data
+//                    for (int h = 0; h < tile_size; h++)
+//                    {
+//                        for (int w = 0; w < tile_width; w++)
+//                        {
+//                            final int value = (w + h * tile_width * tilesX) + wt * tile_width + ht * tilesX * tile_size * tile_width;
+//                            if (value >= lineal.length)
+//                                continue;
+//                            if (pos >= lineal.length)
+//                                continue;
+//
+//                            horizontal[value] = lineal[pos++];
+//                        }
+//                    }
+//                }
+//            }
+//
+//            return horizontal;
+//        }
+//
+//        private static int getColor(byte[] data, int paletteLength, int pos)
+//        {
+//            int color = 0;
+//            int alpha, index;
+//
+//            if (data.length <= (pos / 2))
+//                return color;
+//            int bit4 = data[pos / 2] & 0xff;
+//            index = byteToBit4(bit4)[pos % 2];
+//            if (paletteLength > index)
+//                color = index;
+//
+//            return color;
+//        }
+//
+//        public static byte[] byteToBit4(int data)
+//        {
+//            byte[] bit4 = new byte[2];
+//
+//            bit4[0] = (byte)(data & 0x0F);
+//            bit4[1] = (byte)((data & 0xF0) >> 4);
+//
+//            return bit4;
+//        }
 
         protected enum ScanMode {
             NOT_SCANNED,
@@ -1582,7 +1650,7 @@ public class IndexedImage extends GenericNtrFile
         private static JFrame frame;
         private static JLabel label;
 
-        private static void prepareImageTest(IndexedImage image)
+        public static void prepareImageTest(IndexedImage image)
         {
             frame = new JFrame("Test");
             frame.setSize(image.getWidth(), image.getHeight());
@@ -1609,15 +1677,24 @@ public class IndexedImage extends GenericNtrFile
         }
 
         private static int called = 0;
-        private static Color[] testColors = {Color.MAGENTA, Color.CYAN, Color.RED, Color.YELLOW, Color.PINK, Color.ORANGE};
+        private static Color[] testColors = {Color.MAGENTA, Color.CYAN, Color.RED, Color.YELLOW, Color.PINK, Color.ORANGE, Color.GRAY, Color.GREEN, Color.BLUE, Color.DARK_GRAY,
+                new Color(82, 102, 180),
+                new Color(17, 30, 100),
+                new Color(152, 89, 66),
+                new Color(132, 200, 100),
+                new Color(54, 19, 206),
+                new Color(119, 61, 97)};
 
-        protected static void convertOffsetToCoordinate(int startByte, int numPixels, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk)
+        protected static void convertOffsetToCoordinate(byte[] src, int startByte, int numPixels, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk, IndexedImage cell)
         {
             ChunkManager chunkManager = new ChunkManager();
             int pitch = (chunksWide * colsPerChunk) * 4;
 
 
             image.palette.setColor(120 + (called % testColors.length), testColors[(called % testColors.length)]);
+
+            int startX = 0;
+            int startY = 0;
 
             int idx = 0;
             int numCounted = 0;
@@ -1634,21 +1711,35 @@ public class IndexedImage extends GenericNtrFile
 
                         int destX = compositeIdx % image.getWidth();
                         int destY = compositeIdx / image.getWidth();
-
                         idx++;
-                        if (idx >= startByte && numCounted < numPixels && called != 0)
+
+                        if (idx > startByte && numCounted < numPixels && called != 0)
                         {
-                            numCounted += 2;
-                            image.setPixelValue(destX, destY, 120 + (called % testColors.length));
-                            image.setPixelValue(destX + 1, destY, 120 + (called % testColors.length));
-                            testImage(image);
-                            try
+                            if (numCounted == 0)
                             {
-                                Thread.sleep(100);
+                                startX = destX;
+                                startY = destY;
                             }
-                            catch(InterruptedException e)
+
+                            numCounted += 2;
+
+//                            image.setPixelValue(destX, destY, 120 + (called % testColors.length));
+//                            image.setPixelValue(destX + 1, destY, 120 + (called % testColors.length));
+
+                            cell.setPixelValue(destX - startX, destY - startY, image.getPixelValue(destX, destY));
+                            cell.setPixelValue(destX - startX + 1, destY - startY, image.getPixelValue(destX + 1, destY));
+
+                            testImage(image);
+                            if (called != 0)
                             {
-                                e.printStackTrace();
+                                try
+                                {
+                                    Thread.sleep(100);
+                                }
+                                catch(InterruptedException e)
+                                {
+                                    e.printStackTrace();
+                                }
                             }
                         }
                         else if (numCounted >= numPixels)
@@ -1917,31 +2008,31 @@ public class IndexedImage extends GenericNtrFile
             return byteArrayOutputStream.toByteArray();
         }
 
-        private static byte[] convertScanlines(byte[][] table, int bitDepth, int filterMethod)
+        private static byte[] convertScanlines(int[][] pixels, int bitDepth, int filterMethod)
         {
             ArrayList<Byte> retList = new ArrayList<>();
 
-            for (byte[] scanline : table)
+            for (int[] scanline : pixels)
             {
                 if(scanline.length % 2 != 0)
                     scanline = Arrays.copyOf(scanline,scanline.length+1);
 
                 retList.add((byte) filterMethod);
 
-                for (int x = 0; x < scanline.length; x+= 2)
+                for (int x = 0; x < scanline.length; x += 2)
                 {
                     switch (bitDepth)
                     {
                         case 2:
-                            retList.add((byte) ( ( (scanline[x] << 2) | (scanline[x + 1] & 0x3) ) << 4) );
+                            retList.add((byte) ( ( ((scanline[x] & 0xff) << 2) | ((scanline[x + 1] & 0xff) & 0x3) ) << 4) );
                             break;
 
                         case 4:
-                            retList.add((byte) ( (scanline[x] << 4) | (scanline[x + 1] & 0xf) ) );
+                            retList.add((byte) ( ((scanline[x] & 0xff) << 4) | ((scanline[x + 1] & 0xff) & 0xf) ) );
                             break;
 
                         case 8:
-                            retList.add(scanline[x]);
+                            retList.add((byte) (scanline[x] & 0xff));
                             x -= 1;
                             break;
                     }
@@ -1988,9 +2079,9 @@ public class IndexedImage extends GenericNtrFile
             return ret;
         }
 
-        private static byte[][] createScanlines(byte[] arr, int bitDepth, int filterMethod,int width, int height)
+        private static int[][] createScanlines(byte[] arr, int bitDepth, int filterMethod,int width, int height)
         {
-            byte[][] ret = new byte[height][width];
+            int[][] ret = new int[height][width];
             int numBytes = (int) Math.ceil((double) bitDepth*width/8);
 
             int idx = 0;
@@ -2030,13 +2121,13 @@ public class IndexedImage extends GenericNtrFile
                 }
 
 
-                scanline = new byte[byteList.size()];
+                int[] line = new int[byteList.size()];
                 for (int x = 0; x < byteList.size(); x++)
                 {
-                    scanline[x] = byteList.get(x);
+                    line[x] = byteList.get(x) & 0xff;
                 }
 
-                ret[i] = scanline;
+                ret[i] = line;
 
                 if (ret[i].length > width)
                 {

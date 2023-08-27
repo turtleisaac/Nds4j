@@ -438,8 +438,12 @@ public class CellBank extends GenericNtrFile
         }
     }
 
-    public void setImage(IndexedImage image)
+    public void setParentImage(IndexedImage image)
     {
+        if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED)
+        {
+            throw new RuntimeException("Can't use a scanned image with an NCER");
+        }
         this.image = image;
     }
 
@@ -632,9 +636,19 @@ public class CellBank extends GenericNtrFile
         }
 
         /**
-         * An individual OAM within an NCER (CellBank).
+         * This is a visual representation of a given <code>Cell</code> within its parent NCGR (<code>IndexedImage</code>).
+         */
+        public class CellImage {
+            private IndexedImage cellImage;
+            private boolean update;
+
+
+        }
+
+        /**
+         * An individual OAM within an NCER (<code>CellBank</code>).
          * This represents the sub-images that make up a Cell/Bank, or more accurately,
-         * the data used to generate them from an NCGR (IndexedImage).
+         * the data used to generate them from an NCGR (<code>IndexedImage</code>).
          */
         public class OAM {
             // attr0
@@ -681,11 +695,11 @@ public class CellBank extends GenericNtrFile
             }
 
             /**
-             * This is a visual representation of a given OAM within its parent NCGR (IndexedImage)
+             * This is a visual representation of a given OAM within its parent NCGR (<code>IndexedImage</code>) and <code>Cell</code>
              */
-            private class OamImage
+            public class OamImage
             {
-                private IndexedImage cell;
+                private IndexedImage oamImage;
                 int storedWidth = 0;
                 int storedHeight = 0;
                 private boolean update;
@@ -693,7 +707,6 @@ public class CellBank extends GenericNtrFile
                 private OamImage()
                 {
                     generateImageData();
-                    update = false;
                 }
 
                 private void generateImageData()
@@ -702,14 +715,60 @@ public class CellBank extends GenericNtrFile
                     {
                         storedHeight = oamSize[shape][size][1];
                         storedWidth = oamSize[shape][size][0];
-                        cell = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
+                        oamImage = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
                     }
 
-                    int chunksWide = (image.getWidth() / 8) / image.getColsPerChunk();
                     int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
-                    byte[] imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image, image.getNumTiles(), chunksWide);
-                    IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, cell, chunksWide, startByte);
-//                    NcgrUtils.convertOffsetToCoordinate(startByte, getWidth() * getHeight(), image, image.getNumTiles(), chunksWide, image.getColsPerChunk(), image.getRowsPerChunk());
+                    byte[] imageData;
+
+                    switch (oamImage.getBitDepth())
+                    {
+                        case 4:
+                            imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
+                            IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, oamImage, startByte);
+                            break;
+                        case 8:
+                            imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
+                            IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, oamImage, startByte);
+                            break;
+                    }
+//                    IndexedImage.NcgrUtils.convertOffsetToCoordinate(imageData, startByte, cell.getWidth() * cell.getHeight(), image, image.getNumTiles(), (image.getWidth() / 8) / image.getColsPerChunk(), image.getColsPerChunk(), image.getRowsPerChunk(), cell);
+//                    IndexedImage.NcgrUtils.convertFromTiles4BppAlternate(imageData, cell, startByte);
+                    update = true;
+                }
+
+                public void save()
+                {
+                    oamImage.setBitDepth(image.getBitDepth());
+
+                    byte[] cellData = new byte[0];
+                    byte[] imageData = new byte[0];
+                    switch (image.getBitDepth())
+                    {
+                        case 4:
+                            cellData = IndexedImage.NcgrUtils.convertToTiles4Bpp(oamImage);
+                            imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
+                            break;
+                        case 8:
+                            cellData = IndexedImage.NcgrUtils.convertToTiles8Bpp(oamImage);
+                            imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
+                            break;
+                    }
+
+
+                    int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
+
+                    System.arraycopy(cellData, 0, imageData, startByte, cellData.length);
+
+                    switch (image.getBitDepth())
+                    {
+                        case 4:
+                            IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, image, 0);
+                            break;
+                        case 8:
+                            IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, image, 0);
+                            break;
+                    }
                 }
 
                 public BufferedImage getImage()
@@ -718,8 +777,7 @@ public class CellBank extends GenericNtrFile
                     {
                         generateImageData();
                     }
-                    update = false;
-                    return cell.getImage();
+                    return oamImage.getImage();
                 }
 
                 public BufferedImage getTransparentImage()
@@ -728,48 +786,47 @@ public class CellBank extends GenericNtrFile
                     {
                         generateImageData();
                     }
-                    update = false;
-                    return cell.getTransparentImage();
+                    return oamImage.getTransparentImage();
                 }
 
-                public byte[][] getPixels()
+                public int[][] getPixels()
                 {
-                    return cell.getPixels();
+                    return oamImage.getPixels();
                 }
 
-                public void setPixels(byte[][] pixels)
+                public void setPixels(int[][] pixels)
                 {
-                    cell.setPixels(pixels);
+                    oamImage.setPixels(pixels);
                     update = true;
                 }
 
                 public int getPixelValue(int x, int y)
                 {
-                    return cell.getPixelValue(x, y);
+                    return oamImage.getPixelValue(x, y);
                 }
 
                 public void setPixelValue(int x, int y, int colorIdx)
                 {
-                    cell.setPixelValue(x, y, colorIdx);
+                    oamImage.setPixelValue(x, y, colorIdx);
                     update = true;
                 }
 
                 @Override
                 public boolean equals(Object o)
                 {
-                    return cell.equals(o);
+                    return oamImage.equals(o);
                 }
 
                 @Override
                 public int hashCode()
                 {
-                    return cell.hashCode();
+                    return oamImage.hashCode();
                 }
 
                 @Override
                 public String toString()
                 {
-                    return String.format("%dx%d shadow with tile offset %d of %s", cell.getHeight(), cell.getWidth(), tileOffset, cell.toString());
+                    return String.format("%dx%d shadow with tile offset %d of %s", oamImage.getHeight(), oamImage.getWidth(), tileOffset, oamImage.toString());
                 }
             }
         }
