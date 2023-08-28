@@ -104,7 +104,7 @@ public class ImageTest
     void mappingType()
     {
         assertThat(tiled.getMappingType())
-                .isEqualTo(0);
+                .isEqualTo(32);
     }
 
     @Test

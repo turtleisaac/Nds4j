@@ -459,7 +459,7 @@ public class IndexedImage extends GenericNtrFile
         writer.write(NcgrUtils.charHeader);
         writer.setPosition(NcgrUtils.charHeaderPos + 8);
 
-        if (mappingType == 0)
+        if (mappingType == 32)
         {
             writer.writeShort((short) tilesHeight); // 0x18
             writer.writeShort((short) tilesWidth); // 0x1A
