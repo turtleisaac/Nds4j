@@ -447,6 +447,12 @@ public class CellBank extends GenericNtrFile
         this.image = image;
     }
 
+    public Cell.CellImage getCellImage(int i)
+    {
+        Cell cell = cells[i];
+        return cell.getImage();
+    }
+
     public Cell.OAM.OamImage[] getCellImages(int i)
     {
         Cell cell = cells[i];
@@ -635,14 +641,9 @@ public class CellBank extends GenericNtrFile
             int boundingSphereRadius;
         }
 
-        /**
-         * This is a visual representation of a given <code>Cell</code> within its parent NCGR (<code>IndexedImage</code>).
-         */
-        public class CellImage {
-            private IndexedImage cellImage;
-            private boolean update;
-
-
+        public CellImage getImage()
+        {
+            return new CellImage();
         }
 
         /**
@@ -734,7 +735,7 @@ public class CellBank extends GenericNtrFile
                     }
 //                    IndexedImage.NcgrUtils.convertOffsetToCoordinate(imageData, startByte, cell.getWidth() * cell.getHeight(), image, image.getNumTiles(), (image.getWidth() / 8) / image.getColsPerChunk(), image.getColsPerChunk(), image.getRowsPerChunk(), cell);
 //                    IndexedImage.NcgrUtils.convertFromTiles4BppAlternate(imageData, cell, startByte);
-                    update = true;
+                    update = false;
                 }
 
                 public void save()
@@ -811,6 +812,16 @@ public class CellBank extends GenericNtrFile
                     update = true;
                 }
 
+                public int getHeight()
+                {
+                    return oamImage.getHeight();
+                }
+
+                public int getWidth()
+                {
+                    return oamImage.getWidth();
+                }
+
                 @Override
                 public boolean equals(Object o)
                 {
@@ -828,6 +839,119 @@ public class CellBank extends GenericNtrFile
                 {
                     return String.format("%dx%d shadow with tile offset %d of %s", oamImage.getHeight(), oamImage.getWidth(), tileOffset, oamImage.toString());
                 }
+            }
+        }
+
+        /**
+         * This is a visual representation of a given <code>Cell</code> within its parent NCGR (<code>IndexedImage</code>).
+         */
+        public class CellImage {
+            private IndexedImage cellImage;
+            private boolean update;
+            private OAM.OamImage[] oamImages;
+
+            private CellImage()
+            {
+                generateImageData();
+            }
+
+            private void generateImageData()
+            {
+                cellImage = new IndexedImage(maxY - minY + 1, maxX - minX + 1, image.getBitDepth(), image.getPalette());
+
+                int startX;
+                int startY;
+                oamImages = getImages();
+
+                for (int i = 0; i < oamImages.length; i++)
+                {
+                    Cell.OAM oam = oams[i];
+                    startX = oam.xCoord + cellImage.getWidth() / 2;
+                    startY = oam.yCoord + cellImage.getHeight() / 2;
+
+                    for (int row = 0; row < oamImages[i].getHeight(); row++)
+                    {
+                        for (int col = 0; col < oamImages[i].getWidth(); col++)
+                        {
+                            cellImage.setPixelValue(startX + col, startY + row, oamImages[i].getPixelValue(col, row));
+                        }
+                    }
+                }
+
+                update = false;
+            }
+
+            public void save()
+            {
+                int startX;
+                int startY;
+
+                for (int i = 0; i < oamImages.length; i++)
+                {
+                    Cell.OAM oam = oams[i];
+                    startX = oam.xCoord + cellImage.getWidth() / 2;
+                    startY = oam.yCoord + cellImage.getHeight() / 2;
+
+                    for (int row = 0; row < oamImages[i].getHeight(); row++)
+                    {
+                        for (int col = 0; col < oamImages[i].getWidth(); col++)
+                        {
+                            oamImages[i].setPixelValue(col, row,
+                                    cellImage.getPixelValue(startX + col, startY + row));
+                        }
+                    }
+                    oamImages[i].save();
+                }
+            }
+
+            public BufferedImage getImage()
+            {
+                if (update)
+                {
+                    generateImageData();
+                }
+                return cellImage.getImage();
+            }
+
+            public BufferedImage getTransparentImage()
+            {
+                if (update)
+                {
+                    generateImageData();
+                }
+                return cellImage.getTransparentImage();
+            }
+
+            public int[][] getPixels()
+            {
+                return cellImage.getPixels();
+            }
+
+            public void setPixels(int[][] pixels)
+            {
+                cellImage.setPixels(pixels);
+                update = true;
+            }
+
+            public int getPixelValue(int x, int y)
+            {
+                return cellImage.getPixelValue(x, y);
+            }
+
+            public void setPixelValue(int x, int y, int colorIdx)
+            {
+                cellImage.setPixelValue(x, y, colorIdx);
+                update = true;
+            }
+
+            public int getHeight()
+            {
+                return cellImage.getHeight();
+            }
+
+            public int getWidth()
+            {
+                return cellImage.getWidth();
             }
         }
     }
