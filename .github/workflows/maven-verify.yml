@@ -10,9 +10,18 @@ on:
         required: false
         default: "World"
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
     steps:
+
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install gdown
 
       - name: Update and Install Software
         run: |
@@ -25,7 +34,7 @@ jobs:
           mkdir -p ~/download
           cd ~/download
           touch blank.nds
-          wget -c https://drive.google.com/uc?export=download&id=1nyYSx19n_J19X5jsdw5UwBbOCY-BpugM
+          gdown --id 1nyYSx19n_J19X5jsdw5UwBbOCY-BpugM
           7z x "HeartGold (USA).7z"
           xdelta3 -d -s blank.nds "HeartGold (USA).xdelta" HeartGold.nds
           mv "HeartGold.nds" $GITHUB_WORKSPACE
