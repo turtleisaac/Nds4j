@@ -34,10 +34,10 @@ jobs:
           cd ~/download
           touch blank.nds
           gdown 1nyYSx19n_J19X5jsdw5UwBbOCY-BpugM
-          7z x "HeartGold (USA).7z"
+          7z x "HeartGold (USA).7z" > nul
           xdelta3 -d -s blank.nds "HeartGold (USA).xdelta" HeartGold.nds
           mv "HeartGold.nds" $GITHUB_WORKSPACE
-          cd ~
+          cd $GITHUB_WORKSPACEp
 
       - uses: actions/checkout@v3
       - name: Set up Maven Central Repository
