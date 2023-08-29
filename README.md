@@ -1,7 +1,7 @@
 Nds4j
 =====
 
-[![Maven](https://img.shields.io/badge/maven_central-Current-blue?logo=apachemaven&color=C71A36)](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j/)
+[![Maven](https://maven-badges.herokuapp.com/maven-central/io.github.turtleisaac/Nds4j/badge.svg)](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j/)
 [![javadoc](https://javadoc.io/badge2/io.github.turtleisaac/Nds4j/javadoc.svg?)](https://javadoc.io/doc/io.github.turtleisaac/Nds4j)
 [![License: GNU GPL 3.0](https://img.shields.io/github/license/RoadrunnerWMC/ndspy.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/gpl-3.0)
 
