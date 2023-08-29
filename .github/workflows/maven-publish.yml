@@ -20,14 +20,14 @@ jobs:
           sudo apt -y --allow-downgrades install p7zip-full xdelta3
 
       - name: Setup Repo
-          run: |
-            mkdir -p ~/download
-            cd ~/download
-            touch blank.nds
-            wget -c https://drive.google.com/uc?export=download&id=1nyYSx19n_J19X5jsdw5UwBbOCY-BpugM
-            7z x "HeartGold (USA).7z"
-            xdelta3 -d -s blank.nds "HeartGold (USA).xdelta" HeartGold.nds
-            mv "HeartGold.nds" $GITHUB_WORKSPACE
+        run: |
+          mkdir -p ~/download
+          cd ~/download
+          touch blank.nds
+          wget -c https://drive.google.com/uc?export=download&id=1nyYSx19n_J19X5jsdw5UwBbOCY-BpugM
+          7z x "HeartGold (USA).7z"
+          xdelta3 -d -s blank.nds "HeartGold (USA).xdelta" HeartGold.nds
+          mv "HeartGold.nds" $GITHUB_WORKSPACE
           working-directory: ~
 
       - uses: actions/checkout@v3
