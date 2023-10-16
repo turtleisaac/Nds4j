@@ -1075,5 +1075,93 @@ public class NintendoDsRom
         this.gameCode = gameCode;
     }
 
+    public byte[] getArm9()
+    {
+        return arm9;
+    }
 
+    /**
+     * Sets this <code>NintendoDsRom</code>'s arm9 to the provided value
+     *
+     * @param arm9 a <code>byte[]</code> containing the new arm9 contents
+     */
+    public void setArm9(byte[] arm9)
+    {
+        this.arm9 = arm9;
+    }
+
+    public byte[] getArm7()
+    {
+        return arm7;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s arm7 to the provided value
+     *
+     * @param arm7 a <code>byte[]</code> containing the new arm7 contents
+     */
+    public void setArm7(byte[] arm7)
+    {
+        this.arm7 = arm7;
+    }
+
+    public byte[] getFnt()
+    {
+        return fnt;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s fnt to the provided value
+     *
+     * @param fnt a <code>byte[]</code> containing the new fnt contents
+     */
+    public void setFnt(byte[] fnt)
+    {
+        this.fnt = fnt;
+    }
+
+    public byte[] getFat()
+    {
+        return fat;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s fat to the provided value
+     *
+     * @param fat a <code>byte[]</code> containing the new fat contents
+     */
+    public void setFat(byte[] fat)
+    {
+        this.fat = fat;
+    }
+
+    public byte[] getY9()
+    {
+        return y9;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s y9 to the provided value
+     *
+     * @param y9 a <code>byte[]</code> containing the new y9 contents
+     */
+    public void setY9(byte[] y9)
+    {
+        this.y9 = y9;
+    }
+
+    public byte[] getY7()
+    {
+        return y7;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s y7 to the provided value
+     *
+     * @param y7 a <code>byte[]</code> containing the new y7 contents
+     */
+    public void setY7(byte[] y7)
+    {
+        this.y7 = y7;
+    }
 }
