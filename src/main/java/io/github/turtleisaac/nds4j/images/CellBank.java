@@ -233,6 +233,11 @@ public class CellBank extends GenericNtrFile
         int uextUnknown = reader.readInt();
     }
 
+
+    /**
+     * Generate a <code>byte[]</code> representation of this <code>CellBank</code> as an NCER
+     * @return a <code>byte[]</code>
+     */
     public byte[] save()
     {
         MemBuf dataBuf = MemBuf.create();
@@ -350,6 +355,9 @@ public class CellBank extends GenericNtrFile
         return dataBuf.reader().getBuffer();
     }
 
+    /**
+     * Internal private class for actions relating to reading/writing NCER files
+     */
     private static class NcerUtils {
         private static final byte[] kbecHeader =
                 {
@@ -438,6 +446,10 @@ public class CellBank extends GenericNtrFile
         }
     }
 
+    /**
+     * Sets the parent <code>IndexedImage</code> used to display image data from this <code>CellBank</code>
+     * @param image a <code>IndexedImage</code>
+     */
     public void setParentImage(IndexedImage image)
     {
         if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED)
@@ -738,6 +750,11 @@ public class CellBank extends GenericNtrFile
                     update = false;
                 }
 
+                /**
+                 * Takes any changes which have been made to the pixels of this <code>OamImage</code> and applies them
+                 * onto the parent <code>IndexedImage</code> according to the positional data specified by the parent
+                 * <code>OAM</code> and <code>CellBank</code>
+                 */
                 public void save()
                 {
                     oamImage.setBitDepth(image.getBitDepth());
@@ -772,6 +789,11 @@ public class CellBank extends GenericNtrFile
                     }
                 }
 
+                /**
+                 * Generates and returns a visual (image) representation of the parent <code>OAM</code> given the parent
+                 * <code>IndexedImage</code> providing image data
+                 * @return a <code>BufferedImage</code>
+                 */
                 public BufferedImage getImage()
                 {
                     if (update)
@@ -781,6 +803,11 @@ public class CellBank extends GenericNtrFile
                     return oamImage.getImage();
                 }
 
+                /**
+                 * Generates and returns a visual (image) representation of the parent <code>OAM</code> given the parent
+                 * <code>IndexedImage</code> providing image data, with the color at index 0 replaced with transparency
+                 * @return a <code>BufferedImage</code>
+                 */
                 public BufferedImage getTransparentImage()
                 {
                     if (update)

@@ -40,7 +40,7 @@ public class Narc extends GenericNtrFile
     public static final int FNTB_HEADER_SIZE = 8;
 
     Fnt.Folder filenames; // represents the root folder of the filesystem
-    public ArrayList<byte[]> files;
+    ArrayList<byte[]> files;
 
     public Narc()
     {
@@ -369,6 +369,46 @@ public class Narc extends GenericNtrFile
             throw new RuntimeException("Couldn't find file ID of \"" + filename + "\".");
         }
         files.set(fid, data);
+    }
+
+    public ArrayList<byte[]> getFiles()
+    {
+        return files;
+    }
+
+    public void setFiles(ArrayList<byte[]> files)
+    {
+        this.files = files;
+    }
+
+    public byte[] getFile(int index)
+    {
+        return files.get(index);
+    }
+
+    public void setFile(int index, byte[] file)
+    {
+        files.set(index, file);
+    }
+
+    public void addFile(byte[] file)
+    {
+        files.add(file);
+    }
+
+    public void removeFile(byte[] file)
+    {
+        files.remove(file);
+    }
+
+    public void removeFile(int index)
+    {
+        files.remove(index);
+    }
+
+    public int getNumFiles()
+    {
+        return files.size();
     }
 
 

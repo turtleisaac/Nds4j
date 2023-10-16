@@ -39,16 +39,16 @@ public class PaletteTest
     private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
 
     // party icon palette
-    private static final Palette partyPalette = new Palette(a020.files.get(0), 0);
+    private static final Palette partyPalette = new Palette(a020.getFile(0), 0);
 
     // bulbasaur battle sprite regular palette
-    private static final Palette bulbasaurPalette = new Palette(a004.files.get(10), 0);
+    private static final Palette bulbasaurPalette = new Palette(a004.getFile(10), 0);
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = new IndexedImage(a020.files.get(399), 4, 0, 1, 1, true);
+    private static final IndexedImage tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, true);
+    private static final IndexedImage scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
 
     @Test
     void length()
@@ -67,7 +67,7 @@ public class PaletteTest
     @Test
     void setColor()
     {
-        Palette partyPaletteDuplicate = new Palette(a020.files.get(0), 0);
+        Palette partyPaletteDuplicate = new Palette(a020.getFile(0), 0);
         partyPaletteDuplicate.setColor(0, Color.MAGENTA);
 
         assertThat(partyPaletteDuplicate.getColor(0))

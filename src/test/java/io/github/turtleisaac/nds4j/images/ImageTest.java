@@ -36,11 +36,11 @@ public class ImageTest
     private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = new IndexedImage(a020.files.get(399), 4, 0, 1, 1, true);
+    private static final IndexedImage tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, true);
-    private static final IndexedImage scanned2 = new IndexedImage(a004.files.get(6), 0, 0, 1, 1, false);
+    private static final IndexedImage scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
+    private static final IndexedImage scanned2 = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, false);
 
     @Test
     void bitDepth()

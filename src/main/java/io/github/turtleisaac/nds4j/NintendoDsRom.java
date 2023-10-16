@@ -1032,4 +1032,48 @@ public class NintendoDsRom
     {
         return String.format("ROM \"%s\" (%s)", title, gameCode);
     }
+
+    // Accessors & Mutators below
+
+
+    /**
+     * Gets this <code>NintendoDsRom</code>'s title value
+     * @return a String containing this <code>NintendoDsRom</code>'s title
+     */
+    public String getTitle()
+    {
+        return title;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s title value to the given value
+     * <p>
+     * NOTE: String length should be <= 12 characters long
+     */
+    public void setTitle(String title)
+    {
+        this.title = title;
+    }
+
+    /**
+     * Gets this <code>NintendoDsRom</code>'s game code
+     *
+     * @return a <code>String</code> containing this <code>NintendoDsRom</code>'s game code
+     */
+    public String getGameCode()
+    {
+        return gameCode;
+    }
+
+    /**
+     * Sets this <code>NintendoDsRom</code>'s game code to the provided value
+     *
+     * @param gameCode a <code>String</code> containing the new game code value
+     */
+    public void setGameCode(String gameCode)
+    {
+        this.gameCode = gameCode;
+    }
+
+
 }

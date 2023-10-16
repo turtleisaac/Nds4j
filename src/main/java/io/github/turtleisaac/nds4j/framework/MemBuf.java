@@ -119,7 +119,7 @@ public class MemBuf {
 
         public String readString(int size) {
             require(size);
-            String ret = new String(buf, readPos, size);
+            String ret = new String(Arrays.copyOfRange(buf, readPos, readPos + size), StandardCharsets.UTF_8);
             readPos += size;
             return ret;
         }
