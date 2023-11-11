@@ -26,6 +26,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.github.turtleisaac.nds4j.binaries.MainCodeFile;
 import io.github.turtleisaac.nds4j.framework.*;
 import io.github.turtleisaac.nds4j.Fnt.Folder;
 
@@ -229,6 +230,8 @@ public class NintendoDsRom
         {
             processFat(reader);
         }
+
+        processOverlays();
     }
 
     private void readHeader(MemBuf.MemBufReader reader, int fileLength, boolean fromUnpacked)
@@ -393,6 +396,11 @@ public class NintendoDsRom
         {
             sortedFileIDs.add(offsetToId.get(offset));
         }
+    }
+
+    private void processOverlays()
+    {
+
     }
 
     //SAVE-RELATED FUNCTIONS
@@ -1031,6 +1039,16 @@ public class NintendoDsRom
     public String toString()
     {
         return String.format("ROM \"%s\" (%s)", title, gameCode);
+    }
+
+    public MainCodeFile loadArm9()
+    {
+        return new MainCodeFile(arm9, arm9LoadAddress, arm9Autoload);
+    }
+
+    public MainCodeFile loadArm7()
+    {
+        return new MainCodeFile(arm7, arm7LoadAddress, arm7Autoload);
     }
 
     // Accessors & Mutators below

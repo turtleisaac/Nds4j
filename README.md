@@ -20,22 +20,19 @@ Nds4j is suitable for use in applications written in Java or any other language 
 As Nds4j is written in pure Java, it is cross-platform and should run on all platforms Java 8 or higher supports.
 Note that Java doesn't support the Nintendo DS itself; Nds4j is intended to be used on your computer.
 
-**Note:** Code from the [Universal Pokémon Randomizer ZX](https://github.com/Ajarmar/universal-pokemon-randomizer-zx)
-is adapted for LZ decompression purposes under the rights provided by the GNU General Public License v3.0.
-If there are any complaints related to this, please create a new Issue in the Issues tab here on GitHub.
-
 Special thanks to [red031000](https://github.com/red031000) for helping me figure some particularly annoying formats out.
 
 Formats currently implemented
 -----------------------------
 
-| Format  | Corresponding Java Class | Reading | Writing | Full Editing Capability |
-|:--------|:-------------------------|:-------:|:-------:|:-----------------------:|
-| NDS ROM | `NintendoDsRom`          | &check; | &check; |         &check;         |
-| NARC    | `Narc`                   | &check; | &check; |         &check;         |
-| NCGR    | `images.IndexedImage`    | &check; | &check; |         &cross;         |
-| NCLR    | `images.Palette`         | &check; | &check; |         &cross;         |
-| NCER    | `images.CellBank`        | &check; | &check; |         &cross;         |
+| Format    | Corresponding Java Class | Reading | Writing | Full Editing Capability |
+|:----------|:-------------------------|:-------:|:-------:|:-----------------------:|
+| NDS ROM   | `NintendoDsRom`          | &check; | &check; |         &check;         |
+| NARC      | `Narc`                   | &check; | &check; |         &check;         |
+| NCGR      | `images.IndexedImage`    | &check; | &check; |         &cross;         |
+| NCLR      | `images.Palette`         | &check; | &check; |         &cross;         |
+| NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
+| ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
 
 Likely future supported formats
 --------------------------------
