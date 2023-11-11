@@ -436,6 +436,8 @@ public class IndexedImage extends GenericNtrFile
                     break;
                 case 8:
                     throw new RuntimeException("8bpp not supported yet.");
+//                    writer.write(NcgrUtils.convertToScanned8Bpp(this, bufferSize));
+//                    break;
             }
         }
         else
@@ -588,6 +590,57 @@ public class IndexedImage extends GenericNtrFile
         }
 
         return ret;
+    }
+
+    /**
+     * Creates a <code>IndexedImage</code> based on the data in this <code>IndexedImage</code> given the specified coordinates and boundaries,
+     * <p>Note: (0,0) is the top left corner of the image</p>
+     * @param x an <code>int</code> containing the column value to start from
+     * @param y an <code>int</code> containing the row value to start from
+     * @param width an <code>int</code> containing the number of columns the resulting image will contain
+     * @param height an <code>int</code> containing the number of rows the resulting image will contain
+     * @return a <code>IndexedImage</code> containing a subspace of the original
+     * @throws ImageException if the specified coordinates, width, or height are invalid
+     */
+    public IndexedImage getSubImage(int x, int y, int width, int height) throws ImageException
+    {
+        if (x < 0)
+            throw new ImageException(String.format("Invalid x-coordinate provided for creating sub-image: %d < 0", x));
+        if (x >= getWidth())
+            throw new ImageException(String.format("Invalid x-coordinate provided for creating sub-image: %d >= %d (image width)", x, getWidth()));
+        if (y < 0)
+            throw new ImageException(String.format("Invalid y-coordinate provided for creating sub-image: %d < 0", y));
+        if (y >= getHeight())
+            throw new ImageException(String.format("Invalid y-coordinate provided for creating sub-image: %d >= %d (image height)", y, getHeight()));
+        if (width > getWidth())
+            throw new ImageException(String.format("Invalid width provided for creating sub-image: %d >= %d (image width)", width, getWidth()));
+        if (height > getHeight())
+            throw new ImageException(String.format("Invalid height provided for creating sub-image: %d >= %d (image height)", height, getHeight()));
+        if (x + width > getWidth())
+            throw new ImageException(String.format("Invalid width provided for creating sub-image from given x-coordinate: %d + %d >= %d (image width)", x, width, getWidth()));
+        if (y + height > getHeight())
+            throw new ImageException(String.format("Invalid height provided for creating sub-image from given y-coordinate: %d + %d >= %d (image height)", y, height, getHeight()));
+
+        IndexedImage output = new IndexedImage(height, width, bitDepth, palette);
+        for (int row = 0; row < height; row++)
+        {
+            for (int col = 0; col < width; col++)
+            {
+                output.setPixelValue(col, row, pixels[row + y][col + x]);
+            }
+        }
+
+        output.paletteIdx = paletteIdx;
+        output.scanMode = scanMode;
+        output.colsPerChunk = colsPerChunk;
+        output.rowsPerChunk = rowsPerChunk;
+        output.numTiles = numTiles;
+        output.mappingType = mappingType;
+        output.vram = vram;
+        output.encryptionKey = encryptionKey;
+        output.sopc = sopc;
+
+        return output;
     }
 
     //todo make it so this isn't restricted to 160x160
@@ -1014,28 +1067,43 @@ public class IndexedImage extends GenericNtrFile
     public void setPaletteIdx(int paletteIdx)
     {
         this.paletteIdx = paletteIdx;
+        update = true;
     }
 
     /**
      * Combines two <code>IndexedImage</code> objects of equal height to product a single <code>IndexedImage</code>
-     * @param image1 the primary <code>IndexedImage</code>, its palette is to be used by the composite <code>IndexedImage</code>
-     * @param image2 the secondary <code>IndexedImage</code>, its palette is thrown out
-     * @return a composite <code>IndexedImage</code> composed of <code>image1</code> and <code>image2</code> side by side
+     * @param leftImage the primary <code>IndexedImage</code>, its palette is to be used by the composite <code>IndexedImage</code>
+     * @param rightImage the secondary <code>IndexedImage</code>, its palette is thrown out
+     * @return a composite <code>IndexedImage</code> composed of <code>leftImage</code> and <code>rightImage</code> side by side
      */
-    public static IndexedImage getCompositeImage(IndexedImage image1, IndexedImage image2) throws ImageException
+    public static IndexedImage getHorizontalCompositeImage(IndexedImage leftImage, IndexedImage rightImage) throws ImageException
     {
-        if (image1.height != image2.height) //todo revisit this and see if you can make it address this discrepancy
+        if (leftImage.height != rightImage.height) //todo revisit this and see if you can make it address this discrepancy
             throw new ImageException("The two images you are trying to composite do not have the same height");
 
-        int[][] ret = new int[image1.getHeight()][image1.getWidth() + image2.getWidth()];
+        int[][] ret = new int[leftImage.getHeight()][leftImage.getWidth() + rightImage.getWidth()];
 
-        for (int row = 0; row < image1.getHeight(); row++)
+        for (int row = 0; row < leftImage.getHeight(); row++)
         {
-            System.arraycopy(image1.getPixels()[row],0,ret[row],0,image1.getWidth());
-            System.arraycopy(image2.getPixels()[row],0,ret[row],image1.getWidth(),image2.getWidth());
+            System.arraycopy(leftImage.getPixels()[row],0,ret[row],0,leftImage.getWidth());
+            System.arraycopy(rightImage.getPixels()[row],0,ret[row],leftImage.getWidth(),rightImage.getWidth());
         }
 
-        return new IndexedImage(ret,image1.getPalette());
+        IndexedImage image = new IndexedImage(leftImage.height, rightImage.width + leftImage.width, leftImage.bitDepth, leftImage.palette);
+
+        image.setPixels(ret);
+
+        image.paletteIdx = leftImage.paletteIdx;
+        image.scanMode = leftImage.scanMode;
+        image.colsPerChunk = leftImage.colsPerChunk;
+        image.rowsPerChunk = leftImage.rowsPerChunk;
+        image.numTiles = leftImage.numTiles;
+        image.mappingType = leftImage.mappingType;
+        image.vram = leftImage.vram;
+        image.encryptionKey = leftImage.encryptionKey;
+        image.sopc = leftImage.sopc;
+
+        return image;
     }
 
     @Override
@@ -1434,7 +1502,50 @@ public class IndexedImage extends GenericNtrFile
             return dest;
         }
 
-        //todo convertToScanned8Bpp()
+//        private static byte[] convertToScanned8Bpp(IndexedImage image, int bufferSize)
+//        {
+//            long encValue = image.encryptionKey;
+//
+//            int idx = 0;
+//            int[] data = new int[image.height*image.width];
+//
+//            for (int row = 0; row < image.height; row++)
+//            {
+//                for (int col = 0; col < image.width; col++)
+//                {
+//                    data[idx++] = image.pixels[row][col];
+//                }
+//            }
+//
+//            if (bufferSize != data.length)
+//                throw new RuntimeException("Invalid buffer length: does not match height * width / 2");
+//
+//            byte[] dest = new byte[bufferSize];
+//            if (image.scanMode == ScanMode.FRONT_TO_BACK)
+//            {
+//                for (int i = bufferSize - 1; i > 0; i -= 2)
+//                {
+//                    int val = data[i - 1] | (data[i] << 8);
+//                    encValue = (encValue - 24691) * 4005161829L;
+//                    val ^= (encValue & 0xFFFF);
+//                    dest[i] = (byte) ((val >> 8) & 0xff);
+//                    dest[i - 1] = (byte) (val & 0xff);
+//                }
+//            }
+//            else if (image.scanMode == ScanMode.BACK_TO_FRONT)
+//            {
+//                for (int i = 1; i < bufferSize; i += 2)
+//                {
+//                    int val = (data[i] << 8) | data[i - 1];
+//                    encValue = (int) ((encValue - 24691) * 4005161829L);
+//                    val ^= (encValue & 0xFFFF);
+//                    dest[i] = (byte) ((val >> 8) & 0xff);
+//                    dest[i - 1] = (byte) (val & 0xff);
+//                }
+//            }
+//
+//            return dest;
+//        }
 
         protected static byte[] convertToTiles4Bpp(IndexedImage image)
         {
