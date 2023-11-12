@@ -32,6 +32,7 @@ public abstract class CodeBinary
     private int bssSize;
 
     private boolean compressed;
+    private int size;
 
     public CodeBinary(byte[] data, int ramStartAddress, int bssSize)
     {
@@ -40,6 +41,7 @@ public abstract class CodeBinary
         physicalAddressBuffer = MemBuf.create(decompressed);
         memoryAddressBuffer = physicalAddressBuffer.derivative(ramStartAddress);
         this.bssSize = bssSize;
+        this.size = decompressed.length;
     }
 
     public MemBuf getPhysicalAddressBuffer()
@@ -65,5 +67,22 @@ public abstract class CodeBinary
     public int getRamStartAddress()
     {
         return memoryAddressBuffer.getBaseAddress();
+    }
+
+    public int getSize()
+    {
+        return size;
+    }
+
+    public byte[] getData()
+    {
+        int writerPos = physicalAddressBuffer.writer().getPosition();
+        int readerPos = physicalAddressBuffer.reader().getPosition();
+        physicalAddressBuffer.reader().setPosition(0);
+        physicalAddressBuffer.writer().setPosition(size);
+        byte[] data = physicalAddressBuffer.reader().getBuffer();
+        physicalAddressBuffer.reader().setPosition(readerPos);
+        physicalAddressBuffer.writer().setPosition(writerPos);
+        return data;
     }
 }
