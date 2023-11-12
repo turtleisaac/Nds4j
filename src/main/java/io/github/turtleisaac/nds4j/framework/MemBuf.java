@@ -28,7 +28,6 @@ public class MemBuf {
     private int capacity;
     private int readPos;
     private int writePos;
-    private int baseAddress;
     private MemBufReader reader;
     private MemBufWriter writer;
 
@@ -47,7 +46,6 @@ public class MemBuf {
     public MemBuf() {
         this.buf = new byte[INITIAL_SIZE];
         this.capacity = INITIAL_SIZE;
-        this.baseAddress = 0;
         reader = new MemBufReader();
         writer = new MemBufWriter();
     }
@@ -56,7 +54,6 @@ public class MemBuf {
     {
         this.buf = memBuf.buf;
         this.capacity = memBuf.capacity;
-        this.baseAddress = baseAddress;
         this.readPos = baseAddress;
         this.writePos = baseAddress;
         reader = new MemBufReader();
@@ -69,15 +66,6 @@ public class MemBuf {
 
     public MemBufWriter writer() {
         return writer;
-    }
-
-    public MemBuf derivative(int baseAddress) {
-        return new MemBuf(this, baseAddress);
-    }
-
-    public int getBaseAddress()
-    {
-        return baseAddress;
     }
 
     public class MemBufReader {
@@ -102,13 +90,13 @@ public class MemBuf {
 
         public byte[] getBuffer() {
             byte[] ret = new byte[writePos-readPos];
-            System.arraycopy(buf, readPos-baseAddress, ret, 0, writePos-readPos);
+            System.arraycopy(buf, readPos, ret, 0, writePos-readPos);
             return ret;
         }
 
         public int readByte() {
             require(1);
-            return buf[readPos++ - baseAddress];
+            return buf[readPos++];
         }
 
         public int readInt() {
@@ -141,7 +129,7 @@ public class MemBuf {
 
         public String readString(int size) {
             require(size);
-            String ret = new String(Arrays.copyOfRange(buf, readPos - baseAddress, readPos - baseAddress + size), StandardCharsets.UTF_8);
+            String ret = new String(Arrays.copyOfRange(buf, readPos, readPos + size), StandardCharsets.UTF_8);
             readPos += size;
             return ret;
         }
@@ -149,7 +137,7 @@ public class MemBuf {
         public byte[] readBytes(int size) {
             require(size);
             byte[] ret = new byte[size];
-            System.arraycopy(buf, readPos - baseAddress, ret, 0, size);
+            System.arraycopy(buf, readPos, ret, 0, size);
             readPos += size;
             return ret;
         }
@@ -163,7 +151,7 @@ public class MemBuf {
             int size = (int) (addrs - readPos);
             require(size);
             byte[] ret = new byte[size];
-            System.arraycopy(buf, readPos - baseAddress, ret, 0, size);
+            System.arraycopy(buf, readPos, ret, 0, size);
             readPos += size;
             return ret;
         }
@@ -189,8 +177,8 @@ public class MemBuf {
     public class MemBufWriter {
 
         private void require(int space) {
-            if (capacity - (writePos - baseAddress) < space) {
-                int newSize = Math.max((writePos-baseAddress)+space, capacity + INITIAL_SIZE);
+            if (capacity - (writePos) < space) {
+                int newSize = Math.max((writePos)+space, capacity + INITIAL_SIZE);
                 buf = Arrays.copyOf(buf, newSize);
                 capacity = buf.length;
             }
@@ -210,10 +198,10 @@ public class MemBuf {
 
         public MemBufWriter writeInt(int i) {
             require(4);
-            buf[writePos++ - baseAddress] = (byte) (i & 0xff);
-            buf[writePos++ - baseAddress] = (byte) ((i >> 8) & 0xff);
-            buf[writePos++ - baseAddress] = (byte) ((i >> 16) & 0xff);
-            buf[writePos++ - baseAddress] = (byte) ((i >> 24) & 0xff);
+            buf[writePos++] = (byte) (i & 0xff);
+            buf[writePos++] = (byte) ((i >> 8) & 0xff);
+            buf[writePos++] = (byte) ((i >> 16) & 0xff);
+            buf[writePos++] = (byte) ((i >> 24) & 0xff);
             return this;
         }
 
@@ -223,21 +211,21 @@ public class MemBuf {
 
         public MemBufWriter writeShort(short s) {
             require(2);
-            buf[writePos++ - baseAddress] = (byte) (s & 0xff);
-            buf[writePos++ - baseAddress] = (byte) ((s >> 8) & 0xff);
+            buf[writePos++] = (byte) (s & 0xff);
+            buf[writePos++] = (byte) ((s >> 8) & 0xff);
             return this;
         }
 
         public MemBufWriter writeByte(byte b) {
             require(1);
-            buf[writePos++ - baseAddress] = b;
+            buf[writePos++] = b;
             return this;
         }
 
         public MemBufWriter writeBytes(int... bytes) {
             require(bytes.length);
             for (int b : bytes) {
-                buf[writePos++ - baseAddress] = (byte)b;
+                buf[writePos++] = (byte)b;
             }
             return this;
         }
@@ -245,7 +233,7 @@ public class MemBuf {
         public MemBufWriter write(byte... bytes)  {
             require(bytes.length);
             for (byte b : bytes) {
-                buf[writePos++ - baseAddress] = b;
+                buf[writePos++] = b;
             }
             return this;
         }
@@ -254,8 +242,8 @@ public class MemBuf {
             for(short s : shorts)
             {
                 require(2);
-                buf[writePos++ - baseAddress] = (byte) (s & 0xff);
-                buf[writePos++ - baseAddress] = (byte) ((s >> 8) & 0xff);
+                buf[writePos++] = (byte) (s & 0xff);
+                buf[writePos++] = (byte) ((s >> 8) & 0xff);
             }
             return this;
         }
@@ -278,7 +266,7 @@ public class MemBuf {
         public MemBufWriter write(byte[] bytes, int srcPos, int length) {
             require(length);
             for (int i=srcPos; length > 0; srcPos++,length--) {
-                buf[writePos++ - baseAddress] = bytes[i];
+                buf[writePos++] = bytes[i];
             }
             return this;
         }
@@ -295,7 +283,7 @@ public class MemBuf {
             require(length);
             setPosition(writeOffset);
             for (int i=srcPos; length > 0; srcPos++,length--) {
-                buf[writePos++ - baseAddress] = bytes[i];
+                buf[writePos++] = bytes[i];
             }
             return this;
         }
@@ -303,7 +291,7 @@ public class MemBuf {
         public MemBufWriter writeByteNumTimes(byte b, int numTimes) {
             require(numTimes);
             for (int i = 0; i < numTimes; i++) {
-                buf[writePos++ - baseAddress] = b;
+                buf[writePos++] = b;
             }
             return this;
         }
@@ -312,20 +300,20 @@ public class MemBuf {
             require(numTimes);
             setPosition(writeOffset);
             for (int i = 0; i < numTimes; i++) {
-                buf[writePos++ - baseAddress] = b;
+                buf[writePos++] = b;
             }
             return this;
         }
 
         public MemBufWriter align(int alignment)
         {
-            skip(alignment - (writePos - baseAddress) % alignment);
+            skip(alignment - (writePos) % alignment);
             return this;
         }
 
         public MemBufWriter align(int alignment, byte fill)
         {
-            return writeByteNumTimes(fill, alignment - (writePos - baseAddress) % alignment);
+            return writeByteNumTimes(fill, alignment - (writePos) % alignment);
         }
 
     }
