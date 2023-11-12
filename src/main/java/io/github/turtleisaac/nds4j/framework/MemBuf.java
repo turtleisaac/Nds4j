@@ -59,6 +59,8 @@ public class MemBuf {
         this.baseAddress = baseAddress;
         this.readPos = baseAddress;
         this.writePos = baseAddress;
+        reader = new MemBufReader();
+        writer = new MemBufWriter();
     }
 
     public MemBufReader reader() {

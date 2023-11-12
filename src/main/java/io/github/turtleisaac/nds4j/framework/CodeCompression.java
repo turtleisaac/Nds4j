@@ -130,7 +130,7 @@ public class CodeCompression
             {
                 if (readBytes >= compressedLength)
                     throw new RuntimeException("Not enough data to decompress");
-                flags = compressedData[compressedData.length - 1 - readBytes++];
+                flags = compressedData[compressedData.length - 1 - readBytes++] & 0xff;
                 mask = 0x80;
             }
             else
@@ -145,15 +145,15 @@ public class CodeCompression
                 if (readBytes + 1 >= dataSize)
                     throw new RuntimeException("Not enough data to decompress");
 
-                byte byte1 = compressedData[compressedData.length - 1 - readBytes++];
-                byte byte2 = compressedData[compressedData.length - 1 - readBytes++];
+                int byte1 = compressedData[compressedData.length - 1 - readBytes++] & 0xFF;
+                int byte2 = compressedData[compressedData.length - 1 - readBytes++] & 0xFF;
 
                 // The number of bytes to copy
                 int length = (((byte1 & 0xFF) >> 4) + 3) & 0xff;
 
                 // Where the bytes should be copied from (relatively)
                 // ((((byte1 & 0x0F) << 8)) | (byte2)) + 3
-                int disp = ((((byte1 & 0x0F) << 8) & 0xFF) | (byte2 & 0xFF)) + 3;
+                int disp = (((byte1 & 0x0F) << 8) | byte2) + 3;
 
                 if (disp > currentOutSize)
                 {
@@ -173,8 +173,8 @@ public class CodeCompression
                 int bufIdx = currentOutSize - disp;
                 for (int i = 0; i < length; i++)
                 {
-                    int next = decompressedData[decompressedData.length - 1 - bufIdx++];
-                    decompressedData[decompressedData.length - 1 - currentOutSize++] = (byte) next;
+                    byte next = decompressedData[decompressedData.length - 1 - bufIdx++];
+                    decompressedData[decompressedData.length - 1 - currentOutSize++] = next;
                 }
             }
             else
@@ -182,8 +182,8 @@ public class CodeCompression
                 if (readBytes >= dataSize)
                     throw new RuntimeException("Not enough data to decompress");
 
-                int next = compressedData[compressedData.length - 1 - readBytes++];
-                decompressedData[decompressedData.length - 1 - currentOutSize++] = (byte) next;
+                byte next = compressedData[compressedData.length - 1 - readBytes++];
+                decompressedData[decompressedData.length - 1 - currentOutSize++] = next;
             }
         }
 
