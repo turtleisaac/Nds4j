@@ -741,6 +741,11 @@ public class NintendoDsRom
         UNPACKED_FILENAMES(String s) {
             name = s;
         }
+
+        public String getName()
+        {
+            return name;
+        }
     }
 
     /**
