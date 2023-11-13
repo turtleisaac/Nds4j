@@ -913,7 +913,7 @@ public class NintendoDsRom
         {
             throw new RuntimeException("Unable to unpack rom, target folder already exists");
         }
-        else if (!dir.mkdir())
+        else if (!dir.exists() && !dir.mkdir())
         {
             throw new RuntimeException("Failed to create unpacked directory, check write perms.");
         }
