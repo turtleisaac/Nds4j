@@ -23,9 +23,15 @@ import io.github.turtleisaac.nds4j.framework.CodeCompression;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.util.Arrays;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * An abstract class representing a code binary of a Nintendo DS game, that being either an overlay or an ARM9/ARM7 file.
+ * Please note that for improved support of tools developed using Nds4j and Nds4j-ToolUI, this class (and all of its subclasses)
+ * extend <code>ReentrantLock</code>. If developing a tool with a GUI, please obey the rules of using locks to ensure
+ * thread-safety, as this is shared mutable data.
+ * @see ReentrantLock
+ */
 public abstract class CodeBinary extends ReentrantLock
 {
     private MemBuf physicalAddressBuffer;
@@ -76,8 +82,7 @@ public abstract class CodeBinary extends ReentrantLock
 
     /**
      * Returns the data contained within this code binary according to the current bounds of its physicalAddressBuffer object.
-     * <p></p>
-     * @return
+     * @return a <code>byte[]</code> containing the contents of this code binary.
      */
     public byte[] getData()
     {
@@ -89,7 +94,6 @@ public abstract class CodeBinary extends ReentrantLock
         physicalAddressBuffer.reader().setPosition(0);
         physicalAddressBuffer.writer().setPosition(size);
     }
-
 
     /**
      * Acquires the lock on this CodeBinary object if available, waits until available otherwise.
