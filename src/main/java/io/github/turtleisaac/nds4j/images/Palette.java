@@ -374,7 +374,17 @@ public class Palette extends GenericNtrFile
     public Palette copyOf()
     {
         Palette p = new Palette(numColors);
-        p.colors = Arrays.copyOf(colors, colors.length);
+        p.numColors = numColors;
+        p.bitDepth = bitDepth;
+        p.compNum = compNum;
+        p.ir = ir;
+
+        int idx = 0;
+        for (Color c : colors)
+        {
+            p.colors[idx++] = new Color(c.getRGB());
+        }
+
         return p;
     }
 
