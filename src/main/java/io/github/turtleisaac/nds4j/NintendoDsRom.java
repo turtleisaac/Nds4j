@@ -1040,6 +1040,35 @@ public class NintendoDsRom
         files.set(fid, data);
     }
 
+    public byte[] getFile(int index)
+    {
+        return files.get(index);
+    }
+
+    public boolean addFile(byte[] data)
+    {
+        return files.add(data);
+    }
+
+    public void addFile(int index, byte[] data)
+    {
+        files.add(index, data);
+    }
+
+    public void setFile(int index, byte[] data)
+    {
+        files.set(index, data);
+    }
+
+    public byte[] removeFile(int index)
+    {
+        return files.remove(index);
+    }
+
+    public int getNumFiles()
+    {
+        return files.size();
+    }
 
     public String toString()
     {
