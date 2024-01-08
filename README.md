@@ -8,6 +8,8 @@ Nds4j
 **Nds4j** is a <u>**WIP**</u> Java library that can help you read, modify and create a few types of files used in
 Nintendo DS games, with many more coming soon.
 
+*Note:* DSi Enhanced ROMs are currently not fully supported. Opening them using Nds4j will have adverse effects on your ROM.
+
 > Author: Turtleisaac
 
 This project started off as a replacement for a few Java packages which are still used by Java tool developers in the Pokémon
@@ -44,6 +46,7 @@ These are sorted in order of their likely priority, but that order can and will 
 * NSBTX
 * NSBMD
 * NSBCA
+* SPA
 
 The following are themselves likely, but are not part of my immediate needs or goals due
 to very fleshed out solutions such as ndspy existing:
