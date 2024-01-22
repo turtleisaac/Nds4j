@@ -346,13 +346,13 @@ public class NintendoDsRom
         {
             reader.setPosition(iconBannerOffset);
             int val = reader.readUInt16();
-            reader.setPosition(iconBannerOffset);
             int iconBannerLength;
             if (ICON_BANNER_LENGTHS.get(val) == null)
                 iconBannerLength = ICON_BANNER_LENGTHS.get(1);
             else
                 iconBannerLength = ICON_BANNER_LENGTHS.get(val);
 
+            reader.setPosition(iconBannerOffset);
             iconBanner = reader.readBytes(iconBannerLength);
         }
         else

@@ -569,7 +569,7 @@ public class Fnt
 
         String name;
         // Read file and folders entries from the entries table
-        for (File sub : Arrays.stream(Objects.requireNonNull(dir.listFiles())).sorted().collect(Collectors.toList()))
+        for (File sub : Arrays.stream(Objects.requireNonNull(dir.listFiles())).filter(file -> !file.isHidden()).sorted().collect(Collectors.toList()))
         {
             name = sub.getName();
             if (sub.isDirectory())
