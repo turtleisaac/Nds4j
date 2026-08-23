@@ -87,6 +87,13 @@ public class IndexedImage extends GenericNtrFile
     public IndexedImage(byte[] data, int tilesWidth, int bitDepth, int colsPerChunk, int rowsPerChunk, boolean scanFrontToBack)
     {
         super("RGCN");
+
+        // the javadoc documents 0 as "I don't have one" - treat it as the 1-tile-per-chunk default
+        if (colsPerChunk == 0)
+            colsPerChunk = 1;
+        if (rowsPerChunk == 0)
+            rowsPerChunk = 1;
+
         MemBuf dataBuf = MemBuf.create(data);
         MemBuf.MemBufReader reader = dataBuf.reader();
         int fileSize = dataBuf.writer().getPosition();
@@ -158,10 +165,10 @@ public class IndexedImage extends GenericNtrFile
         }
 
         boolean scanned = reader.readByte() == 1; // 0x24
+        this.vram = reader.readByte() == 1; // 0x25
         reader.skip(2);
 
         this.scanMode = NcgrUtils.ScanMode.getMode(scanned, scanFrontToBack);
-        this.vram = reader.readByte() == 1;
 
         int tileSize = bitDepth * 8;
 
@@ -179,7 +186,7 @@ public class IndexedImage extends GenericNtrFile
         this.height = tilesHeight * 8;
         this.width = tilesWidth * 8;
         this.pixels = new int[this.height][this.width];
-        this.palette = Palette.defaultPalette;
+        this.palette = Palette.defaultPalette.copyOf();
         this.rowsPerChunk = rowsPerChunk;
         this.colsPerChunk = colsPerChunk;
 
@@ -419,7 +426,10 @@ public class IndexedImage extends GenericNtrFile
         int numTiles = this.numTiles;
 
         if (numTiles == 0)
+        {
             numTiles = maxNumTiles;
+            this.numTiles = numTiles;
+        }
         else if (numTiles > maxNumTiles)
             throw new RuntimeException(String.format("The specified number of tiles (%d) is greater than the maximum possible value (%d).", numTiles, maxNumTiles));
 
@@ -456,9 +466,13 @@ public class IndexedImage extends GenericNtrFile
         MemBuf dataBuf = MemBuf.create();
         writer = dataBuf.writer();
 
-        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x30 : 0x20), sopc ? 2 : 1);
+        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x40 : 0x30), sopc ? 2 : 1);
 
         writer.write(NcgrUtils.charHeader);
+
+        writer.setPosition(NcgrUtils.charHeaderPos + 4);
+        writer.writeInt(bufferSize + 0x20); // 0x14
+
         writer.setPosition(NcgrUtils.charHeaderPos + 8);
 
         if (mappingType == 32)
@@ -634,7 +648,7 @@ public class IndexedImage extends GenericNtrFile
         output.scanMode = scanMode;
         output.colsPerChunk = colsPerChunk;
         output.rowsPerChunk = rowsPerChunk;
-        output.numTiles = numTiles;
+        output.numTiles = (height / 8) * (width / 8);
         output.mappingType = mappingType;
         output.vram = vram;
         output.encryptionKey = encryptionKey;
@@ -915,7 +929,12 @@ public class IndexedImage extends GenericNtrFile
      */
     public int[][] getPixels()
     {
-        return pixels;
+        int[][] ret = new int[pixels.length][];
+        for (int row = 0; row < pixels.length; row++)
+        {
+            ret[row] = Arrays.copyOf(pixels[row], pixels[row].length);
+        }
+        return ret;
     }
 
     /**
@@ -928,7 +947,18 @@ public class IndexedImage extends GenericNtrFile
             throw new RuntimeException("Height does not match");
         if (!allRowsHaveSameWidth(pixels))
             throw new RuntimeException("Not all rows have the same width");
-        this.pixels = pixels;
+        for (int[] row : pixels)
+        {
+            if (row.length != width)
+                throw new RuntimeException("Width does not match");
+        }
+
+        int[][] copy = new int[pixels.length][];
+        for (int row = 0; row < pixels.length; row++)
+        {
+            copy[row] = Arrays.copyOf(pixels[row], pixels[row].length);
+        }
+        this.pixels = copy;
         update = true;
     }
 
@@ -1097,7 +1127,7 @@ public class IndexedImage extends GenericNtrFile
         image.scanMode = leftImage.scanMode;
         image.colsPerChunk = leftImage.colsPerChunk;
         image.rowsPerChunk = leftImage.rowsPerChunk;
-        image.numTiles = leftImage.numTiles;
+        image.numTiles = leftImage.numTiles + rightImage.numTiles;
         image.mappingType = leftImage.mappingType;
         image.vram = leftImage.vram;
         image.encryptionKey = leftImage.encryptionKey;
@@ -1197,7 +1227,7 @@ public class IndexedImage extends GenericNtrFile
             MemBuf dataBuf = MemBuf.create(src);
             MemBuf.MemBufReader reader = dataBuf.reader();
 
-            int[] data = new int[width*height/4];
+            int[] data = new int[width*height/2];
             for (int i = 0; i < data.length; i++)
             {
                 data[i] = reader.readUInt16();
@@ -1277,9 +1307,9 @@ public class IndexedImage extends GenericNtrFile
             }
             else
             {
-                encValue = data[width*height];
+                encValue = data[data.length - 1];
 
-                for(int i = width*height - 1; i >= 0; i--)
+                for(int i = data.length - 1; i >= 0; i--)
                 {
                     data[i] = data[i] ^ (encValue & 0xffff);
                     encValue *= 1103515245;
@@ -1300,7 +1330,7 @@ public class IndexedImage extends GenericNtrFile
             {
                 for (int col = 0; col < width; col++)
                 {
-                    pixelTable[row][col] = arr[idx++];
+                    pixelTable[row][col] = arr[idx++] & 0xFF;
                 }
             }
 
@@ -1428,7 +1458,7 @@ public class IndexedImage extends GenericNtrFile
                     for (int k = 0; k < 8; k++)
                     {
                         int idxComponentX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 8 + k;
-                        byte srcPixel = src[idx++];
+                        int srcPixel = src[idx++] & 0xFF;
 
                         int compositeIdx = idxComponentY * pitch + idxComponentX;
                         int destX = compositeIdx % image.getWidth();
@@ -1563,7 +1593,7 @@ public class IndexedImage extends GenericNtrFile
                 }
             }
 
-            byte[] dest = new byte[src.length / 2];
+            byte[] dest = new byte[image.numTiles * 32]; // 4bpp tile is 32 bytes
             idx = 0;
             for (int i = 0; i < image.numTiles; i++) {
                 for (int j = 0; j < 8; j++) {
@@ -1600,7 +1630,7 @@ public class IndexedImage extends GenericNtrFile
                 }
             }
 
-            byte[] dest = new byte[src.length];
+            byte[] dest = new byte[image.numTiles * 64]; // 8bpp tile is 64 bytes
             idx = 0;
             for (int i = 0; i < image.numTiles; i++) {
                 for (int j = 0; j < 8; j++) {
@@ -1904,7 +1934,7 @@ public class IndexedImage extends GenericNtrFile
         byte[] fileContents = Buffer.readFile(file);
 
         int paletteIdx = 0;
-        int imageDataIdx = 0;
+        ArrayList<Integer> imageDataIdxList = new ArrayList<>();
 
         for (int i = 0; i < fileContents.length - 4; i++)
         {
@@ -1917,7 +1947,7 @@ public class IndexedImage extends GenericNtrFile
 
             if (Arrays.equals(thisFour,dataChunkHeader))
             {
-                imageDataIdx = i;
+                imageDataIdxList.add(i);
             }
 
             if (Arrays.equals(thisFour,endChunkHeader))
@@ -1987,11 +2017,17 @@ public class IndexedImage extends GenericNtrFile
             colorList.add(new Color(r,g,b));
         }
 
-        buffer.skipTo(imageDataIdx-4);
-        chunkLength = swapEndianness(buffer.readInt());
-        buffer.skipBytes(4);
+        // a PNG may split its image data across any number of IDAT chunks - all of them together form one zlib stream
+        MemBuf imageDataBuf = MemBuf.create();
+        for (int imageDataIdx : imageDataIdxList)
+        {
+            buffer.skipTo(imageDataIdx-4);
+            chunkLength = swapEndianness(buffer.readInt());
+            buffer.skipBytes(4);
+            imageDataBuf.writer().write(buffer.readBytes(chunkLength));
+        }
 
-        byte[] imageData = buffer.readBytes(chunkLength);
+        byte[] imageData = imageDataBuf.reader().getBuffer();
         imageData = PngUtils.decompress(imageData);
 
         Palette palette = new Palette(colorList.toArray(new Color[0]));
@@ -2016,17 +2052,19 @@ public class IndexedImage extends GenericNtrFile
         MemBuf imageHeaderBuf = MemBuf.create();
         MemBuf.MemBufWriter writer = imageHeaderBuf.writer().write(imageChunkHeader);
 
+        // export depth is local - mutating this.bitDepth here would corrupt the next save() as an NCGR
+        int exportBitDepth;
         if (palette.size() > 16)
         {
-            bitDepth = 8;
+            exportBitDepth = 8;
         }
         else if (palette.size() > 4)
         {
-            bitDepth = 4;
+            exportBitDepth = 4;
         }
         else
         {
-            bitDepth = 2;
+            exportBitDepth = 2;
         }
 
         int colorType = 3;
@@ -2036,7 +2074,7 @@ public class IndexedImage extends GenericNtrFile
 
         writer.writeInt(swapEndianness(width));
         writer.writeInt(swapEndianness(height));
-        writer.writeBytes(bitDepth,colorType,compressionMethod,filterMethod,interlaceMethod);
+        writer.writeBytes(exportBitDepth,colorType,compressionMethod,filterMethod,interlaceMethod);
 
         //Palette Chunk (PLTE)
         MemBuf paletteBuf = MemBuf.create();
@@ -2051,7 +2089,7 @@ public class IndexedImage extends GenericNtrFile
         MemBuf dataBuf = MemBuf.create();
         writer = dataBuf.writer().write(dataChunkHeader);
 
-        byte[] imageData = PngUtils.convertScanlines(pixels,bitDepth,filterMethod);
+        byte[] imageData = PngUtils.convertScanlines(pixels,exportBitDepth,filterMethod);
         imageData = PngUtils.compress(imageData);
 
         writer.write(imageData);
@@ -2123,19 +2161,22 @@ public class IndexedImage extends GenericNtrFile
         {
             ArrayList<Byte> retList = new ArrayList<>();
 
+            int pixelsPerByte = 8 / bitDepth;
+
             for (int[] scanline : pixels)
             {
-                if(scanline.length % 2 != 0)
-                    scanline = Arrays.copyOf(scanline,scanline.length+1);
+                if(scanline.length % pixelsPerByte != 0)
+                    scanline = Arrays.copyOf(scanline,scanline.length + (pixelsPerByte - scanline.length % pixelsPerByte));
 
                 retList.add((byte) filterMethod);
 
-                for (int x = 0; x < scanline.length; x += 2)
+                for (int x = 0; x < scanline.length; x += pixelsPerByte)
                 {
                     switch (bitDepth)
                     {
                         case 2:
-                            retList.add((byte) ( ( ((scanline[x] & 0xff) << 2) | ((scanline[x + 1] & 0xff) & 0x3) ) << 4) );
+                            retList.add((byte) ( ((scanline[x] & 0x3) << 6) | ((scanline[x + 1] & 0x3) << 4)
+                                    | ((scanline[x + 2] & 0x3) << 2) | (scanline[x + 3] & 0x3) ) );
                             break;
 
                         case 4:
@@ -2144,7 +2185,6 @@ public class IndexedImage extends GenericNtrFile
 
                         case 8:
                             retList.add((byte) (scanline[x] & 0xff));
-                            x -= 1;
                             break;
                     }
                 }
@@ -2215,9 +2255,10 @@ public class IndexedImage extends GenericNtrFile
                     switch (bitDepth)
                     {
                         case 2:
-                            int section = (b >> 4) & 0xf;
-                            byteList.add((byte) ((section >> 2) & 0x3));
-                            byteList.add((byte) (section & 0x3));
+                            byteList.add((byte) ((b >> 6) & 0x3));
+                            byteList.add((byte) ((b >> 4) & 0x3));
+                            byteList.add((byte) ((b >> 2) & 0x3));
+                            byteList.add((byte) (b & 0x3));
                             break;
 
                         case 4:

@@ -83,11 +83,22 @@ public class GenericNtrFile
             version = 0x100;
         }
 
+        if (this.version != 0)
+        {
+            version = this.version;
+            if (endiannessOfBeginning == Endianness.EndiannessType.BIG)
+            {
+                version = (version & 0xFF) << 8 | (version >> 8) & 0xFF;
+            }
+        }
+
+        int headerSize = this.headerSize != 0 ? this.headerSize : NTR_HEADER_SIZE;
+
         writer.writeString(magic[whichMagic]);
         writer.writeShort((short) bom);
         writer.writeShort((short) version);
         writer.writeUInt32(length);
-        writer.writeShort((short) NTR_HEADER_SIZE);
+        writer.writeShort((short) headerSize);
         writer.writeShort((short) numSections);
     }
 

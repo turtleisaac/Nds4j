@@ -102,12 +102,12 @@ public class Palette extends GenericNtrFile
         this.compNum = compNum;
 
         reader.setPosition(0x18 + colorStartOffset);
-        for (int i = 0; i < paletteLength / 2; i++)
+        for (int i = 0; i < numColors; i++)
         {
             colors[i] = NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte());
         }
 
-        if (colors[ (int) (paletteLength / 2) - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
+        if (numColors > 0 && colors[numColors - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
         {
             this.ir = true;
         }
@@ -166,7 +166,7 @@ public class Palette extends GenericNtrFile
             throw new RuntimeException(String.format("Not a valid Color[]: %d is greater than 256.", arr.length));
         if (arr.length % 16 != 0)
         {
-            Color[] arr2 = new Color[arr.length + arr.length % 16];
+            Color[] arr2 = new Color[arr.length + (16 - arr.length % 16)];
             Arrays.fill(arr2, Color.black);
             System.arraycopy(arr, 0, arr2, 0, arr.length);
             arr = arr2;
@@ -248,7 +248,7 @@ public class Palette extends GenericNtrFile
      */
     public Color[] getColors()
     {
-        return colors;
+        return Arrays.copyOf(colors, colors.length);
     }
 
     /**
@@ -268,7 +268,7 @@ public class Palette extends GenericNtrFile
      */
     public Color getColor(int i)
     {
-        if (i >= colors.length)
+        if (i < 0 || i >= colors.length)
             throw new RuntimeException("Invalid index: " + i);
         return colors[i];
     }
@@ -281,7 +281,7 @@ public class Palette extends GenericNtrFile
      */
     public void setColor(int i, Color color)
     {
-        if (i >= colors.length)
+        if (i < 0 || i >= colors.length)
             throw new RuntimeException("Invalid index: " + i);
         colors[i] = color;
     }
@@ -332,7 +332,7 @@ public class Palette extends GenericNtrFile
             throw new RuntimeException(String.format("Invalid number of colors: %d is not a multiple of 16", numColors));
         this.numColors = numColors;
         Color[] colors = new Color[numColors];
-        System.arraycopy(this.colors, 0, colors, 0, numColors);
+        System.arraycopy(this.colors, 0, colors, 0, Math.min(this.colors.length, numColors));
         this.colors = colors;
     }
 

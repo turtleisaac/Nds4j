@@ -46,7 +46,7 @@ public abstract class CodeBinary extends ReentrantLock
     {
         super();
         byte[] decompressed = CodeCompression.decompress(data);
-        compressed = Arrays.equals(decompressed, data);
+        compressed = (decompressed != data);
         physicalAddressBuffer = MemBuf.create(decompressed);
         this.bssSize = bssSize;
         this.size = decompressed.length;
@@ -91,6 +91,8 @@ public abstract class CodeBinary extends ReentrantLock
 
     private void resetBufferPositions()
     {
+        // anything appended while the lock was held extends the logical end of the binary
+        size = Math.max(size, physicalAddressBuffer.writer().getPosition());
         physicalAddressBuffer.reader().setPosition(0);
         physicalAddressBuffer.writer().setPosition(size);
     }

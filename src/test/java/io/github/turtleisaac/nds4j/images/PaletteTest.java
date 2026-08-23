@@ -30,25 +30,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PaletteTest
 {
     // rom
-    private static final NintendoDsRom rom = NintendoDsRom.fromFile("HeartGold.nds");
+    private static NintendoDsRom rom;
 
     // this contains the party icons in HGSS
-    private static final Narc a020 = new Narc(rom.getFileByName("a/0/2/0"));
+    private static Narc a020;
 
     // this contains the battle sprites in HGSS
-    private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
+    private static Narc a004;
 
     // party icon palette
-    private static final Palette partyPalette = new Palette(a020.getFile(0), 0);
+    private static Palette partyPalette;
 
     // bulbasaur battle sprite regular palette
-    private static final Palette bulbasaurPalette = new Palette(a004.getFile(10), 0);
+    private static Palette bulbasaurPalette;
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
+    private static IndexedImage tiled;
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
+    private static IndexedImage scanned;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void loadFixtures()
+    {
+        rom = io.github.turtleisaac.nds4j.TestRoms.require("HeartGold.nds");
+        a020 = new Narc(rom.getFileByName("a/0/2/0"));
+        a004 = new Narc(rom.getFileByName("a/0/0/4"));
+        partyPalette = new Palette(a020.getFile(0), 0);
+        bulbasaurPalette = new Palette(a004.getFile(10), 0);
+        tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
+        scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
+    }
 
     @Test
     void length()

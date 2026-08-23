@@ -33,25 +33,18 @@ public class CRC16
         return crc16.getValue();
     }
 
-    private int value = 0;
+    private int value = 0xFFFF;
 
     public CRC16() {
     }
 
-    public void update(byte var1) {
-        int var2 = var1;
-
-        for (int var4 = 7; var4 >= 0; --var4) {
-            var2 <<= 1;
-            int var3 = var2 >>> 8 & 1;
-            if ((this.value & '耀') != 0) {
-                this.value = (this.value << 1) + var3 ^ 4129;
-            } else {
-                this.value = (this.value << 1) + var3;
-            }
+    public void update(byte b) {
+        value ^= (b & 0xFF);
+        for (int i = 0; i < 8; i++)
+        {
+            value = ((value & 1) != 0) ? (value >>> 1) ^ 0xA001 : (value >>> 1);
         }
-
-        this.value &= 65535;
+        value &= 0xFFFF;
     }
 
     public int getValue()
@@ -60,6 +53,6 @@ public class CRC16
     }
 
     public void reset() {
-        this.value = 0;
+        this.value = 0xFFFF;
     }
 }

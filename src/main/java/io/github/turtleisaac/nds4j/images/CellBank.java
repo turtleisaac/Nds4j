@@ -150,10 +150,13 @@ public class CellBank extends GenericNtrFile
 
             int cellOffset = reader.readInt();
 
-            cells[i].maxX = reader.readShort();
-            cells[i].maxY = reader.readShort();
-            cells[i].minX = reader.readShort();
-            cells[i].minY = reader.readShort();
+            if (bankType != 0) // the 8-byte bounding rectangle only exists in bank type 1
+            {
+                cells[i].maxX = reader.readShort();
+                cells[i].maxY = reader.readShort();
+                cells[i].minX = reader.readShort();
+                cells[i].minY = reader.readShort();
+            }
 
             storedPos = reader.getPosition();
 
@@ -165,7 +168,7 @@ public class CellBank extends GenericNtrFile
             // read OAMs
             for (int x = 0; x < cellCount; x++)
             {
-                cells[i].oams[x].yCoord = reader.readByte(); //bits 0-7
+                cells[i].oams[x].yCoord = (byte) reader.readByte(); //bits 0-7 (signed)
                 byte attr0 = (byte) reader.readByte();
                 cells[i].oams[x].rotation = (attr0 & 1) == 1; //bit 8
                 cells[i].oams[x].sizeDisable = ((attr0 >> 1) & 1) == 1; //bit 9 Obj Size (if rotation) or Obj Disable (if not rotation)
@@ -262,7 +265,7 @@ public class CellBank extends GenericNtrFile
         // write banks
         for (Cell cell : cells)
         {
-            NcerUtils.writeCell(bankWriter, cell, oamCount);
+            NcerUtils.writeCell(bankWriter, cell, oamCount, bankType);
             oamCount += cell.oams.length;
         }
 
@@ -367,15 +370,19 @@ public class CellBank extends GenericNtrFile
 
         private static final int oamSize = 6;
 
-        private static void writeCell(MemBuf.MemBufWriter writer, Cell cell, int oamCount)
+        private static void writeCell(MemBuf.MemBufWriter writer, Cell cell, int oamCount, int bankType)
         {
             writer.writeShort((short) cell.oams.length);
             writer.writeShort(writeCellAttributes(cell));
             writer.writeInt(oamCount * oamSize);
-            writer.writeShort(cell.maxX);
-            writer.writeShort(cell.maxY);
-            writer.writeShort(cell.minX);
-            writer.writeShort(cell.minY);
+
+            if (bankType != 0) // the 8-byte bounding rectangle only exists in bank type 1
+            {
+                writer.writeShort(cell.maxX);
+                writer.writeShort(cell.maxY);
+                writer.writeShort(cell.minX);
+                writer.writeShort(cell.minY);
+            }
         }
 
         private static short writeCellAttributes(Cell cell)
@@ -882,9 +889,19 @@ public class CellBank extends GenericNtrFile
                 generateImageData();
             }
 
+            private int roundUpToMultipleOfEight(int value)
+            {
+                if (value <= 0)
+                    return 8;
+                return ((value + 7) / 8) * 8;
+            }
+
             private void generateImageData()
             {
-                cellImage = new IndexedImage(maxY - minY + 1, maxX - minX + 1, image.getBitDepth(), image.getPalette());
+                // the IndexedImage constructor rejects dimensions which aren't a multiple of 8
+                int cellHeight = roundUpToMultipleOfEight(maxY - minY);
+                int cellWidth = roundUpToMultipleOfEight(maxX - minX);
+                cellImage = new IndexedImage(cellHeight, cellWidth, image.getBitDepth(), image.getPalette());
 
                 int startX;
                 int startY;
@@ -893,8 +910,8 @@ public class CellBank extends GenericNtrFile
                 for (int i = 0; i < oamImages.length; i++)
                 {
                     Cell.OAM oam = oams[i];
-                    startX = oam.xCoord + cellImage.getWidth() / 2;
-                    startY = oam.yCoord + cellImage.getHeight() / 2;
+                    startX = oam.xCoord - minX;
+                    startY = oam.yCoord - minY;
 
                     for (int row = 0; row < oamImages[i].getHeight(); row++)
                     {
@@ -916,8 +933,8 @@ public class CellBank extends GenericNtrFile
                 for (int i = 0; i < oamImages.length; i++)
                 {
                     Cell.OAM oam = oams[i];
-                    startX = oam.xCoord + cellImage.getWidth() / 2;
-                    startY = oam.yCoord + cellImage.getHeight() / 2;
+                    startX = oam.xCoord - minX;
+                    startY = oam.yCoord - minY;
 
                     for (int row = 0; row < oamImages[i].getHeight(); row++)
                     {

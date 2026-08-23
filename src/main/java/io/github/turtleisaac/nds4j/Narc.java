@@ -116,7 +116,7 @@ public class Narc extends GenericNtrFile
 
         // parse the filenames
         reader.setPosition(fntbOffset + 8);
-        filenames = Fnt.load(reader.readBytes((int) fntbSize));
+        filenames = Fnt.load(reader.readBytes((int) fntbSize - FNTB_HEADER_SIZE));
     }
 
     /**
@@ -210,7 +210,6 @@ public class Narc extends GenericNtrFile
             narc.filenames = filenames;
         else
             narc.filenames = new Fnt.Folder();
-        narc.filenames = filenames;
         return narc;
     }
 

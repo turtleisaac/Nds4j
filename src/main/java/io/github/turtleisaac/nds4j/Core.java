@@ -24,7 +24,7 @@ public class Core
     /**
      * Individual values can be accessed in a structured manner using <code>Core.getSpecificVersionNumber(VersionData vData)</code>
      */
-    public static final int[] VERSION = {0, 1, 0};
+    private static final int[] VERSION = {0, 1, 0};
 
     public enum VersionData
     {
@@ -54,7 +54,7 @@ public class Core
      * @param vData can be <code>MAJOR</code>, <code>MINOR</code>, or <code>PATCH</code>
      * @return an int
      */
-    private static int getSpecificVersionNumber(VersionData vData)
+    public static int getSpecificVersionNumber(VersionData vData)
     {
         return VERSION[vData.accessID];
     }

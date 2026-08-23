@@ -57,9 +57,9 @@ public class CodeCompression
             return data;
 
         // read the header
-        reader.setPosition(data.length - 8);
+        reader.setPosition(dataSize - 8);
         int composite = reader.readInt();
-        int headerLength = composite >> 24;
+        int headerLength = composite >>> 24;
         int compressedLength = composite & 0xFFFFFF;
         int extraSize = reader.readInt();
 
@@ -70,7 +70,7 @@ public class CodeCompression
             throw new RuntimeException("Compressed length doesn't fit in the input file");
 
         reader.setPosition(dataSize - headerLength);
-        for (Byte b : reader.readTo(data.length - 8))
+        for (Byte b : reader.readTo(dataSize - 8))
         {
             if ((b & 0xFF) != 0xFF)
                 throw new RuntimeException("Header padding isn't entirely 0xFF");
@@ -128,7 +128,7 @@ public class CodeCompression
             // Update the mask. If all flag bits have been read, get a new set.
             if (mask == 1)
             {
-                if (readBytes >= compressedLength)
+                if (readBytes >= compressedData.length)
                     throw new RuntimeException("Not enough data to decompress");
                 flags = compressedData[compressedData.length - 1 - readBytes++] & 0xff;
                 mask = 0x80;
@@ -142,7 +142,7 @@ public class CodeCompression
             if ((flags & mask) != 0)
             {
                 // Get length and displacement ("disp") values from the next 2 bytes
-                if (readBytes + 1 >= dataSize)
+                if (readBytes + 1 >= compressedData.length)
                     throw new RuntimeException("Not enough data to decompress");
 
                 int byte1 = compressedData[compressedData.length - 1 - readBytes++] & 0xFF;
@@ -170,6 +170,9 @@ public class CodeCompression
                     disp = 2;
                 }
 
+                if (currentOutSize + length > decompressedLength)
+                    throw new RuntimeException("Not enough room to decompress");
+
                 int bufIdx = currentOutSize - disp;
                 for (int i = 0; i < length; i++)
                 {
@@ -179,7 +182,7 @@ public class CodeCompression
             }
             else
             {
-                if (readBytes >= dataSize)
+                if (readBytes >= compressedData.length)
                     throw new RuntimeException("Not enough data to decompress");
 
                 byte next = compressedData[compressedData.length - 1 - readBytes++];
@@ -199,27 +202,25 @@ public class CodeCompression
      */
     private static int detectAppendedData(byte[] data)
     {
+        MemBuf dataBuf = MemBuf.create(data);
+        MemBuf.MemBufReader reader = dataBuf.reader();
+
         for (int possibleAmt = 0; possibleAmt < 0x20; possibleAmt+= 4)
         {
-            int headerLength;
-            try {
-                headerLength = data[data.length - 5 - possibleAmt];
-            } catch (IndexOutOfBoundsException e) {
+            if (data.length < possibleAmt + 8)
                 return -1;
-            }
-
-            MemBuf dataBuf = MemBuf.create(data);
-            MemBuf.MemBufReader reader = dataBuf.reader();
 
             reader.setPosition(data.length - possibleAmt - 8);
             int composite = reader.readInt();
-            headerLength = composite >> 24;
+            int headerLength = composite >>> 24;
             int compressedLength = composite & 0xFFFFFF;
             int extraSize = reader.readInt();
 
             if (headerLength < 8)
                 continue;
             if (compressedLength > data.length)
+                continue;
+            if (data.length - possibleAmt - headerLength < 0)
                 continue;
 
             reader.setPosition(data.length - possibleAmt - headerLength);

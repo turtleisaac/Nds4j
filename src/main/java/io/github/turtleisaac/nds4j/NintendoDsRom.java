@@ -174,7 +174,7 @@ public class NintendoDsRom
         {
             realSigOffset = romSizeOrRsaSigOffset;
         }
-        if (realSigOffset != 0)
+        if (realSigOffset > 0 && realSigOffset < fileLength)
         {
             reader.setPosition(realSigOffset);
             rsaSignature = reader.readTo(Math.min(fileLength, realSigOffset + 0x88));
@@ -210,8 +210,11 @@ public class NintendoDsRom
         int arm9PostDataOffset = arm9Offset + arm9Length;
         ArrayList<Integer> arm9PostData = new ArrayList<>();
 
+        reader.setPosition(arm9PostDataOffset);
+
         int[] extraData;
-        while (Arrays.equals(new int[] {0x21, 0x06, 0xC0, 0xDE}, (extraData = reader.readBytesI(4)) ))
+        while (reader.getPosition() >= 0 && reader.getPosition() + 12 <= fileLength
+                && Arrays.equals(new int[] {0x21, 0x06, 0xC0, 0xDE}, (extraData = reader.readBytesI(4)) ))
         {
             arm9PostData.addAll(Arrays.stream(extraData).boxed().collect(Collectors.toList()));
             arm9PostData.addAll(Arrays.stream(reader.readBytesI(8)).boxed().collect(Collectors.toList()));
@@ -697,12 +700,7 @@ public class NintendoDsRom
 
     private short calculateCRC16(byte... arr)
     {
-        CRC16 crc16 = new CRC16();
-
-        for (byte b : arr) {
-            crc16.update(b);
-        }
-        return (short) crc16.getValue();
+        return (short) CRC16.calculateCrc(arr);
     }
 
     private Integer getNextFile(HashMap<Integer, Integer> fileOffsets)
@@ -866,7 +864,7 @@ public class NintendoDsRom
         File dataDir = Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile();
 
         Stream<File> overlayStream = Arrays.stream(Objects.requireNonNull(overlayDir.listFiles(File::isFile)));
-        List<File> overlays = overlayStream.sorted(Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("_")[1].replace(".bin", "")))).filter(file -> !file.isHidden()).collect(Collectors.toList());
+        List<File> overlays = overlayStream.filter(file -> !file.isHidden()).sorted(Comparator.comparingInt(o -> Integer.parseInt(o.getName().split("_")[1].replace(".bin", "")))).collect(Collectors.toList());
 
         int numFiles = Fnt.calculateNumFiles(overlayDir) + Fnt.calculateNumFiles(dataDir);
         for (int i = 0; i < numFiles; i++)
@@ -894,38 +892,11 @@ public class NintendoDsRom
     }
 
     /**
-     * Unpacks the rom to the target directory on disk
-     * @param dir a <code>String</code> containing the path to the target directory
-     * @throws IOException if any of the output files fail to be written
+     * Serializes this <code>NintendoDsRom</code>'s header exactly as it is written to an unpacked ROM directory.
+     * @return a <code>byte[]</code> containing the serialized header
      */
-    public void unpack(String dir) throws IOException
+    public byte[] getHeader()
     {
-        unpack(new File(dir));
-    }
-
-    /**
-     * Unpacks the rom to the target directory on disk
-     * @param dir a <code>File</code> object containing the path to the target directory
-     * @throws IOException if any of the output files fail to be written
-     */
-    public void unpack(File dir) throws IOException
-    {
-        if (dir.exists() && dir.isDirectory() && Objects.requireNonNull(dir.listFiles()).length != 0)
-        {
-            throw new RuntimeException("Unable to unpack rom, target folder already exists");
-        }
-        else if (!dir.exists() && !dir.mkdir())
-        {
-            throw new RuntimeException("Failed to create unpacked directory, check write perms.");
-        }
-
-        //todo figure out arm9 post data
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM9.name), arm9);
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM7.name), arm7);
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y9.name), y9);
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y7.name), y7);
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.BANNER.name), iconBanner);
-
         MemBuf headerBuf = MemBuf.create();
         MemBuf.MemBufWriter headerWriter = headerBuf.writer();
 
@@ -987,7 +958,52 @@ public class NintendoDsRom
         headerWriter.write(padding_200h);
 
         headerBuf.reader().setPosition(0);
-        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name), headerBuf.reader().getBuffer());
+        return headerBuf.reader().getBuffer();
+    }
+
+    /**
+     * Gets a copy of the icon/banner data of this <code>NintendoDsRom</code>
+     * @return a <code>byte[]</code> containing the icon/banner data, or <code>null</code> if there is none
+     */
+    public byte[] getIconBanner()
+    {
+        return iconBanner == null ? null : iconBanner.clone();
+    }
+
+    /**
+     * Unpacks the rom to the target directory on disk
+     * @param dir a <code>String</code> containing the path to the target directory
+     * @throws IOException if any of the output files fail to be written
+     */
+    public void unpack(String dir) throws IOException
+    {
+        unpack(new File(dir));
+    }
+
+    /**
+     * Unpacks the rom to the target directory on disk
+     * @param dir a <code>File</code> object containing the path to the target directory
+     * @throws IOException if any of the output files fail to be written
+     */
+    public void unpack(File dir) throws IOException
+    {
+        if (dir.exists() && dir.isDirectory() && Objects.requireNonNull(dir.listFiles()).length != 0)
+        {
+            throw new RuntimeException("Unable to unpack rom, target folder already exists");
+        }
+        else if (!dir.exists() && !dir.mkdir())
+        {
+            throw new RuntimeException("Failed to create unpacked directory, check write perms.");
+        }
+
+        //todo figure out arm9 post data
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM9.name), arm9);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.ARM7.name), arm7);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y9.name), y9);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.Y7.name), y7);
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.BANNER.name), iconBanner);
+
+        BinaryWriter.writeFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name), getHeader());
 
         // write the filesystem
         Fnt.writeFolderToDisk(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.DATA.name).toFile(), filenames, files);
