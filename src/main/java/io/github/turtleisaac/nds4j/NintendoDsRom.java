@@ -1117,7 +1117,7 @@ public class NintendoDsRom
     /**
      * Sets this <code>NintendoDsRom</code>'s title value to the given value
      * <p>
-     * NOTE: String length should be <= 12 characters long
+     * NOTE: String length should be &lt;= 12 characters long
      */
     public void setTitle(String title)
     {

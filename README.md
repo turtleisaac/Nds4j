@@ -185,8 +185,24 @@ This section will try to answer some questions you may have.
 Distribution
 ------------
 
-The current version of Nds4j can be obtained from [Apache Maven](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j),
-or from the [Releases Page](https://github.com/turtleisaac/Nds4j/releases/latest) here on GitHub.
+Nds4j is published to Maven Central. Add it to a Maven project with:
+
+```xml
+<dependency>
+    <groupId>io.github.turtleisaac</groupId>
+    <artifactId>Nds4j</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+or to a Gradle project with:
+
+```groovy
+implementation 'io.github.turtleisaac:Nds4j:1.0.0'
+```
+
+Every published version is listed on [the Maven Central artifact page](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j),
+and jars are also attached to the [Releases Page](https://github.com/turtleisaac/Nds4j/releases/latest) here on GitHub.
 
 Documentation
 -------------

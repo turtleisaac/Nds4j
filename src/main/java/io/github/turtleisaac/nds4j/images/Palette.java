@@ -45,7 +45,6 @@ public class Palette extends GenericNtrFile
      * Parses an NCLR file and returns a <code>Palette</code> representation of it
      * @param data a <code>byte[]</code> containing a binary representation of an NCLR file
      * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @return a <code>Palette</code> representation of the provided NCLR file
      */
     public Palette(byte[] data, int bitDepth)
     {
@@ -457,7 +456,7 @@ public class Palette extends GenericNtrFile
      * @param file a <code>File</code> containing a path to an indexed PNG file on disk
      * @return a <code>Palette</code> matching that of the original indexed PNG file
      * @throws IOException if the parent directory of the specified target input file does not exist
-     * @exception IndexedImage.PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     * @throws RuntimeException if the provided file is not a PNG, or if it is not indexed
      */
     public static Palette fromIndexedPngFile(File file) throws IOException
     {
@@ -469,7 +468,7 @@ public class Palette extends GenericNtrFile
      * @param file a <code>String</code> containing a path to an indexed PNG file on disk
      * @return a <code>Palette</code> matching that of the original indexed PNG file
      * @throws IOException if the parent directory of the specified target input file does not exist
-     * @exception IndexedImage.PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     * @throws RuntimeException if the provided file is not a PNG, or if it is not indexed
      */
     public static Palette fromIndexedPngFile(String file) throws IOException
     {

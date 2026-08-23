@@ -1,0 +1,94 @@
+name: Release
+
+# Publishing to Maven Central is irreversible: a coordinate that has been released can never
+# be changed or withdrawn. The checks below run before anything is uploaded, so the common
+# mistakes fail here rather than becoming permanent.
+#
+# Required repository secrets:
+#   MAVEN_CENTRAL_USERNAME  token username from https://central.sonatype.com/account
+#   MAVEN_CENTRAL_PASSWORD  token password from the same page
+#   GPG_PRIVATE_KEY         ASCII-armoured private key (gpg --armor --export-secret-keys <id>)
+#   GPG_PASSPHRASE          passphrase for that key
+#
+# The upload lands in the Central Portal as a validated deployment awaiting release; it is
+# published by hand from the portal UI. Set <autoPublish>true</autoPublish> in pom.xml to
+# skip that step once the process is trusted.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v1.0.0'
+        required: true
+
+jobs:
+  release:
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # The oldest JDK this project is tested on. Building the release artifact on the
+          # lowest supported version avoids shipping something the matrix never exercised.
+          java-version: '17'
+          cache: maven
+          server-id: central
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Check the tag matches the project version
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          pom=$(mvn -B -ntp -q help:evaluate -Dexpression=project.version -DforceStdout)
+          echo "tag=$tag  ->  version=$version"
+          echo "pom.xml declares $pom"
+          if [ "$version" != "$pom" ]; then
+            echo "::error title=Version mismatch::Tag '$tag' implies version '$version', but pom.xml declares '$pom'. Releasing would publish '$pom' under a tag that names something else. Retag, or correct the version in pom.xml."
+            exit 1
+          fi
+
+      - name: Check the version is not already on Maven Central
+        run: |
+          set -euo pipefail
+          version=$(mvn -B -ntp -q help:evaluate -Dexpression=project.version -DforceStdout)
+          url="https://repo1.maven.org/maven2/io/github/turtleisaac/Nds4j/${version}/"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url")
+          if [ "$code" = "200" ]; then
+            echo "::error title=Version already published::Nds4j ${version} is already on Maven Central. Released coordinates are immutable, so this cannot be overwritten -- bump the version and tag again."
+            exit 1
+          fi
+          echo "Nds4j ${version} is not yet on Central (HTTP ${code}); proceeding."
+
+      - name: Run the test suite
+        # A release is the one build that must not skip its tests.
+        run: mvn -B -ntp verify
+
+      - name: Publish
+        run: mvn -B -ntp -Prelease deploy -DskipTests
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Attach artifacts to the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            target/*.jar
+            target/*.asc
+          if-no-files-found: ignore
