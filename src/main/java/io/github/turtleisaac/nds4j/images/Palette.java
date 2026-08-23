@@ -144,6 +144,8 @@ public class Palette extends GenericNtrFile
     public Palette(int numColors)
     {
         super("RLCN", "RPCN");
+        if (numColors <= 0)
+            throw new RuntimeException(String.format("%d was provided as a palette size, but it must be positive.", numColors));
         this.numColors = numColors;
         colors = new Color[numColors];
         for (int i = 0; i < colors.length; i++)

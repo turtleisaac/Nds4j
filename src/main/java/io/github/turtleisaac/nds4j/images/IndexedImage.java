@@ -62,7 +62,10 @@ public class IndexedImage extends GenericNtrFile
     private final int width;
 
     private int bitDepth;
-    private NcgrUtils.ScanMode scanMode;
+    // Defaults to NOT_SCANNED so that an image built in memory (rather than parsed from an
+    // NCGR) serializes down the plain tiled path. Leaving this null made save() take the
+    // scanned branch, where neither direction matched and the pixel buffer came out empty.
+    private NcgrUtils.ScanMode scanMode = NcgrUtils.ScanMode.NOT_SCANNED;
     private int colsPerChunk = 1;
     private int rowsPerChunk = 1;
     private int numTiles;
@@ -268,6 +271,18 @@ public class IndexedImage extends GenericNtrFile
     public IndexedImage(int height, int width, int bitDepth, Palette palette)
     {
         super("RGCN");
+
+        // Guard the degenerate arguments first: without these, a negative dimension surfaces as
+        // a bare NegativeArraySizeException from the pixel allocation, and 0 slips through the
+        // multiple-of-8 test to produce an image with no pixels at all.
+        if (height <= 0)
+            throw new RuntimeException(String.format("%d was provided for image height, but it must be positive.", height));
+
+        if (width <= 0)
+            throw new RuntimeException(String.format("%d was provided for image width, but it must be positive.", width));
+
+        if (palette == null)
+            throw new RuntimeException("An IndexedImage requires a palette, but null was provided.");
 
         if (height % 8 != 0)
             throw new RuntimeException(String.format("%d was provided for image height, but a multiple of 8 is required.", height));
@@ -1022,7 +1037,7 @@ public class IndexedImage extends GenericNtrFile
      */
     public void setScanMode(NcgrUtils.ScanMode scanMode)
     {
-        this.scanMode = scanMode;
+        this.scanMode = scanMode == null ? NcgrUtils.ScanMode.NOT_SCANNED : scanMode;
     }
 
     /**

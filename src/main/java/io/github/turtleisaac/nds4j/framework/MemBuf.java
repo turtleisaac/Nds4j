@@ -131,6 +131,8 @@ public class MemBuf {
         }
 
         public byte[] readBytes(int size) {
+            if (size < 0)
+                throw new IllegalArgumentException("Cannot read a negative number of bytes: " + size);
             require(size);
             byte[] ret = new byte[size];
             System.arraycopy(buf, readPos, ret, 0, size);
@@ -189,6 +191,10 @@ public class MemBuf {
         }
 
         public void skip(int n) {
+            // A negative skip silently rewinds the write cursor, which truncates everything
+            // written so far the next time the buffer is read back.
+            if (n < 0)
+                throw new IllegalArgumentException("Cannot skip a negative number of bytes: " + n);
             require(n);
             writePos += n;
         }
@@ -251,6 +257,8 @@ public class MemBuf {
         }
 
         public MemBufWriter writeString(String s, int len) {
+            if (len < 0)
+                throw new IllegalArgumentException("Cannot write a string into a negative-width field: " + len);
             byte[] b = s.getBytes(StandardCharsets.ISO_8859_1);
             byte[] toWrite = new byte[len];
             System.arraycopy(b, 0, toWrite, 0, Math.min(b.length, len));

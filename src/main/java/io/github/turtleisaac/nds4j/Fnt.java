@@ -525,9 +525,23 @@ public class Fnt
      */
     public static void writeFolderToDisk(File dir, Folder folder, ArrayList<byte[]> files) throws IOException
     {
-        if (!dir.mkdir())
+        // mkdir() alone conflates "already exists", "parent is missing" and "no write permission"
+        // into one misleading message. Distinguish them, and keep refusing to write into a
+        // directory that already holds data rather than silently mixing in stale files.
+        if (dir.exists())
         {
-            throw new RuntimeException("Could not create data dir, check write perms.");
+            if (!dir.isDirectory())
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" already exists and is not a directory.");
+
+            String[] existing = dir.list();
+            if (existing == null)
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" could not be read.");
+            if (existing.length != 0)
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" already exists and is not empty; refusing to write over it.");
+        }
+        else if (!dir.mkdirs())
+        {
+            throw new RuntimeException("Could not create \"" + dir.getAbsolutePath() + "\", check write perms.");
         }
 
         for (String name : folder.getFolders().keySet())
@@ -557,6 +571,25 @@ public class Fnt
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" does not exist.");
         else if(!dir.isDirectory())
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" is not a directory.");
+
+        // File ids are assigned by writing into fixed slots, so the destination has to be big
+        // enough before the walk starts. Size it here when the caller hands over an empty list
+        // (the documented "to fill" usage) and reject a list that is too small to hold the tree,
+        // which would otherwise surface much later as "No available file IDs to allocate".
+        int numFiles = calculateNumFiles(dir);
+        if (files.isEmpty())
+        {
+            for (int i = 0; i < numFiles; i++)
+                files.add(null);
+        }
+        else if (files.size() < numFiles)
+        {
+            throw new IllegalArgumentException(String.format(
+                    "The provided file list holds %d slots but \"%s\" contains %d files. Pass an empty list, "
+                            + "or one pre-sized to at least the file count.",
+                    files.size(), dir.getAbsolutePath(), numFiles));
+        }
+
         return loadFolderFromDisk(dir, files); // this is always root folder
     }
 
