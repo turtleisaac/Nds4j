@@ -47,7 +47,12 @@ public class CodeCompression
         {
             reader.setPosition(dataBuf.writer().getPosition() - appendedDataAmount);
             appendedData = reader.readBytes(appendedDataAmount);
-            dataBuf.writer().skip(-appendedDataAmount);
+            // Drop the appended tail from the buffer's extent. The write cursor doubles as the
+            // reader's bound, so moving it back is what stops the tail being read as part of the
+            // compressed data below. This used to go through skip() with a negative count, which
+            // is now rejected - rightly, since an accidental negative skip silently discards
+            // everything written so far. Here the truncation is the intent, so it is spelled out.
+            dataBuf.writer().setPosition(dataBuf.writer().getPosition() - appendedDataAmount);
             dataSize -= appendedDataAmount;
         }
 
