@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.awt.Color;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
@@ -210,6 +211,68 @@ class IndexedImageGeometryTest
                 assertThat(reparsed.getPixelValue(x, y))
                         .as("pixel (%d,%d) survives save/parse", x, y)
                         .isEqualTo((x ^ y) & 0xF);
+    }
+
+    @Test
+    @DisplayName("a saved image parses back at its true size without being told the tile grid")
+    void serialisationRoundTripWithoutForcingTheGrid()
+    {
+        // serialisationRoundTrip passes width/8 as tilesWidth, which tells the parser the answer
+        // and so cannot notice if the file fails to record it. A real consumer opening an NCGR
+        // has only the file, so this passes 0 and lets the header speak for itself.
+        //
+        // Written from memory, mappingType is whatever the image was constructed with. The
+        // writer emits the tile grid only for mapping type 32 and otherwise fills those two
+        // fields with 0xFFFF, while still writing a 0 at 0x22 that the reader normalises back to
+        // 32 - so the file declared a grid it did not contain. A 160x80 image came back 8x1600.
+        int height = 80, width = 160;
+        IndexedImage original = blank(height, width, 4);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                original.setPixelValue(x, y, (x ^ y) & 0xF);
+
+        IndexedImage reparsed = new IndexedImage(original.save(), 0, 0, 1, 1, true);
+
+        assertThat(reparsed.getWidth()).as("width survives a parse that was not told the grid")
+                .isEqualTo(width);
+        assertThat(reparsed.getHeight()).as("height survives a parse that was not told the grid")
+                .isEqualTo(height);
+
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                assertThat(reparsed.getPixelValue(x, y))
+                        .as("pixel (%d,%d) survives save/parse", x, y)
+                        .isEqualTo((x ^ y) & 0xF);
+    }
+
+    @Test
+    @DisplayName("the tile grid written to the header matches the image's real dimensions")
+    void headerRecordsTheRealTileGrid()
+    {
+        // asserted against the bytes rather than through a reparse, because a reader that is
+        // handed the grid separately would agree with a header that has none
+        byte[] ncgr = blank(80, 160, 4).save();
+
+        int tilesHeight = (ncgr[0x18] & 0xFF) | ((ncgr[0x19] & 0xFF) << 8);
+        int tilesWidth = (ncgr[0x1A] & 0xFF) | ((ncgr[0x1B] & 0xFF) << 8);
+
+        assertThat(tilesHeight).as("tile rows at 0x18").isEqualTo(80 / 8);
+        assertThat(tilesWidth).as("tile columns at 0x1A").isEqualTo(160 / 8);
+    }
+
+    @Test
+    @DisplayName("an image with no bit depth is refused rather than written as an empty file")
+    void bitDepthlessImageIsNotSilentlyEmptied() throws IndexedImage.ImageException
+    {
+        // Two deprecated constructors never set a bit depth. The writer used to emit a 48 byte
+        // header with no character data, which parses cleanly as an empty image - so every pixel
+        // was discarded and the result still looked like a valid NCGR.
+        IndexedImage image = new IndexedImage(new int[16][16], greyPalette(16));
+
+        assertThatThrownBy(image::save)
+                .as("a file that holds no pixels must not be produced silently")
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bit depth");
     }
 
     @Test

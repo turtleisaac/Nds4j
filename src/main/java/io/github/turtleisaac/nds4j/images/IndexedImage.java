@@ -69,7 +69,16 @@ public class IndexedImage extends GenericNtrFile
     private int colsPerChunk = 1;
     private int rowsPerChunk = 1;
     private int numTiles;
-    private int mappingType;
+    /**
+     * The tile mapping type, in the normalised form the reader produces: 32, 64, 128 or 256.
+     * <p>
+     * Defaults to 32 because that is what a file carrying 0 in the header means - the reader
+     * maps a raw 0 to 32. Leaving the field at 0 for an image built in memory made save() take
+     * its "not 32" branch and write 0xFFFFFFFF over the tile grid, while still writing 0 at
+     * 0x22 for the reader to normalise back to 32. The file then declared a grid it did not
+     * contain: a 160x80 image saved and reparsed as 8x1600.
+     */
+    private int mappingType = 32;
     private boolean vram;
     private int encryptionKey = -1;
 
@@ -420,6 +429,17 @@ public class IndexedImage extends GenericNtrFile
      */
     public byte[] save()
     {
+        // An image whose bit depth was never set has no pixel format, and the writer would emit
+        // a header with no character data at all - a 48 byte file that parses cleanly as an
+        // empty image, losing every pixel without a word. Two deprecated constructors leave it
+        // unset. Refuse rather than produce something that looks valid and holds nothing.
+        if (bitDepth != 4 && bitDepth != 8)
+        {
+            throw new RuntimeException("This image has no bit depth set (" + bitDepth + "), so"
+                    + " there is no pixel format to write it in. It was most likely built with one"
+                    + " of the deprecated constructors, which never set one.");
+        }
+
         int tileSize = bitDepth * 8;
 
         if (width % 8 != 0)
@@ -998,8 +1018,13 @@ public class IndexedImage extends GenericNtrFile
      */
     public void setPixelValue(int x, int y, int colorIdx)
     {
-        if (y >= pixels.length || x >= pixels[y].length)
-            System.out.println("moo");
+        // The array index would throw on its own; this only makes the failure say which pixel
+        // and how big the image is. It used to print "moo" and let the throw happen anyway.
+        if (y < 0 || y >= pixels.length || x < 0 || x >= pixels[y].length)
+        {
+            throw new ArrayIndexOutOfBoundsException(String.format(
+                    "Pixel (%d, %d) is outside this %dx%d image.", x, y, width, height));
+        }
         pixels[y][x] = colorIdx;
         update = true;
     }
@@ -1142,7 +1167,9 @@ public class IndexedImage extends GenericNtrFile
         image.scanMode = leftImage.scanMode;
         image.colsPerChunk = leftImage.colsPerChunk;
         image.rowsPerChunk = leftImage.rowsPerChunk;
-        image.numTiles = leftImage.numTiles + rightImage.numTiles;
+        // numTiles is left as the constructor computed it from the composite's own dimensions.
+        // Summing the two inputs is wrong whenever either was a partial grid: the sum under-
+        // counts, save() emits only that many tiles, and the image reparses shorter than it is.
         image.mappingType = leftImage.mappingType;
         image.vram = leftImage.vram;
         image.encryptionKey = leftImage.encryptionKey;
@@ -1242,7 +1269,12 @@ public class IndexedImage extends GenericNtrFile
             MemBuf dataBuf = MemBuf.create(src);
             MemBuf.MemBufReader reader = dataBuf.reader();
 
-            int[] data = new int[width*height/2];
+            // 4bpp packs two pixels per byte, so a tile is 32 bytes = 16 u16 words. Sized from
+            // the tile count rather than from width*height: the header's tile grid can be larger
+            // than the char data it actually carries, and deriving the length from the grid then
+            // reads past the end of the file. This also removes the depth-dependent divisor that
+            // was the original mistake - it was set to width*height/2, which is the 8bpp figure.
+            int[] data = new int[image.numTiles * 16];
             for (int i = 0; i < data.length; i++)
             {
                 data[i] = reader.readUInt16();
@@ -1271,7 +1303,9 @@ public class IndexedImage extends GenericNtrFile
             }
 
             byte[] arr = new byte[width*height];
-            for (int i = 0; i < arr.length/4; i++)
+            // bounded by both: a partial file supplies fewer words than the grid has room for,
+            // and the remainder stays as palette index 0
+            for (int i = 0; i < arr.length/4 && i < data.length; i++)
             {
                 arr[i*4] = (byte) (data[i] & 0xf);
                 arr[i*4+1] = (byte) ((data[i] >> 4) & 0xf);
@@ -1304,7 +1338,10 @@ public class IndexedImage extends GenericNtrFile
             MemBuf dataBuf = MemBuf.create(src);
             MemBuf.MemBufReader reader = dataBuf.reader();
 
-            int[] data = new int[width*height/4];
+            // 8bpp is one byte per pixel, so a tile is 64 bytes = 32 u16 words. This was
+            // width*height/4 - the 4bpp figure - so it under-allocated by half and the unpack
+            // below indexed straight off the end.
+            int[] data = new int[image.numTiles * 32];
             for (int i = 0; i < data.length; i++)
             {
                 data[i] = reader.readUInt16();
@@ -1333,7 +1370,8 @@ public class IndexedImage extends GenericNtrFile
             }
 
             byte[] arr = new byte[width*height];
-            for (int i = 0; i < arr.length/2; i++)
+            // see the 4bpp path: bounded by the data actually present as well as by the grid
+            for (int i = 0; i < arr.length/2 && i < data.length; i++)
             {
                 arr[i*2] = (byte) (data[i] & 0xff);
                 arr[i*2+1] = (byte) ((data[i] >> 8) & 0xff);
@@ -1432,11 +1470,12 @@ public class IndexedImage extends GenericNtrFile
                         int leftPixel = srcPixelPair & 0xF;
                         int rightPixel = (srcPixelPair >> 4) & 0xF;
 
+                        // A destination outside the image means the tile grid and the declared
+                        // dimensions disagree, which a malformed or truncated file can produce.
+                        // This used to print "moo" and then write anyway; setPixelValue now
+                        // reports the offending pixel itself, so the pair is simply skipped.
                         if (destX >= image.getWidth() || destY >= image.getHeight())
-                            System.out.println("moo");
-
-//                        image.setPixelValue(destX, destY, i % 127);
-//                        image.setPixelValue(destX + 1, destY, i % 127);
+                            continue;
 
                         image.setPixelValue(destX, destY, leftPixel);
                         image.setPixelValue(destX + 1, destY, rightPixel);

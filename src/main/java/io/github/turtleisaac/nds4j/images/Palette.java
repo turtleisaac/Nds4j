@@ -190,7 +190,11 @@ public class Palette extends GenericNtrFile
         int numColors = colors.length;
 
         int size = numColors * 2; // two bytes per color
-        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18) + NTR_HEADER_SIZE;
+        // 0x18 for both magics: NclrUtils.palHeader is the same 24 bytes either way and the
+        // colour data starts at 0x28 regardless, so an RPCN file used to declare a size eight
+        // bytes short of itself. Nothing in this library reads the field back, which is why it
+        // went unnoticed, but it is what an external tool would trust.
+        int extSize = size + 0x18 + NTR_HEADER_SIZE;
 
         writeGenericNtrHeader(writer, extSize, 1);
 
@@ -334,6 +338,11 @@ public class Palette extends GenericNtrFile
         this.numColors = numColors;
         Color[] colors = new Color[numColors];
         System.arraycopy(this.colors, 0, colors, 0, Math.min(this.colors.length, numColors));
+        // Growing a palette leaves the new entries null, and a null reaches colorToBGR555 on
+        // save as a NullPointerException from inside the writer. Black is the conventional
+        // filler and is what an unused palette slot holds in practice.
+        for (int i = this.colors.length; i < numColors; i++)
+            colors[i] = java.awt.Color.BLACK;
         this.colors = colors;
     }
 
@@ -482,7 +491,13 @@ public class Palette extends GenericNtrFile
      */
     public byte[] saveAsIndexedPng() throws IOException
     {
-        IndexedImage image = new IndexedImage(numColors / 16, 16, bitDepth, this);
+        // ceil, not floor: a palette that does not fill a whole row still needs that row. And
+        // IndexedImage requires a height that is a multiple of 8, so the row count is rounded
+        // up to one - which is why this used to work only for 128 and 256 colours and threw for
+        // every other size, including the 16 colour palette that is the norm for 4bpp graphics.
+        int rows = (numColors + 15) / 16;
+        int paddedRows = ((rows + 7) / 8) * 8;
+        IndexedImage image = new IndexedImage(paddedRows, 16, bitDepth, this);
 
         int idx = 0;
         int row;
