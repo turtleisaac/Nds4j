@@ -46,7 +46,17 @@ public abstract class CodeBinary extends ReentrantLock
     {
         super();
         byte[] decompressed = CodeCompression.decompress(data);
-        compressed = (decompressed != data);
+        // decompress() hands back the input untouched when there was nothing to decompress, so
+        // differing content is what "this binary was compressed" means. The original asked
+        // Arrays.equals, which is that same test inverted: it set the flag when decompression
+        // had changed nothing.
+        //
+        // Compared by content rather than by reference. Reference inequality also works today,
+        // since decompress returns the very same array on its early-out path, but that is an
+        // unwritten detail of another class - one defensive copy added there and this silently
+        // becomes always-true with nothing to catch it. The comparison costs one memcmp beside
+        // a BLZ decode that has just run.
+        compressed = !Arrays.equals(decompressed, data);
         physicalAddressBuffer = MemBuf.create(decompressed);
         this.bssSize = bssSize;
         this.size = decompressed.length;

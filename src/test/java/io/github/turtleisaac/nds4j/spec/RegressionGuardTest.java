@@ -239,6 +239,62 @@ class RegressionGuardTest
      * asserts that the two agree, which is the one thing already known. Run with -Drom.dir.
      */
     @Nested
+    @DisplayName("code binary compression flag")
+    class CompressionFlag
+    {
+        /**
+         * Reads the private field, because nothing else does.
+         * <p>
+         * {@code compressed} has no getter and no reader anywhere in the library, which is how
+         * it carried an inverted value without anyone noticing. Reflection here is a statement
+         * about that, not a preference: the moment the field is either exposed or deleted, this
+         * helper should go with it.
+         */
+        private boolean compressedFlagOf(byte[] data)
+        {
+            try {
+                io.github.turtleisaac.nds4j.binaries.CodeBinary binary =
+                        new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {};
+                java.lang.reflect.Field field = io.github.turtleisaac.nds4j.binaries.CodeBinary.class
+                        .getDeclaredField("compressed");
+                field.setAccessible(true);
+                return field.getBoolean(binary);
+            }
+            catch (ReflectiveOperationException e) {
+                throw new AssertionError("the compressed flag could not be read", e);
+            }
+        }
+
+        @Test
+        @DisplayName("is false for a binary that was never compressed")
+        void uncompressedBinaryIsNotFlagged()
+        {
+            // The property, stated plainly: if decompressing changed nothing, the input was not
+            // compressed. The original expressed exactly this test and then assigned its
+            // negation, so the flag was true for every uncompressed binary and false for every
+            // compressed one.
+            byte[] plain = "an arm9 binary with nothing compressed about it".getBytes();
+            assertThat(compressedFlagOf(plain))
+                    .as("decompression changed nothing, so this binary was not compressed")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("does not depend on decompress returning the same array")
+        void flagIsAboutContentNotIdentity()
+        {
+            // A copy of the same bytes must give the same answer as the bytes themselves. This
+            // is what reference comparison cannot promise: it happens to work only because
+            // decompress returns its argument unchanged on the early-out path, which is an
+            // implementation detail of another class and not part of any contract.
+            byte[] plain = "an arm9 binary with nothing compressed about it".getBytes();
+            assertThat(compressedFlagOf(plain.clone()))
+                    .as("the answer must come from the contents, not from which object holds them")
+                    .isEqualTo(compressedFlagOf(plain));
+        }
+    }
+
+    @Nested
     @DisplayName("ROM header (needs a retail ROM)")
     class Header
     {
