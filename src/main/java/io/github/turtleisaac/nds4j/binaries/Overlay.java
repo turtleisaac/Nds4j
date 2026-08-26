@@ -19,9 +19,6 @@
 
 package io.github.turtleisaac.nds4j.binaries;
 
-import io.github.turtleisaac.nds4j.framework.CodeCompression;
-import io.github.turtleisaac.nds4j.framework.MemBuf;
-
 public class Overlay extends CodeBinary
 {
     private int ramSize;
@@ -39,13 +36,7 @@ public class Overlay extends CodeBinary
         this.staticInitEnd = staticInitEnd;
         this.fileId = fileId;
         this.compressedSize = compressedSize;
-
-
-        if (isCompressed())
-        {
-            MemBuf physicalAddressBuffer = MemBuf.create(CodeCompression.decompress(data));
-        }
-
+        this.flags = flags;
     }
 
     public boolean isCompressed()

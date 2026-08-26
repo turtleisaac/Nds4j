@@ -84,7 +84,7 @@ public class Example
     public static void example2(NintendoDsRom rom)
     {
         Narc narc = new Narc(rom.getFileByName("a/0/5/6"));
-        byte[] data = narc.files.get(0);
+        byte[] data = narc.getFile(0);
         //dataBuf.writer() can be used to write to a buffer in memory (aka dataBuf)
         // (conversely, dataBuf.reader() can be used to read from the same buffer)
         // (do keep in mind that you'll have to keep track of the end of the buffer yourself at times)
@@ -95,7 +95,7 @@ public class Example
         writer.setPosition(0);
         writer.writeUInt32(0xFFFFFFFFL);
         writer.setPosition(end);
-        narc.files.set(0, dataBuf.reader().getBuffer()); //puts the modified byte[] back into the narc
+        narc.setFile(0, dataBuf.reader().getBuffer()); //puts the modified byte[] back into the narc
         rom.setFileByName("a/0/5/6", narc.save()); //generates a new byte[] representing the modified narc
     }
 
@@ -128,7 +128,7 @@ public class Example
 
         // go use another tool or do whatever, but let's say now you want to pack it back to being a NARC
 
-        Narc packed = Narc.fromUnpacked("a056_unpacked", true, Endianness.BIG);
+        Narc packed = Narc.fromUnpacked("a056_unpacked", true, Endianness.EndiannessType.BIG);
 
         // from here you can put it back into a ROM or whatever
     }
@@ -185,8 +185,24 @@ This section will try to answer some questions you may have.
 Distribution
 ------------
 
-The current version of Nds4j can be obtained from [Apache Maven](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j),
-or from the [Releases Page](https://github.com/turtleisaac/Nds4j/releases/latest) here on GitHub.
+Nds4j is published to Maven Central. Add it to a Maven project with:
+
+```xml
+<dependency>
+    <groupId>io.github.turtleisaac</groupId>
+    <artifactId>Nds4j</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+or to a Gradle project with:
+
+```groovy
+implementation 'io.github.turtleisaac:Nds4j:1.0.0'
+```
+
+Every published version is listed on [the Maven Central artifact page](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j),
+and jars are also attached to the [Releases Page](https://github.com/turtleisaac/Nds4j/releases/latest) here on GitHub.
 
 Documentation
 -------------

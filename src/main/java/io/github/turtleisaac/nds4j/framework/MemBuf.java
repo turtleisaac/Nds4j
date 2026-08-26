@@ -31,7 +31,7 @@ public class MemBuf {
     private MemBufReader reader;
     private MemBufWriter writer;
 
-    private static final int INITIAL_SIZE = 1024*1024;
+    private static final int INITIAL_SIZE = 4096;
 
     public static MemBuf create() {
         return new MemBuf();
@@ -50,16 +50,6 @@ public class MemBuf {
         writer = new MemBufWriter();
     }
 
-    private MemBuf(MemBuf memBuf, int baseAddress)
-    {
-        this.buf = memBuf.buf;
-        this.capacity = memBuf.capacity;
-        this.readPos = baseAddress;
-        this.writePos = baseAddress;
-        reader = new MemBufReader();
-        writer = new MemBufWriter();
-    }
-
     public MemBufReader reader() {
         return reader;
     }
@@ -71,6 +61,12 @@ public class MemBuf {
     public class MemBufReader {
 
         private void require(int space) {
+            if (readPos < 0) {
+                throw new IllegalStateException("Invalid read position: " + readPos);
+            }
+            if (writePos > buf.length) {
+                throw new IllegalStateException("Invalid write position: " + writePos + ", buffer length is " + buf.length);
+            }
             if (writePos - readPos < space) {
                 throw new IllegalStateException("Not enough room to read. need "+space+" bytes, have "+(writePos-readPos));
             }
@@ -96,7 +92,7 @@ public class MemBuf {
 
         public int readByte() {
             require(1);
-            return buf[readPos++];
+            return buf[readPos++] & 0xFF;
         }
 
         public int readInt() {
@@ -129,12 +125,14 @@ public class MemBuf {
 
         public String readString(int size) {
             require(size);
-            String ret = new String(Arrays.copyOfRange(buf, readPos, readPos + size), StandardCharsets.UTF_8);
+            String ret = new String(Arrays.copyOfRange(buf, readPos, readPos + size), StandardCharsets.ISO_8859_1);
             readPos += size;
             return ret;
         }
 
         public byte[] readBytes(int size) {
+            if (size < 0)
+                throw new IllegalArgumentException("Cannot read a negative number of bytes: " + size);
             require(size);
             byte[] ret = new byte[size];
             System.arraycopy(buf, readPos, ret, 0, size);
@@ -178,7 +176,7 @@ public class MemBuf {
 
         private void require(int space) {
             if (capacity - (writePos) < space) {
-                int newSize = Math.max((writePos)+space, capacity + INITIAL_SIZE);
+                int newSize = Math.max((writePos)+space, capacity * 2);
                 buf = Arrays.copyOf(buf, newSize);
                 capacity = buf.length;
             }
@@ -193,6 +191,11 @@ public class MemBuf {
         }
 
         public void skip(int n) {
+            // A negative skip silently rewinds the write cursor, which truncates everything
+            // written so far the next time the buffer is read back.
+            if (n < 0)
+                throw new IllegalArgumentException("Cannot skip a negative number of bytes: " + n);
+            require(n);
             writePos += n;
         }
 
@@ -254,9 +257,11 @@ public class MemBuf {
         }
 
         public MemBufWriter writeString(String s, int len) {
+            if (len < 0)
+                throw new IllegalArgumentException("Cannot write a string into a negative-width field: " + len);
             byte[] b = s.getBytes(StandardCharsets.ISO_8859_1);
             byte[] toWrite = new byte[len];
-            System.arraycopy(b, 0, toWrite, 0, b.length);
+            System.arraycopy(b, 0, toWrite, 0, Math.min(b.length, len));
             return write(toWrite);
         }
 
@@ -265,9 +270,8 @@ public class MemBuf {
          */
         public MemBufWriter write(byte[] bytes, int srcPos, int length) {
             require(length);
-            for (int i=srcPos; length > 0; srcPos++,length--) {
-                buf[writePos++] = bytes[i];
-            }
+            System.arraycopy(bytes, srcPos, buf, writePos, length);
+            writePos += length;
             return this;
         }
 
@@ -280,11 +284,12 @@ public class MemBuf {
          * @return
          */
         public MemBufWriter writeAt(byte[] bytes, int srcPos, int writeOffset, int length) {
-            require(length);
+            int saved = writePos;
             setPosition(writeOffset);
-            for (int i=srcPos; length > 0; srcPos++,length--) {
-                buf[writePos++] = bytes[i];
-            }
+            require(length);
+            System.arraycopy(bytes, srcPos, buf, writePos, length);
+            writePos += length;
+            writePos = Math.max(saved, writePos);
             return this;
         }
 
@@ -297,23 +302,30 @@ public class MemBuf {
         }
 
         public MemBufWriter writeByteNumTimesAt(byte b, int numTimes, int writeOffset) {
-            require(numTimes);
+            int saved = writePos;
             setPosition(writeOffset);
+            require(numTimes);
             for (int i = 0; i < numTimes; i++) {
                 buf[writePos++] = b;
             }
+            writePos = Math.max(saved, writePos);
             return this;
         }
 
         public MemBufWriter align(int alignment)
         {
-            skip(alignment - (writePos) % alignment);
+            int rem = (writePos) % alignment;
+            if (rem != 0)
+                skip(alignment - rem);
             return this;
         }
 
         public MemBufWriter align(int alignment, byte fill)
         {
-            return writeByteNumTimes(fill, alignment - (writePos) % alignment);
+            int rem = (writePos) % alignment;
+            if (rem != 0)
+                return writeByteNumTimes(fill, alignment - rem);
+            return this;
         }
 
     }

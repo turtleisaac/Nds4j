@@ -63,7 +63,7 @@ public class Endianness
                 (byte) ((num >> 8) & 0xff)
         };
 
-        return (short) (( (bytes[1] & 0xff) << 16) | ( (bytes[0] & 0xff) << 24));
+        return (short) (( (bytes[1] & 0xff)) | ( (bytes[0] & 0xff) << 8));
     }
 }
 

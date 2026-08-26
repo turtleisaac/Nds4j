@@ -27,20 +27,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ImageTest
 {
     // rom
-    private static final NintendoDsRom rom = NintendoDsRom.fromFile("HeartGold.nds");
+    private static NintendoDsRom rom;
 
     // this contains the party icons in HGSS
-    private static final Narc a020 = new Narc(rom.getFileByName("a/0/2/0"));
+    private static Narc a020;
 
     // this contains the battle sprites in HGSS
-    private static final Narc a004 = new Narc(rom.getFileByName("a/0/0/4"));
+    private static Narc a004;
 
     // infernape party sprite in HGSS
-    private static final IndexedImage tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
+    private static IndexedImage tiled;
 
     // bulbasaur battle sprite in HGSS
-    private static final IndexedImage scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
-    private static final IndexedImage scanned2 = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, false);
+    private static IndexedImage scanned;
+    private static IndexedImage scanned2;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void loadFixtures()
+    {
+        rom = io.github.turtleisaac.nds4j.TestRoms.require("HeartGold.nds");
+        a020 = new Narc(rom.getFileByName("a/0/2/0"));
+        a004 = new Narc(rom.getFileByName("a/0/0/4"));
+        tiled = new IndexedImage(a020.getFile(399), 4, 0, 1, 1, true);
+        scanned = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, true);
+        scanned2 = new IndexedImage(a004.getFile(6), 0, 0, 1, 1, false);
+    }
 
     @Test
     void bitDepth()

@@ -46,7 +46,17 @@ public abstract class CodeBinary extends ReentrantLock
     {
         super();
         byte[] decompressed = CodeCompression.decompress(data);
-        compressed = Arrays.equals(decompressed, data);
+        // decompress() hands back the input untouched when there was nothing to decompress, so
+        // differing content is what "this binary was compressed" means. The original asked
+        // Arrays.equals, which is that same test inverted: it set the flag when decompression
+        // had changed nothing.
+        //
+        // Compared by content rather than by reference. Reference inequality also works today,
+        // since decompress returns the very same array on its early-out path, but that is an
+        // unwritten detail of another class - one defensive copy added there and this silently
+        // becomes always-true with nothing to catch it. The comparison costs one memcmp beside
+        // a BLZ decode that has just run.
+        compressed = !Arrays.equals(decompressed, data);
         physicalAddressBuffer = MemBuf.create(decompressed);
         this.bssSize = bssSize;
         this.size = decompressed.length;
@@ -81,6 +91,29 @@ public abstract class CodeBinary extends ReentrantLock
     }
 
     /**
+     * Reports whether the data this code binary was constructed from was compressed.
+     * <p>Past tense deliberately. This describes the <i>input</i>, not the current contents: the
+     * buffer returned by <code>getPhysicalAddressBuffer()</code> holds decompressed data either
+     * way, and <code>getSize()</code> is the decompressed length. A retail arm9 answers
+     * <code>true</code> here while everything read out of it is plain.</p>
+     * <p>The answer is decided once, at construction, by comparing the decompressed bytes against
+     * the input. Nothing recompresses on save, so it does not change over the lifetime of the
+     * object.</p>
+     * <p><b>Not the same question as <code>Overlay.isCompressed()</code>.</b> That reads the
+     * compression bit the ROM's overlay table stores for an overlay, and it can be set; this is
+     * an observation about the bytes handed to the constructor, and cannot. The two can disagree
+     * - an overlay whose table entry claims compression but whose data decompressed to itself
+     * answers true there and false here. They were briefly the same name, which made
+     * <code>Overlay</code> override this one by accident.</p>
+     * @return whether the bytes passed to the constructor were compressed
+     * @see Overlay#isCompressed()
+     */
+    public boolean wasCompressed()
+    {
+        return compressed;
+    }
+
+    /**
      * Returns the data contained within this code binary according to the current bounds of its physicalAddressBuffer object.
      * @return a <code>byte[]</code> containing the contents of this code binary.
      */
@@ -91,6 +124,8 @@ public abstract class CodeBinary extends ReentrantLock
 
     private void resetBufferPositions()
     {
+        // anything appended while the lock was held extends the logical end of the binary
+        size = Math.max(size, physicalAddressBuffer.writer().getPosition());
         physicalAddressBuffer.reader().setPosition(0);
         physicalAddressBuffer.writer().setPosition(size);
     }

@@ -19,31 +19,24 @@
 
 package io.github.turtleisaac.nds4j.framework;
 
+import java.util.Locale;
+
 public class StringFormatter
 {
     public static String formatOutputString(int i, int cnt, String prefix, String suffix)
     {
-        StringBuilder sb = new StringBuilder("" + i);
-        if (cnt < 10)
-        {
-            while (sb.length() < 2)
-                sb.insert(0, "0");
-        }
-        else if (cnt < 100)
-        {
-            while (sb.length() < 3)
-                sb.insert(0, "0");
-        }
-        else if (cnt < 1000)
-        {
-            while (sb.length() < 4)
-                sb.insert(0, "0");
-        }
-        else if (cnt < 10000)
-        {
-            while (sb.length() < 5)
-                sb.insert(0, "0");
-        }
+        // Historically this padded to one digit wider than the digit count of cnt, but only
+        // handled cnt < 10000 -- larger counts got no padding at all, which made unpacked
+        // subfile names sort lexicographically out of order and scrambled file IDs on repack.
+        // Keep the original widths (so existing unpacked projects still resolve) and simply
+        // extend the same rule past 9999.
+        int width = String.valueOf(Math.max(cnt, 1)).length() + 1;
+        // Locale.ROOT, not the default: %d formats with the default locale's digits, so under
+        // ar-EG, fa-IR or a Thai-numeral locale this produced Arabic-Indic digits instead of
+        // ASCII. Those are filenames - they go on disk, get listed back, and get parsed with
+        // Integer.parseInt - so the name a project was unpacked with must not depend on the
+        // machine that unpacked it.
+        StringBuilder sb = new StringBuilder(String.format(Locale.ROOT, "%0" + width + "d", i));
         sb.insert(0, prefix).append(suffix);
         return sb.toString();
     }

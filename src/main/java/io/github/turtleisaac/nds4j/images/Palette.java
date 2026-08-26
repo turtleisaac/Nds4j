@@ -45,7 +45,6 @@ public class Palette extends GenericNtrFile
      * Parses an NCLR file and returns a <code>Palette</code> representation of it
      * @param data a <code>byte[]</code> containing a binary representation of an NCLR file
      * @param bitDepth an <code>int</code> containing a bit-depth value to enforce (use <code>0</code> if you don't have one)
-     * @return a <code>Palette</code> representation of the provided NCLR file
      */
     public Palette(byte[] data, int bitDepth)
     {
@@ -102,12 +101,12 @@ public class Palette extends GenericNtrFile
         this.compNum = compNum;
 
         reader.setPosition(0x18 + colorStartOffset);
-        for (int i = 0; i < paletteLength / 2; i++)
+        for (int i = 0; i < numColors; i++)
         {
             colors[i] = NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte());
         }
 
-        if (colors[ (int) (paletteLength / 2) - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
+        if (numColors > 0 && colors[numColors - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
         {
             this.ir = true;
         }
@@ -144,6 +143,8 @@ public class Palette extends GenericNtrFile
     public Palette(int numColors)
     {
         super("RLCN", "RPCN");
+        if (numColors <= 0)
+            throw new RuntimeException(String.format("%d was provided as a palette size, but it must be positive.", numColors));
         this.numColors = numColors;
         colors = new Color[numColors];
         for (int i = 0; i < colors.length; i++)
@@ -166,7 +167,7 @@ public class Palette extends GenericNtrFile
             throw new RuntimeException(String.format("Not a valid Color[]: %d is greater than 256.", arr.length));
         if (arr.length % 16 != 0)
         {
-            Color[] arr2 = new Color[arr.length + arr.length % 16];
+            Color[] arr2 = new Color[arr.length + (16 - arr.length % 16)];
             Arrays.fill(arr2, Color.black);
             System.arraycopy(arr, 0, arr2, 0, arr.length);
             arr = arr2;
@@ -189,7 +190,11 @@ public class Palette extends GenericNtrFile
         int numColors = colors.length;
 
         int size = numColors * 2; // two bytes per color
-        int extSize = size + (whichMagic == 1 ? 0x10 : 0x18) + NTR_HEADER_SIZE;
+        // 0x18 for both magics: NclrUtils.palHeader is the same 24 bytes either way and the
+        // colour data starts at 0x28 regardless, so an RPCN file used to declare a size eight
+        // bytes short of itself. Nothing in this library reads the field back, which is why it
+        // went unnoticed, but it is what an external tool would trust.
+        int extSize = size + 0x18 + NTR_HEADER_SIZE;
 
         writeGenericNtrHeader(writer, extSize, 1);
 
@@ -248,7 +253,7 @@ public class Palette extends GenericNtrFile
      */
     public Color[] getColors()
     {
-        return colors;
+        return Arrays.copyOf(colors, colors.length);
     }
 
     /**
@@ -268,7 +273,7 @@ public class Palette extends GenericNtrFile
      */
     public Color getColor(int i)
     {
-        if (i >= colors.length)
+        if (i < 0 || i >= colors.length)
             throw new RuntimeException("Invalid index: " + i);
         return colors[i];
     }
@@ -281,7 +286,7 @@ public class Palette extends GenericNtrFile
      */
     public void setColor(int i, Color color)
     {
-        if (i >= colors.length)
+        if (i < 0 || i >= colors.length)
             throw new RuntimeException("Invalid index: " + i);
         colors[i] = color;
     }
@@ -332,7 +337,12 @@ public class Palette extends GenericNtrFile
             throw new RuntimeException(String.format("Invalid number of colors: %d is not a multiple of 16", numColors));
         this.numColors = numColors;
         Color[] colors = new Color[numColors];
-        System.arraycopy(this.colors, 0, colors, 0, numColors);
+        System.arraycopy(this.colors, 0, colors, 0, Math.min(this.colors.length, numColors));
+        // Growing a palette leaves the new entries null, and a null reaches colorToBGR555 on
+        // save as a NullPointerException from inside the writer. Black is the conventional
+        // filler and is what an unused palette slot holds in practice.
+        for (int i = this.colors.length; i < numColors; i++)
+            colors[i] = java.awt.Color.BLACK;
         this.colors = colors;
     }
 
@@ -455,7 +465,7 @@ public class Palette extends GenericNtrFile
      * @param file a <code>File</code> containing a path to an indexed PNG file on disk
      * @return a <code>Palette</code> matching that of the original indexed PNG file
      * @throws IOException if the parent directory of the specified target input file does not exist
-     * @exception IndexedImage.PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     * @throws RuntimeException if the provided file is not a PNG, or if it is not indexed
      */
     public static Palette fromIndexedPngFile(File file) throws IOException
     {
@@ -467,7 +477,7 @@ public class Palette extends GenericNtrFile
      * @param file a <code>String</code> containing a path to an indexed PNG file on disk
      * @return a <code>Palette</code> matching that of the original indexed PNG file
      * @throws IOException if the parent directory of the specified target input file does not exist
-     * @exception IndexedImage.PngUtils.PngParseException can occur if the provided file is not a PNG, or if it is not indexed
+     * @throws RuntimeException if the provided file is not a PNG, or if it is not indexed
      */
     public static Palette fromIndexedPngFile(String file) throws IOException
     {
@@ -481,7 +491,13 @@ public class Palette extends GenericNtrFile
      */
     public byte[] saveAsIndexedPng() throws IOException
     {
-        IndexedImage image = new IndexedImage(numColors / 16, 16, bitDepth, this);
+        // ceil, not floor: a palette that does not fill a whole row still needs that row. And
+        // IndexedImage requires a height that is a multiple of 8, so the row count is rounded
+        // up to one - which is why this used to work only for 128 and 256 colours and threw for
+        // every other size, including the 16 colour palette that is the norm for 4bpp graphics.
+        int rows = (numColors + 15) / 16;
+        int paddedRows = ((rows + 7) / 8) * 8;
+        IndexedImage image = new IndexedImage(paddedRows, 16, bitDepth, this);
 
         int idx = 0;
         int row;

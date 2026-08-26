@@ -105,6 +105,9 @@ public class Fnt
          */
         private int findFilenameInFolder(String[] requestedPath, Folder searchFolder)
         {
+            if (requestedPath.length == 0)
+                return -1;
+
             String pathPart = requestedPath[0];
             if (requestedPath.length == 1)
             {
@@ -157,6 +160,9 @@ public class Fnt
          */
         private Folder findSubfolderInFolder(String[] requestedPath, Folder searchFolder)
         {
+            if (requestedPath.length == 0)
+                return null;
+
             String pathPart = requestedPath[0];
 
             for (String subfolderName : searchFolder.folders.keySet())
@@ -380,8 +386,6 @@ public class Fnt
         MemBuf getFntEntry();
     }
 
-    public static int nextFolderId;
-
     /**
      * Generates a MemBuf representing the root folder as a filename table. This is the inverse of <code>load()</code>
      * @param root a Folder object for the root folder
@@ -393,12 +397,12 @@ public class Fnt
 
         // nextFolderId allows us to assign folder IDs in sequential order.
         // The root folder always has ID 0xF000.
-        nextFolderId = 0xF000;
+        int[] nextFolderId = new int[] {0xF000};
         // The root folder's parent's ID is the total number of folders.
         int rootParentId = countFoldersIn(root);
 
         // Ensure that the root folder has the proper folder ID.
-        int rootId = parseFolder(root, rootParentId, folderEntries);
+        int rootId = parseFolder(root, rootParentId, folderEntries, nextFolderId);
         assert (rootId == 0xF000);
 
         // in theory, (folderEntries.size() * 8) bytes are needed for the folders table at the beginning of the fnt
@@ -434,12 +438,13 @@ public class Fnt
      * @param folder a <code>Folder</code>
      * @param parentId an <code>int</code> containing the ID of the parent folder
      * @param folderEntries a <code>HashMap</code> containing information needed to write the fnt entry for each Folder in the rom
+     * @param nextFolderId a single-element <code>int[]</code> holding the next folder ID to assign
      * @return the ID number assigned to the parsed folder
      */
-    private static int parseFolder(Folder folder, int parentId, HashMap<Integer, FileProcessingData> folderEntries)
+    private static int parseFolder(Folder folder, int parentId, HashMap<Integer, FileProcessingData> folderEntries, int[] nextFolderId)
     {
-        int folderId = nextFolderId;
-        nextFolderId += 1;
+        int folderId = nextFolderId[0];
+        nextFolderId[0] += 1;
 
         // Create an entries table and add filenames and folders to it
         MemBuf entriesTable = MemBuf.create();
@@ -457,7 +462,7 @@ public class Fnt
             Folder sub = folder.folders.get(folderName);
 
             // First, parse the subfolder and get its ID, so we can save that to the entries table.
-            int otherId = parseFolder(sub, folderId, folderEntries);
+            int otherId = parseFolder(sub, folderId, folderEntries, nextFolderId);
 
             if (folderName.length() > 127)
                 throw new RuntimeException("Folder name \"" + folderName + "\" is " + folderName.length() + " characters long (maximum is 127)!");
@@ -520,9 +525,23 @@ public class Fnt
      */
     public static void writeFolderToDisk(File dir, Folder folder, ArrayList<byte[]> files) throws IOException
     {
-        if (!dir.mkdir())
+        // mkdir() alone conflates "already exists", "parent is missing" and "no write permission"
+        // into one misleading message. Distinguish them, and keep refusing to write into a
+        // directory that already holds data rather than silently mixing in stale files.
+        if (dir.exists())
         {
-            throw new RuntimeException("Could not create data dir, check write perms.");
+            if (!dir.isDirectory())
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" already exists and is not a directory.");
+
+            String[] existing = dir.list();
+            if (existing == null)
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" could not be read.");
+            if (existing.length != 0)
+                throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" already exists and is not empty; refusing to write over it.");
+        }
+        else if (!dir.mkdirs())
+        {
+            throw new RuntimeException("Could not create \"" + dir.getAbsolutePath() + "\", check write perms.");
         }
 
         for (String name : folder.getFolders().keySet())
@@ -552,6 +571,25 @@ public class Fnt
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" does not exist.");
         else if(!dir.isDirectory())
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" is not a directory.");
+
+        // File ids are assigned by writing into fixed slots, so the destination has to be big
+        // enough before the walk starts. Size it here when the caller hands over an empty list
+        // (the documented "to fill" usage) and reject a list that is too small to hold the tree,
+        // which would otherwise surface much later as "No available file IDs to allocate".
+        int numFiles = calculateNumFiles(dir);
+        if (files.isEmpty())
+        {
+            for (int i = 0; i < numFiles; i++)
+                files.add(null);
+        }
+        else if (files.size() < numFiles)
+        {
+            throw new IllegalArgumentException(String.format(
+                    "The provided file list holds %d slots but \"%s\" contains %d files. Pass an empty list, "
+                            + "or one pre-sized to at least the file count.",
+                    files.size(), dir.getAbsolutePath(), numFiles));
+        }
+
         return loadFolderFromDisk(dir, files); // this is always root folder
     }
 
@@ -565,21 +603,31 @@ public class Fnt
     private static Folder loadFolderFromDisk(File dir, ArrayList<byte[]> files)
     {
         Folder folder = new Folder(dir.getName());
+
+        // to make sure it doesn't grab stray files like .DS_STORE thanks to macOS
+        List<File> subs = Arrays.stream(Objects.requireNonNull(dir.listFiles())).filter(file -> !file.isHidden()).sorted().collect(Collectors.toList());
+
         folder.firstId = findLowestAvailableFileId(files);
 
-        String name;
-        // Read file and folders entries from the entries table
-        for (File sub : Arrays.stream(Objects.requireNonNull(dir.listFiles())).filter(file -> !file.isHidden()).sorted().collect(Collectors.toList()))
+        // first pass - every regular file in this folder gets a contiguous ID, so firstId stays valid
+        for (File sub : subs)
         {
-            name = sub.getName();
+            if (!sub.isDirectory())
+            {
+                folder.files.add(sub.getName());
+                int fileId = findLowestAvailableFileId(files);
+                if (fileId >= files.size())
+                    throw new RuntimeException("No available file IDs to allocate.");
+                files.set(fileId, Buffer.readFile(sub.getAbsolutePath()));
+            }
+        }
+
+        // second pass - only now that this folder's ID range is closed do we recurse into subfolders
+        for (File sub : subs)
+        {
             if (sub.isDirectory())
             {
-                folder.folders.put(name, loadFolderFromDisk(sub, files));
-            }
-            else if (!sub.isHidden()) // to make sure it doesn't grab stray files like .DS_STORE thanks to macOS
-            {
-                folder.files.add(name);
-                files.set(findLowestAvailableFileId(files), Buffer.readFile(sub.getAbsolutePath()));
+                folder.folders.put(sub.getName(), loadFolderFromDisk(sub, files));
             }
         }
         return folder;
@@ -593,7 +641,9 @@ public class Fnt
                 return i;
         }
 
-        throw new RuntimeException("No available file IDs to allocate.");
+        // no free slot remains - one-past-the-end is still a valid firstId for an empty folder,
+        // callers which actually write a file must treat this as exhaustion
+        return files.size();
     }
 
     protected static int calculateNumFiles(File dir)

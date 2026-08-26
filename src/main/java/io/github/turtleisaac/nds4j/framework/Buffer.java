@@ -20,9 +20,10 @@
 package io.github.turtleisaac.nds4j.framework;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
-public class Buffer {
+public class Buffer implements Closeable {
 
     private static final int INITIAL_SIZE = 1024*64;
 
@@ -60,7 +61,21 @@ public class Buffer {
     public static byte[] readFile(String file)
     {
         Buffer buffer= new Buffer(file);
-        return buffer.readRemainder();
+        try
+        {
+            return buffer.readRemainder();
+        }
+        finally
+        {
+            try
+            {
+                buffer.close();
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     public static byte[] readFile(Path file)
@@ -118,10 +133,10 @@ public class Buffer {
     public long readLong() {
         require(8);
 
-        long ret = readByte();
-        ret |= readByte() << 8;
-        ret |= readByte() << 16;
-        ret |= readByte() << 24;
+        long ret = (long)readByte();
+        ret |= (long)readByte() << 8;
+        ret |= (long)readByte() << 16;
+        ret |= (long)readByte() << 24;
         ret |= (long)readByte() << 32;
         ret |= (long)readByte() << 40;
         ret |= (long)readByte() << 48;
@@ -157,7 +172,7 @@ public class Buffer {
 
     public String readString(int size) {
         require(size);
-        String ret = new String(bytes, position, size);
+        String ret = new String(bytes, position, size, StandardCharsets.ISO_8859_1);
         position += size;
         truePosition+= size;
         return ret;
@@ -281,7 +296,7 @@ public class Buffer {
             throw new RuntimeException("Already beyond this offset. Currently at: " + truePosition + ", Target was: " + offset);
         else if(offset != truePosition)
             return readBytes((int) ((offset & 0xffffffffL)-(truePosition & 0xffffffffL)));
-        return null;
+        return new byte[0];
     }
 
     public byte[] readTo(long offset)
@@ -290,7 +305,7 @@ public class Buffer {
             throw new RuntimeException("Already beyond this offset. Currently at: " + truePosition + ", Target was: " + offset);
         else if(offset != truePosition)
             return readBytes((int) (offset-truePosition));
-        return null;
+        return new byte[0];
     }
 
     public byte[] readRemainder() {

@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A branch that gets pushed twice in quick succession only needs the newer run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Report every JDK's result rather than stopping at the first failure --
+      # knowing whether a break is version-specific is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        # 17 is the floor: the test sources use java.util.HexFormat.
+        # The main sources still target Java 8, which the compiler settings enforce.
+        java: ['17', '21']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: Build and test
+        # Tests needing a retail ROM skip rather than fail, so no ROM is required here.
+        # See TestRoms: pass -Drom.dir to run them locally.
+        run: mvn -B -ntp verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-jdk${{ matrix.java }}
+          path: '**/target/surefire-reports/**'
+          if-no-files-found: ignore

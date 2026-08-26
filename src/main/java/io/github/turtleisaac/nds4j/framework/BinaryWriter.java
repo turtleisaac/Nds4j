@@ -19,28 +19,31 @@
 
 package io.github.turtleisaac.nds4j.framework;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Path;
 import java.util.Arrays;
 
-public class BinaryWriter {
+public class BinaryWriter implements Closeable {
 
     private final RandomAccessFile raf;
     private final byte[] buf = new byte[8];
 
     public static void writeFile(File file, int... bytes) throws IOException {
-        BinaryWriter writer = new BinaryWriter(file);
-        writer.writeBytes(bytes);
-        writer.close();
+        try (BinaryWriter writer = new BinaryWriter(file))
+        {
+            writer.writeBytes(bytes);
+        }
     }
 
     public static void writeFile(File file, byte... bytes) throws IOException
     {
-        BinaryWriter writer = new BinaryWriter(file);
-        writer.write(bytes);
-        writer.close();
+        try (BinaryWriter writer = new BinaryWriter(file))
+        {
+            writer.write(bytes);
+        }
     }
 
     public static void writeFile(String file, byte... bytes) throws IOException
@@ -168,6 +171,7 @@ public class BinaryWriter {
         raf.close();
     }
 
-    public void write(int i) {
+    public void write(int i) throws IOException {
+        raf.write(i & 0xFF);
     }
 }
