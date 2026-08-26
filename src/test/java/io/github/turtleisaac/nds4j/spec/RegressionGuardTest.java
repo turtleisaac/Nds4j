@@ -249,7 +249,7 @@ class RegressionGuardTest
          */
         private boolean compressedFlagOf(byte[] data)
         {
-            return new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {}.isCompressed();
+            return new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {}.wasCompressed();
         }
 
         @Test
@@ -263,6 +263,29 @@ class RegressionGuardTest
             byte[] plain = "an arm9 binary with nothing compressed about it".getBytes();
             assertThat(compressedFlagOf(plain))
                     .as("decompression changed nothing, so this binary was not compressed")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("is a different question from Overlay's compression flag")
+        void overlayFlagAndContentFlagAreSeparate()
+        {
+            // Overlay extends CodeBinary, and Overlay.isCompressed() reads the bit the ROM's
+            // overlay table stores - settable, and about the table entry. wasCompressed() is an
+            // observation about the bytes the constructor was handed. Naming the second one
+            // isCompressed() made Overlay override it by accident: same signature, no @Override,
+            // nothing from the compiler, and a CodeBinary reference to an Overlay silently
+            // answering the other question.
+            byte[] plain = "an overlay with nothing compressed about it".getBytes();
+            io.github.turtleisaac.nds4j.binaries.Overlay overlay =
+                    new io.github.turtleisaac.nds4j.binaries.Overlay(plain, 0, 0, 0, 0, 0, 0, 0, 1);
+
+            assertThat(overlay.isCompressed())
+                    .as("the table entry says compressed, because flags bit 0 is set")
+                    .isTrue();
+            assertThat(overlay.wasCompressed())
+                    .as("the bytes decompressed to themselves, so nothing was compressed about "
+                            + "them - the two answers are allowed to disagree, and here they must")
                     .isFalse();
         }
 

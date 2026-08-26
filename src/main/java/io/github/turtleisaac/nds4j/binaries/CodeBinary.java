@@ -92,16 +92,23 @@ public abstract class CodeBinary extends ReentrantLock
 
     /**
      * Reports whether the data this code binary was constructed from was compressed.
-     * <p>This describes the <i>input</i>, not the current contents: the buffer returned by
-     * <code>getPhysicalAddressBuffer()</code> holds decompressed data either way, and
-     * <code>getSize()</code> is the decompressed length. A retail arm9 answers <code>true</code>
-     * here while everything read out of it is plain.</p>
+     * <p>Past tense deliberately. This describes the <i>input</i>, not the current contents: the
+     * buffer returned by <code>getPhysicalAddressBuffer()</code> holds decompressed data either
+     * way, and <code>getSize()</code> is the decompressed length. A retail arm9 answers
+     * <code>true</code> here while everything read out of it is plain.</p>
      * <p>The answer is decided once, at construction, by comparing the decompressed bytes against
      * the input. Nothing recompresses on save, so it does not change over the lifetime of the
      * object.</p>
+     * <p><b>Not the same question as <code>Overlay.isCompressed()</code>.</b> That reads the
+     * compression bit the ROM's overlay table stores for an overlay, and it can be set; this is
+     * an observation about the bytes handed to the constructor, and cannot. The two can disagree
+     * - an overlay whose table entry claims compression but whose data decompressed to itself
+     * answers true there and false here. They were briefly the same name, which made
+     * <code>Overlay</code> override this one by accident.</p>
      * @return whether the bytes passed to the constructor were compressed
+     * @see Overlay#isCompressed()
      */
-    public boolean isCompressed()
+    public boolean wasCompressed()
     {
         return compressed;
     }
