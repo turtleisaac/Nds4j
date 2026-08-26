@@ -91,6 +91,22 @@ public abstract class CodeBinary extends ReentrantLock
     }
 
     /**
+     * Reports whether the data this code binary was constructed from was compressed.
+     * <p>This describes the <i>input</i>, not the current contents: the buffer returned by
+     * <code>getPhysicalAddressBuffer()</code> holds decompressed data either way, and
+     * <code>getSize()</code> is the decompressed length. A retail arm9 answers <code>true</code>
+     * here while everything read out of it is plain.</p>
+     * <p>The answer is decided once, at construction, by comparing the decompressed bytes against
+     * the input. Nothing recompresses on save, so it does not change over the lifetime of the
+     * object.</p>
+     * @return whether the bytes passed to the constructor were compressed
+     */
+    public boolean isCompressed()
+    {
+        return compressed;
+    }
+
+    /**
      * Returns the data contained within this code binary according to the current bounds of its physicalAddressBuffer object.
      * @return a <code>byte[]</code> containing the contents of this code binary.
      */

@@ -243,26 +243,13 @@ class RegressionGuardTest
     class CompressionFlag
     {
         /**
-         * Reads the private field, because nothing else does.
-         * <p>
-         * {@code compressed} has no getter and no reader anywhere in the library, which is how
-         * it carried an inverted value without anyone noticing. Reflection here is a statement
-         * about that, not a preference: the moment the field is either exposed or deleted, this
-         * helper should go with it.
+         * Asks the binary directly. This used to read the private field by reflection, because
+         * nothing in the library read it at all - which is how it carried an inverted value
+         * undetected. It is public API now, so the test exercises what a caller would.
          */
         private boolean compressedFlagOf(byte[] data)
         {
-            try {
-                io.github.turtleisaac.nds4j.binaries.CodeBinary binary =
-                        new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {};
-                java.lang.reflect.Field field = io.github.turtleisaac.nds4j.binaries.CodeBinary.class
-                        .getDeclaredField("compressed");
-                field.setAccessible(true);
-                return field.getBoolean(binary);
-            }
-            catch (ReflectiveOperationException e) {
-                throw new AssertionError("the compressed flag could not be read", e);
-            }
+            return new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {}.isCompressed();
         }
 
         @Test
