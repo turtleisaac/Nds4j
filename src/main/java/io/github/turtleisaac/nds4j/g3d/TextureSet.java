@@ -19,7 +19,6 @@
 
 package io.github.turtleisaac.nds4j.g3d;
 
-import io.github.turtleisaac.nds4j.framework.GenericNtrFile;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import javax.imageio.ImageIO;
@@ -27,9 +26,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * An object representation of an NSBTX file (a Nitro 3D texture archive, magic {@code BTX0}).
@@ -43,7 +40,7 @@ import java.util.Objects;
  * The file round-trips byte-for-byte: the {@code TEX0} block (and any others) is preserved verbatim
  * and the dictionaries/data are parsed as a read-only view over it for decoding and export.
  */
-public class Nsbtx extends GenericNtrFile
+public class TextureSet extends G3dFile
 {
     // Texture formats (NNS_G3D_TEX_FORMAT), indexed by the texImageParam format field.
     private static final int FORMAT_A3I5 = 1;
@@ -54,14 +51,10 @@ public class Nsbtx extends GenericNtrFile
     private static final int FORMAT_A5I3 = 6;
     private static final int FORMAT_DIRECT = 7;
 
-    private long[] blockOffsets;
-    private byte[][] blocks; // each block preserved verbatim; block 0 is TEX0
-    private long fileSize;
-
     private final List<Texture> textures = new ArrayList<>();
     private final List<Palette> palettes = new ArrayList<>();
 
-    // Views into the TEX0 block (block 0). Offsets are relative to the block's first byte.
+    // Views into the TEX0 block. Offsets are relative to the block's first byte.
     private byte[] tex0;
     private int texDataOfs, tex4x4DataOfs, tex4x4PlttIdxOfs, plttDataOfs;
 
@@ -69,34 +62,16 @@ public class Nsbtx extends GenericNtrFile
      * Generates an object representation of an NSBTX file.
      * @param data a <code>byte[]</code> representation of an NSBTX file
      */
-    public Nsbtx(byte[] data)
+    public TextureSet(byte[] data)
     {
         super("BTX0");
-        MemBuf buf = MemBuf.create(data);
-        MemBuf.MemBufReader reader = buf.reader();
-        fileSize = data.length;
-
-        readGenericNtrHeader(reader);
-
-        blockOffsets = new long[numBlocks];
-        for (int i = 0; i < numBlocks; i++)
-            blockOffsets[i] = reader.readUInt32();
-
-        blocks = new byte[numBlocks][];
-        for (int i = 0; i < numBlocks; i++)
-        {
-            long start = blockOffsets[i];
-            long end = (i + 1 < numBlocks) ? blockOffsets[i + 1] : fileSize;
-            reader.setPosition(start);
-            blocks[i] = reader.readBytes((int) (end - start));
-        }
-
-        parseTex0();
+        readContainer(data);
+        parseTex0(block(indexOfBlock("TEX0")));
     }
 
-    private void parseTex0()
+    private void parseTex0(byte[] tex0Block)
     {
-        tex0 = blocks[0];
+        tex0 = tex0Block;
         MemBuf buf = MemBuf.create(tex0);
         MemBuf.MemBufReader r = buf.reader();
 
@@ -153,27 +128,6 @@ public class Nsbtx extends GenericNtrFile
     }
 
     /**
-     * Generates a <code>byte[]</code> representation of this <code>Nsbtx</code>.
-     * @return a <code>byte[]</code>
-     */
-    public byte[] save()
-    {
-        MemBuf buf = MemBuf.create();
-        MemBuf.MemBufWriter w = buf.writer();
-
-        writeGenericNtrHeader(w, fileSize, numBlocks);
-        for (long offset : blockOffsets)
-            w.writeUInt32(offset);
-        for (int i = 0; i < numBlocks; i++)
-        {
-            w.setPosition((int) blockOffsets[i]);
-            w.write(blocks[i]);
-        }
-        w.setPosition((int) fileSize);
-        return buf.reader().getBuffer();
-    }
-
-    /**
      * Gets the textures in this archive.
      * @return a <code>List</code> of {@link Texture}
      */
@@ -191,35 +145,12 @@ public class Nsbtx extends GenericNtrFile
         return palettes;
     }
 
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o)
-            return true;
-        if (o == null || getClass() != o.getClass())
-            return false;
-        Nsbtx nsbtx = (Nsbtx) o;
-        // The blocks fully determine the archive (textures/palettes are a parsed view over them), so
-        // comparing them plus the offset table is a complete value equality.
-        return numBlocks == nsbtx.numBlocks
-                && fileSize == nsbtx.fileSize
-                && Arrays.equals(blockOffsets, nsbtx.blockOffsets)
-                && Arrays.deepEquals(blocks, nsbtx.blocks);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        int result = Objects.hash(numBlocks, fileSize);
-        result = 31 * result + Arrays.hashCode(blockOffsets);
-        result = 31 * result + Arrays.deepHashCode(blocks);
-        return result;
-    }
+    // save(), equals(), and hashCode() are inherited from G3dFile (block-level, byte-exact).
 
     @Override
     public String toString()
     {
-        return String.format("Nsbtx[%d textures, %d palettes]", textures.size(), palettes.size());
+        return String.format("TextureSet[%d textures, %d palettes]", textures.size(), palettes.size());
     }
 
     /**

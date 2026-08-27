@@ -36,7 +36,7 @@ Formats currently implemented
 | NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
 | NANR      | `images.CellAnimation`   | &check; | &check; |         &cross;         |
 | NSCR      | `images.Screen`          | &check; | &check; |         &cross;         |
-| NSBTX     | `g3d.Nsbtx`              | &check; | &check; |         &cross;         |
+| NSBTX     | `g3d.TextureSet`         | &check; | &check; |         &cross;         |
 | ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
 
 Likely future supported formats

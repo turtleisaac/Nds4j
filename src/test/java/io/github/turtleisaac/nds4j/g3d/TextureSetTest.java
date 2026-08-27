@@ -36,12 +36,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Tests for {@link Nsbtx} (NSBTX / {@code BTX0}) &mdash; the first of the Nitro 3D formats. Exercised
+ * Tests for {@link TextureSet} (NSBTX / {@code BTX0}) &mdash; the first of the Nitro 3D formats. Exercised
  * against every BTX0 file in a retail ROM: the reader/writer must round-trip byte-for-byte, and every
  * texture must decode to an image of the size its texImageParam declares.
  */
 @DisplayName("NSBTX (3D texture archive)")
-public class NsbtxTest
+public class TextureSetTest
 {
     private static List<byte[]> nsbtxFiles;
 
@@ -78,24 +78,24 @@ public class NsbtxTest
 
     @Test
     @DisplayName("save() reproduces every BTX0 file byte-for-byte")
-    void writtenNsbtxEqualsOriginalBytes()
+    void writtenTextureSetEqualsOriginalBytes()
     {
         for (int i = 0; i < nsbtxFiles.size(); i++)
         {
             byte[] original = nsbtxFiles.get(i);
-            byte[] written = new Nsbtx(original).save();
+            byte[] written = new TextureSet(original).save();
             assertThat(written).as("BTX0 file #%d must round-trip byte-for-byte", i).isEqualTo(original);
         }
     }
 
     @Test
     @DisplayName("a saved NSBTX re-reads equal to the original object")
-    void writtenNsbtxEqualsOriginalObject()
+    void writtenTextureSetEqualsOriginalObject()
     {
         for (int i = 0; i < nsbtxFiles.size(); i++)
         {
-            Nsbtx original = new Nsbtx(nsbtxFiles.get(i));
-            Nsbtx reloaded = new Nsbtx(original.save());
+            TextureSet original = new TextureSet(nsbtxFiles.get(i));
+            TextureSet reloaded = new TextureSet(original.save());
             assertThat(reloaded).as("BTX0 file #%d must equal itself after a save/load cycle", i).isEqualTo(original);
             assertThat(reloaded.hashCode()).isEqualTo(original.hashCode());
         }
@@ -108,8 +108,8 @@ public class NsbtxTest
         int totalTextures = 0;
         for (byte[] file : nsbtxFiles)
         {
-            Nsbtx nsbtx = new Nsbtx(file);
-            for (Nsbtx.Texture t : nsbtx.getTextures())
+            TextureSet nsbtx = new TextureSet(file);
+            for (TextureSet.Texture t : nsbtx.getTextures())
             {
                 BufferedImage img = nsbtx.getImage(t);
                 assertThat(img.getWidth()).as("%s width", t.getName()).isEqualTo(t.getWidth());
@@ -127,11 +127,11 @@ public class NsbtxTest
     @DisplayName("named lookup returns the same texture as iteration")
     void namedLookupWorks()
     {
-        Nsbtx nsbtx = nsbtxFiles.stream().map(Nsbtx::new)
+        TextureSet nsbtx = nsbtxFiles.stream().map(TextureSet::new)
                 .filter(n -> !n.getTextures().isEmpty()).findFirst().orElse(null);
         Assumptions.assumeTrue(nsbtx != null, "need an NSBTX with a texture");
 
-        Nsbtx.Texture first = nsbtx.getTextures().get(0);
+        TextureSet.Texture first = nsbtx.getTextures().get(0);
         assertThat(nsbtx.getTexture(first.getName())).isSameAs(first);
         assertThat(nsbtx.getImage(first.getName())).isNotNull();
         assertThatThrownBy(() -> nsbtx.getImage("definitely-not-a-texture"))
@@ -140,10 +140,10 @@ public class NsbtxTest
 
     @Test
     @DisplayName("a non-NSBTX input is rejected")
-    void rejectsNonNsbtx()
+    void rejectsNonTextureSet()
     {
         byte[] junk = new byte[0x20];
         junk[0] = 'J'; junk[1] = 'U'; junk[2] = 'N'; junk[3] = 'K';
-        assertThatThrownBy(() -> new Nsbtx(junk)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> new TextureSet(junk)).isInstanceOf(RuntimeException.class);
     }
 }

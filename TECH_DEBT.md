@@ -14,7 +14,7 @@ out of a non-NCGR format.
 
 `images.IndexedImage` (NCGR) is really two things fused: a *paletted raster* (pixels + palette +
 render/PNG/pixel-edit) and *the NCGR file format* (`extends GenericNtrFile`, tile/scan layout, the
-RAHC header, `save()`). `g3d.Nsbtx` decodes textures straight to `BufferedImage`, so the two don't
+RAHC header, `save()`). `g3d.TextureSet` decodes textures straight to `BufferedImage`, so the two don't
 share the paletted-raster abstraction. It's tempting to extract a `PalettedRaster` base so palette
 textures and NCGR share one type.
 
@@ -51,7 +51,7 @@ not just a 1:1 mirror of the byte layout:
 - NSCR -> `Screen` (tile grid with flip/sub-palette accessors, composited `getImage()`)
 - NCER -> `CellBank` (assembled cell images, write-back to the NCGR)
 - NANR -> `CellAnimation` (frames/durations/transforms, rendered through NCER->NCGR)
-- NSBTX -> `Nsbtx` (named textures/palettes decoded to `BufferedImage`, PNG export)
+- NSBTX -> `TextureSet` (named textures/palettes decoded to `BufferedImage`, PNG export)
 
 New formats should follow the same shape: a byte-exact core for round-tripping **plus** a meaningful
 in-memory model and export/import via a widely-supported interchange format. This is the standard the
