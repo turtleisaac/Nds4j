@@ -43,9 +43,17 @@ Likely future supported formats
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-* NSBTX
+The Nitro 3D (`NSB*`) formats below are a priority group. They will receive full first-class support
+built natively in Nds4j &mdash; each fully reverse-engineered and rebuilt to the same standard as every
+other format here (byte-for-byte round-tripping, `framework.GenericNtrFile`/`MemBuf`, informative
+exceptions, `equals()`, and unit tests validated against retail ROMs). A third-party reader is being
+kept on hand purely as a decoding reference to check against; it will not be wrapped or depended upon.
+
 * NSBMD
+* NSBTX
 * NSBCA
+* NSBTP
+* NSBVA
 * SPA
 
 The following are themselves likely, but are not part of my immediate needs or goals due
