@@ -66,7 +66,10 @@ public class TextureSet extends G3dFile
     {
         super("BTX0");
         readContainer(data);
-        parseTex0(block(indexOfBlock("TEX0")));
+        int tex0Index = indexOfBlock("TEX0");
+        if (tex0Index < 0)
+            throw new RuntimeException("Not a valid BTX0 file: missing TEX0 block.");
+        parseTex0(block(tex0Index));
     }
 
     private void parseTex0(byte[] tex0Block)

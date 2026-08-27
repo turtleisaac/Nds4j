@@ -33,6 +33,14 @@ import java.util.List;
  * This is the meaningful, exportable representation of the geometry (see {@link #toObj()}); the raw
  * bytes still round-trip byte-for-byte through {@link ModelSet}. Materials, textures and the skeleton
  * are layered on in later work.
+ * <p>
+ * <b>Known limitation (single-node vs multi-node):</b> the display list binds a bone/node matrix
+ * before each shape (via {@code MTX_RESTORE}), which this decoder does not yet apply &mdash; every
+ * shape is left in the model's root space. For a single-node model ({@link #getNodeCount()} == 1,
+ * the identity case) the decoded geometry matches the model's header bounding box; for multi-node
+ * models the parts are mislocated until node transforms are applied. {@link #isSingleNode()} reports
+ * which case a model is, and {@link #getDecodedBoundingBox()} / {@link #getHeaderBoundingBox()} let a
+ * caller verify placement.
  */
 public class Model
 {
@@ -43,6 +51,9 @@ public class Model
     private final int expectedVertexCount;
     private final int expectedTriangleCount;
     private final int expectedQuadCount;
+    private final int nodeCount;
+    private final float[] headerBoxMin = new float[3];
+    private final float[] headerBoxMax = new float[3];
     private final List<Mesh> meshes = new ArrayList<>();
 
     Model(byte[] mdl0, int modelStart, String name)
@@ -53,21 +64,32 @@ public class Model
 
         // model header (NNS_G3dModelInfo)
         int info = modelStart + 0x14;
-        int numShapes = mdl0[info + 5] & 0xFF;
+        nodeCount = mdl0[info + 3] & 0xFF;
         posScale = readU32(mdl0, info + 8) / 4096.0;
         expectedVertexCount = readU16(mdl0, info + 16);
         expectedTriangleCount = readU16(mdl0, info + 20);
         expectedQuadCount = readU16(mdl0, info + 22);
 
+        // header bounding box: min corner (x,y,z) then dimensions (w,h,d) as 1.3.12 fixed at info+0x18,
+        // scaled by boxPosScale (1.19.12 fixed at info+0x24). This is the placement oracle.
+        double boxScale = readU32(mdl0, info + 0x24) / 4096.0;
+        for (int c = 0; c < 3; c++)
+        {
+            double lo = (short) readU16(mdl0, info + 0x18 + c * 2) / 4096.0 * boxScale;
+            double dim = (short) readU16(mdl0, info + 0x1E + c * 2) / 4096.0 * boxScale;
+            headerBoxMin[c] = (float) lo;
+            headerBoxMax[c] = (float) (lo + dim);
+        }
+
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
-        // 16-byte shape struct that points at its display list.
+        // 16-byte shape struct that points at its display list. The dictionary is authoritative.
         int shapeSet = modelStart + ofsShp;
         MemBuf buf = MemBuf.create(mdl0);
         MemBuf.MemBufReader reader = buf.reader();
         reader.setPosition(shapeSet);
         G3dDictionary shapeDict = new G3dDictionary(reader);
 
-        for (int i = 0; i < numShapes && i < shapeDict.size(); i++)
+        for (int i = 0; i < shapeDict.size(); i++)
         {
             int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(i), 0);
             int dlOffset = (int) readU32(mdl0, shapeStruct + 8);  // relative to the shape struct
@@ -165,7 +187,13 @@ public class Model
                         break;
                     }
                     case 0x41: break;                                   // END_VTXS
-                    default: break;
+                    default:
+                        // Every opcode a retail Gen IV display list uses is handled above (verified by
+                        // the 100%-vertex-count match). An unknown opcode means either a malformed
+                        // stream or a command whose parameter words we don't know to skip - continuing
+                        // would silently desync the whole stream, so fail loudly instead.
+                        throw new RuntimeException(String.format(
+                                "Unhandled display-list opcode 0x%02X at offset 0x%X in mesh %s", op, pos - 4, meshName));
                 }
             }
         }
@@ -264,9 +292,11 @@ public class Model
     }
 
     /**
-     * Exports this model to Wavefront OBJ text &mdash; a universally supported, zero-dependency
-     * interchange format. Each mesh becomes an OBJ group with its own vertices, texture coordinates and
-     * triangle faces.
+     * Exports this model's geometry to Wavefront OBJ text &mdash; a universally supported,
+     * zero-dependency interchange format. Each mesh becomes an OBJ group with its vertices and triangle
+     * faces. Texture coordinates are decoded (see {@link Mesh#getTexcoords()}) but not written yet:
+     * without materials/textures they carry no usable mapping, so they are omitted rather than emitted
+     * as misleading data. They will be added with {@code usemtl}/{@code mtllib} when texturing lands.
      * @return the OBJ document as a <code>String</code>
      */
     public String toObj()
@@ -281,17 +311,66 @@ public class Model
             for (int i = 0; i < vertexCount; i++)
                 sb.append("v ").append(mesh.positions[i * 3]).append(' ')
                         .append(mesh.positions[i * 3 + 1]).append(' ').append(mesh.positions[i * 3 + 2]).append('\n');
-            for (int i = 0; i < vertexCount; i++)
-                sb.append("vt ").append(mesh.texcoords[i * 2]).append(' ').append(mesh.texcoords[i * 2 + 1]).append('\n');
             for (int i = 0; i + 2 < mesh.triangleIndices.length; i += 3)
-            {
-                int a = vBase + mesh.triangleIndices[i], b = vBase + mesh.triangleIndices[i + 1], c = vBase + mesh.triangleIndices[i + 2];
-                sb.append("f ").append(a).append('/').append(a).append(' ')
-                        .append(b).append('/').append(b).append(' ').append(c).append('/').append(c).append('\n');
-            }
+                sb.append("f ").append(vBase + mesh.triangleIndices[i]).append(' ')
+                        .append(vBase + mesh.triangleIndices[i + 1]).append(' ')
+                        .append(vBase + mesh.triangleIndices[i + 2]).append('\n');
             vBase += vertexCount;
         }
         return sb.toString();
+    }
+
+    /** @return the number of nodes (bones) this model declares */
+    public int getNodeCount()
+    {
+        return nodeCount;
+    }
+
+    /**
+     * @return true if this model has a single (identity) node, the case where the decoded geometry is
+     *         already positionally correct (multi-node placement needs node transforms, still to come)
+     */
+    public boolean isSingleNode()
+    {
+        return nodeCount == 1;
+    }
+
+    /**
+     * Gets the model's axis-aligned bounding box as declared in its header: a 2x3 array
+     * {@code {{minX,minY,minZ},{maxX,maxY,maxZ}}} in model space.
+     * @return a <code>float[2][3]</code>
+     */
+    public float[][] getHeaderBoundingBox()
+    {
+        return new float[][]{headerBoxMin.clone(), headerBoxMax.clone()};
+    }
+
+    /**
+     * Computes the axis-aligned bounding box of the decoded geometry, in model space. For a correctly
+     * placed model this matches {@link #getHeaderBoundingBox()}.
+     * @return a <code>float[2][3]</code> {@code {{minX,minY,minZ},{maxX,maxY,maxZ}}}, or a zero box if
+     *         there are no vertices
+     */
+    public float[][] getDecodedBoundingBox()
+    {
+        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
+        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        boolean any = false;
+        for (Mesh mesh : meshes)
+        {
+            for (int i = 0; i < mesh.positions.length; i += 3)
+            {
+                any = true;
+                for (int c = 0; c < 3; c++)
+                {
+                    min[c] = Math.min(min[c], mesh.positions[i + c]);
+                    max[c] = Math.max(max[c], mesh.positions[i + c]);
+                }
+            }
+        }
+        if (!any)
+            return new float[][]{{0, 0, 0}, {0, 0, 0}};
+        return new float[][]{min, max};
     }
 
     @Override

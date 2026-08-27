@@ -122,6 +122,41 @@ public class ModelSetTest
     }
 
     @Test
+    @DisplayName("identity single-node models decode into their header bounding box")
+    void identitySingleNodeModelsArePlacedInHeaderBox()
+    {
+        // Positional oracle (the vertex-count oracle can't see wrong placement): where a shape's bound
+        // node matrix is identity, the decoded AABB must equal the box the header declares. This guards
+        // the fixed-point scale and posScale. A large population of models satisfies it exactly, which
+        // both proves the decode/box arithmetic and gives a regression net. (Models whose node carries
+        // a real transform - including some single-node ones - need node matrices, a documented gap;
+        // see Model's class doc and isSingleNode().)
+        int placedCorrectly = 0;
+        for (byte[] file : nsbmdFiles)
+        {
+            for (Model model : new ModelSet(file).getModels())
+            {
+                if (model.getVertexCount() == 0)
+                    continue;
+                float[][] decoded = model.getDecodedBoundingBox();
+                float[][] header = model.getHeaderBoundingBox();
+                float extent = 0;
+                for (int c = 0; c < 3; c++)
+                    extent = Math.max(extent, header[1][c] - header[0][c]);
+                float tol = Math.max(1e-3f, 0.02f * extent);
+                boolean match = true;
+                for (int c = 0; c < 3 && match; c++)
+                    match = Math.abs(decoded[0][c] - header[0][c]) < tol && Math.abs(decoded[1][c] - header[1][c]) < tol;
+                if (match)
+                    placedCorrectly++;
+            }
+        }
+        // Hundreds of models (the identity-node majority; ~676 in Platinum) must land exactly in their
+        // header box. A decode/scale regression would collapse this count.
+        assertThat(placedCorrectly).as("models whose decoded AABB matches their header box").isGreaterThan(400);
+    }
+
+    @Test
     @DisplayName("meshes and OBJ export are coherent")
     void meshesAndObjExport()
     {

@@ -98,12 +98,6 @@ public abstract class G3dFile extends GenericNtrFile
         return buf.reader().getBuffer();
     }
 
-    /** @return the number of blocks in this file */
-    public int getNumBlocks()
-    {
-        return numBlocks;
-    }
-
     /**
      * Gets the verbatim bytes of block <code>i</code>, starting at the block's magic. Offsets parsed
      * out of the block are relative to this array's first byte.
