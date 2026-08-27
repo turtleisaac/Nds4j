@@ -49,13 +49,47 @@ class VersionConsistencyTest
         throw new AssertionError("pom.xml declares no top-level <version>");
     }
 
+    /**
+     * The pom version without any {@code -SNAPSHOT} or other qualifier.
+     * <p>
+     * Between releases the pom carries a qualifier and the runtime version cannot: {@code VERSION}
+     * is an {@code int[]}, so it holds only the three numbers. Comparing the numbers is still the
+     * thing worth checking - it is the digits that drift, and a qualifier the pom alone can say.
+     */
+    private static String releasedPartOf(String pomVersion)
+    {
+        int qualifier = pomVersion.indexOf('-');
+        return qualifier < 0 ? pomVersion : pomVersion.substring(0, qualifier);
+    }
+
     @Test
     @DisplayName("Core.getVersionNumber() equals the version in pom.xml")
     void runtimeVersionMatchesPom() throws Exception
     {
         assertThat(Core.getVersionNumber())
                 .as("Core.VERSION and pom.xml must be bumped together")
-                .isEqualTo(pomVersion());
+                .isEqualTo(releasedPartOf(pomVersion()));
+    }
+
+    /**
+     * A published coordinate is permanent, so the version on main must never be one that has
+     * already been released - main moved eight commits past the v1.0.0 tag while still declaring
+     * 1.0.0, which meant "Nds4j 1.0.0" named two different jars: the one on Central and the one
+     * every downstream CI was building from source. Nothing reported the difference.
+     * <p>
+     * A qualifier is what says "not that release yet". This does not assert which version is
+     * next - only that development is not sitting on a number that is already taken.
+     */
+    @Test
+    @DisplayName("an in-development version is qualified, so it cannot be mistaken for a release")
+    void developmentVersionIsQualified() throws Exception
+    {
+        String pom = pomVersion();
+
+        assertThat(pom)
+                .as("a release is cut by dropping the qualifier at tag time; carrying a bare "
+                        + "version on main is how a released coordinate comes to mean two jars")
+                .endsWith("-SNAPSHOT");
     }
 
     @Test
