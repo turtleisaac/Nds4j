@@ -88,7 +88,7 @@ public class Model
         // shape is drawn with. This is what positions a multi-node model's parts correctly.
         double[][] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
         int[] shapeNode = new int[shapeCountHeader];
-        double[][] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, matCount, shapeCountHeader);
+        double[][] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeCountHeader);
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
@@ -129,7 +129,27 @@ public class Model
             if ((flags & 0x1) == 0) { t[0] = readFx32(d, p); t[1] = readFx32(d, p + 4); t[2] = readFx32(d, p + 8); p += 12; }
             if ((flags & 0x2) == 0)
             {
-                if ((flags & 0x8) != 0) { p += 4; } // pivot-compressed rotation - approximated as identity for now
+                if ((flags & 0x8) != 0)
+                {
+                    // Pivot-compressed rotation: two values fill a 2x2 minor with a +/-1 pivot cell. The
+                    // pivot index is flags bits 4-7; sign flags are bits 8 (pivot -1), 9 (negate c),
+                    // 10 (negate d). This is the NNS getPivotMatrix construction.
+                    double av = readFx16(d, p), bv = readFx16(d, p + 2); p += 4;
+                    double c = (flags & 0x200) != 0 ? -bv : bv;
+                    double dd = (flags & 0x400) != 0 ? -av : av;
+                    double one = (flags & 0x100) != 0 ? -1.0 : 1.0;
+                    int sel = (flags >> 4) & 0xF;
+                    if (sel <= 8)
+                    {
+                        int row = sel / 3, col = sel % 3;
+                        double[] arr = {av, bv, c, dd};
+                        int k = 0;
+                        for (int ii = 0; ii < 3; ii++)
+                            for (int jj = 0; jj < 3; jj++)
+                                r[ii * 3 + jj] = (jj == col || ii == row) ? 0 : arr[k++];
+                        r[row * 3 + col] = one;
+                    }
+                }
                 else
                 {
                     r[1] = readFx16(d, p);     r[2] = readFx16(d, p + 2);  r[3] = readFx16(d, p + 4);
@@ -148,9 +168,10 @@ public class Model
     }
 
     // Walks the SBC render-command stream to record each node's parent (for the world-matrix hierarchy)
-    // and which node is current when each shape is drawn. Then resolves node world matrices. Commands:
-    // NOP/RET/NODE/MTX/MAT/SHP/NODEDESC/BB/BBY/POSSCALE (opcode = byte & 0x1F; flags in the high bits).
-    private double[][] walkSbc(byte[] d, int sbc, double[][] nodeLocal, int[] shapeNode, int matCount, int shapeCount)
+    // and which node is current when each shape is drawn, then resolves node world matrices. Commands:
+    // opcode = byte & 0x1F, flags in the high bits; every command's operand length is consumed so the
+    // walk stays in sync (BB/BBY are 3 bytes, NODEMIX is variable, CALLDL is 8, etc.).
+    private double[][] walkSbc(byte[] d, int sbc, double[][] nodeLocal, int[] shapeNode, int shapeCount)
     {
         int count = nodeLocal.length;
         int[] parent = new int[count];
@@ -171,15 +192,19 @@ public class Model
                 case 0x03: current = stackNode[d[p++] & 0xFF]; break; // MTX (restore)
                 case 0x04: p += (flags & 0x20) != 0 ? 2 : 1; break; // MAT matId (+ optional)
                 case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) shapeNode[shp] = current; break; } // SHP
-                case 0x06: {                                        // NODEDESC nodeId, parentId
+                case 0x06: {                                        // NODEDESC nodeId, parentId (+ optional stack store/restore)
                     int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
                     if (nid < count) { parent[nid] = par < count ? par : -1; current = nid; }
                     if ((flags & 0x40) != 0) { int dst = d[p++] & 0xFF; if (dst < stackNode.length) stackNode[dst] = nid; }
                     if ((flags & 0x20) != 0) p++;
                     break;
                 }
-                case 0x07: case 0x08: p++; break;                   // BB / BBY (billboard)
+                case 0x07: case 0x08: p += 3; break;                // BB / BBY (billboard)
+                case 0x09: { int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
+                case 0x0A: p += 8; break;                           // CALLDL
                 case 0x0B: break;                                   // POSSCALE
+                case 0x0C: p += 2; break;                           // ENVMAP
+                case 0x0D: p += 2; break;                           // PRJMAP
                 default: stop = true; break;                        // an unmodelled command - stop rather than desync
             }
         }
