@@ -82,6 +82,14 @@ public class IndexedImage extends GenericNtrFile
     private boolean vram;
     private int encryptionKey = -1;
 
+    // Raw NCGR character-header fields that save() otherwise recomputes. Preserved so an unedited image
+    // round-trips byte-for-byte: party-icon NCGRs store 0xFFFF "unspecified" tile width/height and a 0x10
+    // flag at 0x20, which the reader replaces with a computed layout. Only restored when the image has not
+    // been resized (its pixel dimensions still match what was read); an edited/resized image writes fresh
+    // values. Absent for images not read from a file.
+    private boolean hasSourceHeader = false;
+    private int srcCharHeightField, srcCharWidthField, srcUnknown0x20, srcWidthPx, srcHeightPx;
+
     private boolean sopc;
 
     private BufferedImage storedImage;
@@ -126,16 +134,15 @@ public class IndexedImage extends GenericNtrFile
         long charSectionSize = reader.readUInt32();
 
         int tilesHeight = reader.readShort(); //0x18
+        this.srcCharHeightField = tilesHeight & 0xFFFF; // captured raw so save() can round-trip it exactly
 
-        if (tilesWidth == 0) //0x1A
+        int rawWidthField = reader.readShort(); //0x1A - always read, so the raw field can be captured
+        this.srcCharWidthField = rawWidthField & 0xFFFF;
+        if (tilesWidth == 0)
         {
-            tilesWidth = reader.readShort();
+            tilesWidth = rawWidthField;
             if (tilesWidth < 0)
                 tilesWidth = 1;
-        }
-        else
-        {
-            reader.skip(2);
         }
 
         //0x1C
@@ -155,7 +162,7 @@ public class IndexedImage extends GenericNtrFile
         {
             numColors = 16;
         }
-        reader.skip(2);
+        this.srcUnknown0x20 = reader.readUInt16(); // 0x20 - captured raw so save() can round-trip it exactly
 
         this.mappingType = reader.readUInt16(); // 0x22
 
@@ -229,6 +236,10 @@ public class IndexedImage extends GenericNtrFile
                     break;
             }
         }
+
+        this.srcWidthPx = this.width;
+        this.srcHeightPx = this.height;
+        this.hasSourceHeader = true;
 
         this.update = true;
     }
@@ -572,6 +583,20 @@ public class IndexedImage extends GenericNtrFile
             sopcWriter.setPosition(endPos);
 
             writer.write(sopcBuf.reader().getBuffer());
+        }
+
+        // Restore the raw character-header fields for an unedited (same-size) image so it round-trips exactly.
+        // For an image with real dimensions (e.g. battle sprites) these equal what was just written, so this is
+        // a no-op; for party-icon NCGRs it puts back the 0xFFFF "unspecified" width/height and the 0x20 flag.
+        if (hasSourceHeader && width == srcWidthPx && height == srcHeightPx)
+        {
+            int endPos = writer.getPosition(); // getBuffer() returns up to the writer position, so seek back after
+            writer.setPosition(NcgrUtils.charHeaderPos + 8);
+            writer.writeShort((short) srcCharHeightField); // 0x18
+            writer.writeShort((short) srcCharWidthField);  // 0x1A
+            writer.setPosition(NcgrUtils.charHeaderPos + 16);
+            writer.writeShort((short) srcUnknown0x20);     // 0x20
+            writer.setPosition(endPos);
         }
 
         return dataBuf.reader().getBuffer();
