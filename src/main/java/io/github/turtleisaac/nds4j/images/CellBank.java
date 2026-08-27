@@ -480,66 +480,73 @@ public class CellBank extends GenericNtrFile
 
     public BufferedImage getNcerImage(int i)
     {
-        Cell cell = cells[i];
-
-        //todo undo this being 80
-//        BufferedImage output = new BufferedImage(cell.maxX - cell.minX, cell.maxY - cell.minY, BufferedImage.TYPE_INT_RGB);
-        BufferedImage output = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = (Graphics2D) output.getGraphics();
-
-        Cell.OAM.OamImage[] images = cell.getImages();
-        for (int x = 0; x < images.length; x++)
-        {
-            Cell.OAM oam = cell.oams[x];
-
-            g.drawImage(images[x].getImage(), oam.xCoord + output.getWidth() / 2, oam.yCoord + output.getHeight() / 2, null);
-        }
-
-//        for (int x = 0; x < images.length; x++)
-//        {
-//            Cell.OAM oam = cell.oams[x];
-//
-//            int xOrigin = oam.xCoord + output.getWidth() / 2;
-//            int yOrigin = oam.yCoord + output.getHeight() / 2;
-//
-//            g.setColor(Color.black);
-//            g.drawLine(xOrigin, yOrigin, xOrigin, yOrigin + images[x].getHeight());
-//            g.drawLine(xOrigin, yOrigin, xOrigin + images[x].getImage().getWidth(), yOrigin);
-//
-//            g.drawLine(xOrigin + images[x].getImage().getWidth(), yOrigin, xOrigin + images[x].getImage().getWidth(),yOrigin + images[x].getHeight());
-//            g.drawLine(xOrigin, yOrigin + images[x].getHeight(), xOrigin + images[x].getImage().getWidth(), yOrigin + images[x].getHeight());
-//        }
-        g.dispose();
-
-        return output;
+        return renderCell(i, false);
     }
-
-    /** The side length of the square canvas the cell assemblers composite OAMs onto. */
-    public static final int NCER_CANVAS_SIZE = 80;
 
     /**
      * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM colour index 0 is
      * left transparent) so the assembled cell can be composited &mdash; for instance under an
      * animation transform supplied by a {@link CellAnimation}.
      * @param i the index of the cell
-     * @return an <code>NCER_CANVAS_SIZE</code>-square <code>BufferedImage</code> with an alpha channel
+     * @return a <code>BufferedImage</code> the size of the cell, with an alpha channel
      */
     public BufferedImage getTransparentNcerImage(int i)
     {
-        Cell cell = cells[i];
+        return renderCell(i, true);
+    }
 
-        BufferedImage output = new BufferedImage(NCER_CANVAS_SIZE, NCER_CANVAS_SIZE, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = (Graphics2D) output.getGraphics();
+    // Composites a cell's OAMs onto a canvas sized to the cell's own bounds, rather than a fixed
+    // square. The bounds come from where the OAMs actually sit (their signed positions plus sizes), so
+    // the image is neither clipped (as an oversized cell was against the old 80x80 canvas) nor padded
+    // with dead space, and it works for both bank types (bank type 0 carries no stored bounding box).
+    private BufferedImage renderCell(int i, boolean transparent)
+    {
+        Cell cell = cells[i];
+        Rectangle bounds = cellBounds(cell);
+
+        BufferedImage output = new BufferedImage(Math.max(1, bounds.width), Math.max(1, bounds.height),
+                transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = output.createGraphics();
 
         Cell.OAM.OamImage[] images = cell.getImages();
         for (int x = 0; x < images.length; x++)
         {
             Cell.OAM oam = cell.oams[x];
-            g.drawImage(images[x].getTransparentImage(), oam.xCoord + output.getWidth() / 2, oam.yCoord + output.getHeight() / 2, null);
+            BufferedImage oamImage = transparent ? images[x].getTransparentImage() : images[x].getImage();
+            g.drawImage(oamImage, oam.xCoord - bounds.x, oam.yCoord - bounds.y, null);
         }
         g.dispose();
 
         return output;
+    }
+
+    /**
+     * Gets the bounding rectangle of a cell in its own coordinate space, where (0,0) is the origin the
+     * OAM offsets are measured from (the point the DS rotates and scales the cell about). The rectangle
+     * is derived from the OAMs' positions and sizes, so it is available for both bank types.
+     * @param i the index of the cell
+     * @return a {@link Rectangle}
+     */
+    public Rectangle getCellBounds(int i)
+    {
+        return cellBounds(cells[i]);
+    }
+
+    private Rectangle cellBounds(Cell cell)
+    {
+        if (cell.oams.length == 0)
+            return new Rectangle(0, 0, 0, 0);
+
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+        for (Cell.OAM oam : cell.oams)
+        {
+            int[] size = getOamSize(oam); // {width, height}
+            minX = Math.min(minX, oam.xCoord);
+            minY = Math.min(minY, oam.yCoord);
+            maxX = Math.max(maxX, oam.xCoord + size[0]);
+            maxY = Math.max(maxY, oam.yCoord + size[1]);
+        }
+        return new Rectangle(minX, minY, maxX - minX, maxY - minY);
     }
 
     /**

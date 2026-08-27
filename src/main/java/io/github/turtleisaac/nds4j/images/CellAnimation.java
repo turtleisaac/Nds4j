@@ -348,8 +348,9 @@ public class CellAnimation extends GenericNtrFile
 
     /**
      * Renders a single animation frame: the cell it names, assembled from the companion NCER/NCGR and
-     * transformed by the frame's scale, rotation and translation. The result is a transparent image the
-     * size of the cell bank's canvas ({@link CellBank#NCER_CANVAS_SIZE}).
+     * transformed by the frame's scale, rotation and translation. The transform is applied about the
+     * cell's origin (the point the DS rotates and scales it about); the returned image is sized so the
+     * transformed cell fits without clipping, with that origin at its centre.
      *
      * @param frame the frame to render
      * @return a transparent <code>BufferedImage</code>
@@ -359,21 +360,34 @@ public class CellAnimation extends GenericNtrFile
     {
         requireCellBank();
 
-        BufferedImage cell = cellBank.getTransparentNcerImage(frame.getCellIndex());
-        BufferedImage output = new BufferedImage(cell.getWidth(), cell.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        int cellIndex = frame.getCellIndex();
+        BufferedImage cell = cellBank.getTransparentNcerImage(cellIndex);
+        java.awt.Rectangle bounds = cellBank.getCellBounds(cellIndex);
 
-        double centerX = cell.getWidth() / 2.0;
-        double centerY = cell.getHeight() / 2.0;
+        double scaleX = frame.getScaleX();
+        double scaleY = frame.getScaleY();
 
-        // Apply the frame transform about the centre of the canvas: translate, then rotate (a full turn
-        // is 0x10000), then scale. Rotation is negated so a positive angle turns the same way the DS 2D
-        // engine does (clockwise on screen).
+        // The cell's origin is at (0,0) in cell space; its furthest reach from the origin in each axis
+        // sets how big a half-canvas is needed. Use the diagonal (times the scale) so a rotated, scaled
+        // cell still fits, and keep the origin at the canvas centre so the transform pivots correctly.
+        int reachX = Math.max(bounds.x + bounds.width, -bounds.x);
+        int reachY = Math.max(bounds.y + bounds.height, -bounds.y);
+        double scale = Math.max(1.0, Math.max(Math.abs(scaleX), Math.abs(scaleY)));
+        int half = Math.max(1, (int) Math.ceil(Math.hypot(reachX, reachY) * scale));
+        int size = half * 2;
+
+        BufferedImage output = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+
+        // Compose, right to left: place the cell so its origin lands on the canvas centre, then scale
+        // and rotate (a full turn is 0x10000; negated so a positive angle turns the way the DS does),
+        // then translate. drawImage applies the transform to the cell image's top-left corner, so the
+        // final step shifts the cell's top-left (cell-space bounds.x, bounds.y) to the centre + offset.
         AffineTransform transform = new AffineTransform();
         transform.translate(frame.getTranslateX(), frame.getTranslateY());
-        transform.translate(centerX, centerY);
+        transform.translate(half, half);
         transform.rotate(-frame.getRotation() / 65536.0 * 2 * Math.PI);
-        transform.scale(frame.getScaleX(), frame.getScaleY());
-        transform.translate(-centerX, -centerY);
+        transform.scale(scaleX, scaleY);
+        transform.translate(bounds.x, bounds.y);
 
         Graphics2D g = output.createGraphics();
         g.drawImage(cell, transform, null);
