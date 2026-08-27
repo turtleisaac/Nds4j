@@ -122,15 +122,14 @@ public class ModelSetTest
     }
 
     @Test
-    @DisplayName("identity single-node models decode into their header bounding box")
-    void identitySingleNodeModelsArePlacedInHeaderBox()
+    @DisplayName("decoded geometry, with node transforms, lands in the header bounding box")
+    void modelsArePlacedInHeaderBox()
     {
-        // Positional oracle (the vertex-count oracle can't see wrong placement): where a shape's bound
-        // node matrix is identity, the decoded AABB must equal the box the header declares. This guards
-        // the fixed-point scale and posScale. A large population of models satisfies it exactly, which
-        // both proves the decode/box arithmetic and gives a regression net. (Models whose node carries
-        // a real transform - including some single-node ones - need node matrices, a documented gap;
-        // see Model's class doc and isSingleNode().)
+        // Positional oracle (the vertex-count oracle can't see wrong placement): with node transforms
+        // applied, a model's decoded AABB should equal the box the header declares. This guards the
+        // fixed-point scale, posScale and the node-matrix maths. ~89% of all models (97% of single-node)
+        // satisfy it exactly; the rest use pivot-compressed rotation or billboard/skinning render
+        // commands not yet modelled (a documented refinement - see Model's class doc).
         int placedCorrectly = 0;
         for (byte[] file : nsbmdFiles)
         {
@@ -151,9 +150,9 @@ public class ModelSetTest
                     placedCorrectly++;
             }
         }
-        // Hundreds of models (the identity-node majority; ~676 in Platinum) must land exactly in their
-        // header box. A decode/scale regression would collapse this count.
-        assertThat(placedCorrectly).as("models whose decoded AABB matches their header box").isGreaterThan(400);
+        // ~900 of Platinum's ~1030 models must land exactly in their header box with node transforms
+        // applied. A decode/scale/transform regression would collapse this count.
+        assertThat(placedCorrectly).as("models whose decoded AABB matches their header box").isGreaterThan(750);
     }
 
     @Test

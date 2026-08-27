@@ -60,11 +60,14 @@ public class Model
     {
         this.name = name;
 
+        int ofsSbc = (int) readU32(mdl0, modelStart + 4);
         int ofsShp = (int) readU32(mdl0, modelStart + 12);
 
         // model header (NNS_G3dModelInfo)
         int info = modelStart + 0x14;
         nodeCount = mdl0[info + 3] & 0xFF;
+        int matCount = mdl0[info + 4] & 0xFF;
+        int shapeCountHeader = mdl0[info + 5] & 0xFF;
         posScale = readU32(mdl0, info + 8) / 4096.0;
         expectedVertexCount = readU16(mdl0, info + 16);
         expectedTriangleCount = readU16(mdl0, info + 20);
@@ -81,6 +84,12 @@ public class Model
             headerBoxMax[c] = (float) (lo + dim);
         }
 
+        // Per-node local transforms and, by walking the render commands, which node's world matrix each
+        // shape is drawn with. This is what positions a multi-node model's parts correctly.
+        double[][] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
+        int[] shapeNode = new int[shapeCountHeader];
+        double[][] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, matCount, shapeCountHeader);
+
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
         int shapeSet = modelStart + ofsShp;
@@ -94,7 +103,131 @@ public class Model
             int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(i), 0);
             int dlOffset = (int) readU32(mdl0, shapeStruct + 8);  // relative to the shape struct
             int dlSize = (int) readU32(mdl0, shapeStruct + 12);
-            meshes.add(interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i)));
+            Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
+            int node = (i < shapeNode.length) ? shapeNode[i] : 0;
+            transformInPlace(mesh.positions, (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null);
+            meshes.add(mesh);
+        }
+    }
+
+    // Parses each node's local transform (NNS node data): u16 flags, fx16 rotation[0][0], then optional
+    // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form we
+    // approximate as identity), and scale (3x fx32 + 3x fx32 inverse). Returns a 3x4 matrix per node.
+    private double[][] parseNodeLocals(byte[] d, int nodeSet)
+    {
+        int count = d[nodeSet + 1] & 0xFF;
+        int recordsOffset = nodeSet + 2 + 10 + count * 4 + 4; // dict header + patricia + elemSize/ofsData
+        double[][] local = new double[count][];
+        for (int n = 0; n < count; n++)
+        {
+            int p = nodeSet + (int) readU32(d, recordsOffset + n * 4);
+            int flags = readU16(d, p); p += 2;
+            double r00 = (short) readU16(d, p) / 4096.0; p += 2;
+            double[] t = {0, 0, 0};
+            double[] r = {r00, 0, 0, 0, 1, 0, 0, 0, 1};
+            double[] s = {1, 1, 1};
+            if ((flags & 0x1) == 0) { t[0] = readFx32(d, p); t[1] = readFx32(d, p + 4); t[2] = readFx32(d, p + 8); p += 12; }
+            if ((flags & 0x2) == 0)
+            {
+                if ((flags & 0x8) != 0) { p += 4; } // pivot-compressed rotation - approximated as identity for now
+                else
+                {
+                    r[1] = readFx16(d, p);     r[2] = readFx16(d, p + 2);  r[3] = readFx16(d, p + 4);
+                    r[4] = readFx16(d, p + 6); r[5] = readFx16(d, p + 8);  r[6] = readFx16(d, p + 10);
+                    r[7] = readFx16(d, p + 12);r[8] = readFx16(d, p + 14); p += 16;
+                }
+            }
+            if ((flags & 0x4) == 0) { s[0] = readFx32(d, p); s[1] = readFx32(d, p + 4); s[2] = readFx32(d, p + 8); p += 24; }
+            // local = translate * rotate * scale (3x4)
+            local[n] = new double[]{
+                    r[0] * s[0], r[1] * s[1], r[2] * s[2], t[0],
+                    r[3] * s[0], r[4] * s[1], r[5] * s[2], t[1],
+                    r[6] * s[0], r[7] * s[1], r[8] * s[2], t[2]};
+        }
+        return local;
+    }
+
+    // Walks the SBC render-command stream to record each node's parent (for the world-matrix hierarchy)
+    // and which node is current when each shape is drawn. Then resolves node world matrices. Commands:
+    // NOP/RET/NODE/MTX/MAT/SHP/NODEDESC/BB/BBY/POSSCALE (opcode = byte & 0x1F; flags in the high bits).
+    private double[][] walkSbc(byte[] d, int sbc, double[][] nodeLocal, int[] shapeNode, int matCount, int shapeCount)
+    {
+        int count = nodeLocal.length;
+        int[] parent = new int[count];
+        java.util.Arrays.fill(parent, -1);
+        int[] stackNode = new int[64];
+        int current = 0;
+        int p = sbc;
+        boolean stop = false;
+        while (p < d.length && !stop)
+        {
+            int b = d[p++] & 0xFF;
+            int op = b & 0x1F, flags = b & 0xE0;
+            switch (op)
+            {
+                case 0x00: break;                                   // NOP
+                case 0x01: stop = true; break;                      // RET
+                case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
+                case 0x03: current = stackNode[d[p++] & 0xFF]; break; // MTX (restore)
+                case 0x04: p += (flags & 0x20) != 0 ? 2 : 1; break; // MAT matId (+ optional)
+                case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) shapeNode[shp] = current; break; } // SHP
+                case 0x06: {                                        // NODEDESC nodeId, parentId
+                    int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
+                    if (nid < count) { parent[nid] = par < count ? par : -1; current = nid; }
+                    if ((flags & 0x40) != 0) { int dst = d[p++] & 0xFF; if (dst < stackNode.length) stackNode[dst] = nid; }
+                    if ((flags & 0x20) != 0) p++;
+                    break;
+                }
+                case 0x07: case 0x08: p++; break;                   // BB / BBY (billboard)
+                case 0x0B: break;                                   // POSSCALE
+                default: stop = true; break;                        // an unmodelled command - stop rather than desync
+            }
+        }
+        double[][] world = new double[count][];
+        for (int n = 0; n < count; n++)
+            world[n] = resolveWorld(n, parent, nodeLocal, world);
+        return world;
+    }
+
+    private double[] resolveWorld(int n, int[] parent, double[][] local, double[][] world)
+    {
+        if (world[n] != null)
+            return world[n];
+        world[n] = local[n]; // guard against cycles
+        if (parent[n] < 0 || parent[n] == n)
+            return local[n];
+        double[] pw = resolveWorld(parent[n], parent, local, world);
+        world[n] = multiply(pw, local[n]);
+        return world[n];
+    }
+
+    // Multiplies two 3x4 matrices (each an implicit 4x4 with bottom row 0,0,0,1).
+    private static double[] multiply(double[] a, double[] b)
+    {
+        double[] r = new double[12];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 4; j++)
+            {
+                double s = 0;
+                for (int k = 0; k < 3; k++)
+                    s += a[i * 4 + k] * b[k * 4 + j];
+                if (j == 3)
+                    s += a[i * 4 + 3];
+                r[i * 4 + j] = s;
+            }
+        return r;
+    }
+
+    private static void transformInPlace(float[] positions, double[] m)
+    {
+        if (m == null)
+            return;
+        for (int i = 0; i < positions.length; i += 3)
+        {
+            double x = positions[i], y = positions[i + 1], z = positions[i + 2];
+            positions[i] = (float) (m[0] * x + m[1] * y + m[2] * z + m[3]);
+            positions[i + 1] = (float) (m[4] * x + m[5] * y + m[6] * z + m[7]);
+            positions[i + 2] = (float) (m[8] * x + m[9] * y + m[10] * z + m[11]);
         }
     }
 
@@ -393,6 +526,16 @@ public class Model
     private static long readU32(byte[] d, int o)
     {
         return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
+    }
+
+    private static double readFx16(byte[] d, int o)
+    {
+        return (short) readU16(d, o) / 4096.0;
+    }
+
+    private static double readFx32(byte[] d, int o)
+    {
+        return (int) readU32(d, o) / 4096.0;
     }
 
     /** A single drawable mesh: interleaved-free position and texcoord arrays plus triangle indices. */
