@@ -18,6 +18,8 @@ These sources will be denoted as <sup>unused</sup>.
 * [NCGR](#ncgr)
 * [NCLR](#nclr)
 * [NCER](#ncer)
+* [NANR](#nanr)
+* [NSCR](#nscr)
 
 ---------------
 
@@ -75,3 +77,21 @@ These sources will be denoted as <sup>unused</sup>.
   * [Nintendo Cell Resource (NCER/RECN)](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm#NCER)
 * [lowlines' Documents Page](http://llref.emutalk.net/docs/)
   * [Nitro Cell Resource (NCER)](http://llref.emutalk.net/docs/?file=xml/ncer.xml#xml-doc)
+
+## NANR
+* The existing NCER implementation in this library (`images.CellBank`), which shares the same
+  generic NTR header and the LBAL/UEXT label/extension section layout that an NANR reuses.
+* Retail Generation IV Pokémon ROMs (Diamond/Pearl/Platinum/HeartGold/SoulSilver), used to
+  reverse-engineer and validate the `KNBA` animation-bank block: byte-exact round-trip was
+  confirmed against every RNAN file in all five titles.
+* [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>
+  * [Nitro Animation Resource (NANR)](http://llref.emutalk.net/docs/?file=xml/nanr.xml#xml-doc) <sup>unused</sup>
+
+## NSCR
+* Retail Generation IV Pokémon ROMs (Diamond/Pearl/Platinum/HeartGold/SoulSilver), used to
+  reverse-engineer and validate the `NRCS` screen block; byte-exact round-trip was confirmed
+  against every RCSN file in all five titles.
+* [ROMhacking.net NDS File Formats](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm)
+  * [Nintendo Screen Resource (NSCR/RCSN)](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm#NSCR) <sup>unused</sup>
+* [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>
+  * [Nitro Screen Resource (NSCR)](http://llref.emutalk.net/docs/?file=xml/nscr.xml#xml-doc) <sup>unused</sup>

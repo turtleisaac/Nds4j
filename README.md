@@ -34,6 +34,8 @@ Formats currently implemented
 | NCGR      | `images.IndexedImage`    | &check; | &check; |         &cross;         |
 | NCLR      | `images.Palette`         | &check; | &check; |         &cross;         |
 | NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
+| NANR      | `images.CellAnimation`   | &check; | &check; |         &cross;         |
+| NSCR      | `images.Screen`          | &check; | &check; |         &cross;         |
 | ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
 
 Likely future supported formats
@@ -41,12 +43,38 @@ Likely future supported formats
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-* NANR
-* NSCR
-* NSBTX
-* NSBMD
-* NSBCA
-* SPA
+The Nitro 3D (`NSB*`) formats below are a priority group. They will receive full first-class support
+built natively in Nds4j &mdash; each fully reverse-engineered and rebuilt to the same standard as every
+other format here (byte-for-byte round-tripping, `framework.GenericNtrFile`/`MemBuf`, informative
+exceptions, `equals()`, and unit tests validated against retail ROMs). A third-party reader is being
+kept on hand purely as a decoding reference to check against; it will not be wrapped or depended upon.
+Note that `NSBTA` and `NSBMA` have no third-party reader to reference and must be worked out entirely
+from documentation and the retail files themselves.
+
+* NSBMD &mdash; model
+* NSBTX &mdash; texture
+* NSBCA &mdash; joint/skeletal animation
+* NSBTA &mdash; texture SRT (scale/rotate/translate) animation
+* NSBTP &mdash; texture pattern animation
+* NSBMA &mdash; material colour animation
+* NSBVA &mdash; visibility animation
+* SPA &mdash; particle effects
+
+The 2D graphics companions below round out the `NCLR`/`NCGR`/`NSCR`/`NCER`/`NANR` set already
+supported. They aren't used by the Pokémon Gen IV games but are common across other DS titles.
+
+* NMCR &mdash; multi-cell resource (composes several `NCER` cells into one object)
+* NMAR &mdash; multi-cell animation resource (animates an `NMCR`)
+* NFTR &mdash; Nitro font resource
+* NTFT / NTFP / NTFI &mdash; raw texture texel / palette / index data
+
+The following is infrastructure rather than a single format, but it gates a large share of the files
+above: many `NSB*`, `NCGR`, and other resources are stored compressed. Supporting the general Nitro
+codecs (and rounding out the ROM container) is a prerequisite for the rest.
+
+* General Nitro compression &mdash; LZ10, LZ11, Huffman, RLE (`framework.BLZCoder` currently only
+    covers the ARM-code BLZ variant)
+* ROM banner / icon &mdash; the cartridge icon bitmap and multilingual titles
 
 The following are themselves likely, but are not part of my immediate needs or goals due
 to very fleshed out solutions such as ndspy existing:
@@ -56,6 +84,7 @@ to very fleshed out solutions such as ndspy existing:
 * SBNK
 * SWAR
 * SSAR
+* STRM
 
 
 A few examples of Nds4j in action
