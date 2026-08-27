@@ -393,6 +393,21 @@ public class Fnt
      */
     public static MemBuf save(Folder root)
     {
+        // A nameless archive (no filenames anywhere, which is every retail Pokémon NARC) uses a special
+        // minimal filename table: one 8-byte main-table entry whose subtable-offset field is the
+        // sentinel 4, with no entries table at all. Emit that exact form. The general path below instead
+        // writes a real subtable offset plus a 0x00-terminated (and 4-byte aligned) entries table, which
+        // adds four bytes and shifts every following section, breaking the byte-exact round-trip.
+        if (root.files.isEmpty() && root.folders.isEmpty())
+        {
+            MemBuf buf = MemBuf.create();
+            MemBuf.MemBufWriter writer = buf.writer();
+            writer.writeInt(4);                       // subtable offset (sentinel for "no names")
+            writer.writeShort((short) root.firstId);  // id of the archive's first file (0)
+            writer.writeShort((short) 1);             // total directory count (just the root)
+            return buf;
+        }
+
         HashMap<Integer, FileProcessingData> folderEntries = new HashMap<>();
 
         // nextFolderId allows us to assign folder IDs in sequential order.
