@@ -36,6 +36,7 @@ Formats currently implemented
 | NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
 | NANR      | `images.CellAnimation`   | &check; | &check; |         &cross;         |
 | NSCR      | `images.Screen`          | &check; | &check; |         &cross;         |
+| NSBTX     | `g3d.Nsbtx`              | &check; | &check; |         &cross;         |
 | ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
 
 Likely future supported formats
@@ -52,7 +53,6 @@ Note that `NSBTA` and `NSBMA` have no third-party reader to reference and must b
 from documentation and the retail files themselves.
 
 * NSBMD &mdash; model
-* NSBTX &mdash; texture
 * NSBCA &mdash; joint/skeletal animation
 * NSBTA &mdash; texture SRT (scale/rotate/translate) animation
 * NSBTP &mdash; texture pattern animation

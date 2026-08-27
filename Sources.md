@@ -20,6 +20,7 @@ These sources will be denoted as <sup>unused</sup>.
 * [NCER](#ncer)
 * [NANR](#nanr)
 * [NSCR](#nscr)
+* [NSBTX](#nsbtx)
 
 ---------------
 
@@ -95,3 +96,15 @@ These sources will be denoted as <sup>unused</sup>.
   * [Nintendo Screen Resource (NSCR/RCSN)](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm#NSCR) <sup>unused</sup>
 * [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>
   * [Nitro Screen Resource (NSCR)](http://llref.emutalk.net/docs/?file=xml/nscr.xml#xml-doc) <sup>unused</sup>
+
+## NSBTX
+The `TEX0` block layout (the texture/palette info headers and the shared `NNS_G3dResDict`
+dictionary) was reverse-engineered from a third-party reference reader, `NitroSystemTool` (its
+`nitroreader` package), kept out-of-tree as a decoding reference only. The seven texture pixel
+formats and the `texImageParam` bit layout are from GBATEK and the retail files themselves. Byte-exact
+round-trip and correct decoding were confirmed against every BTX0 file in Diamond/Pearl/Platinum/
+HeartGold/SoulSilver.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [DS 3D Texture Formats](https://problemkaputt.de/gbatek.htm#ds3dtextureformats)
+* [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>
+  * [Nitro System Binary TeXture (NSBTX)](http://llref.emutalk.net/docs/?file=xml/btx0.xml#xml-doc) <sup>unused</sup>
