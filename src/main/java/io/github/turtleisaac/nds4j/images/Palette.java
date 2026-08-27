@@ -41,6 +41,14 @@ public class Palette extends GenericNtrFile
     private int compNum = 0;
     private boolean ir = false;
 
+    // The raw 16-bit BGR555 values as read from a file, kept so an unedited colour round-trips byte-for-byte.
+    // BGR555 only uses 15 bits, but retail palettes set the unused bit 15 and java.awt.Color cannot carry it,
+    // so without this a plain load/save would clear it (0xFFFF -> 0x7FFF). Null for palettes not read from a file;
+    // an individual entry of NO_SOURCE means that slot has been edited/replaced and must not restore an old bit 15.
+    // Kept in sync by every method that mutates colors (setColor/setColors/setNumColors) and copied by copyOf.
+    private int[] sourceColors;
+    private static final int NO_SOURCE = -1;
+
     /**
      * Parses an NCLR file and returns a <code>Palette</code> representation of it
      * @param data a <code>byte[]</code> containing a binary representation of an NCLR file
@@ -100,10 +108,14 @@ public class Palette extends GenericNtrFile
         this.bitDepth = bitDepth;
         this.compNum = compNum;
 
+        sourceColors = new int[numColors];
         reader.setPosition(0x18 + colorStartOffset);
         for (int i = 0; i < numColors; i++)
         {
-            colors[i] = NclrUtils.bgr555ToColor((byte) reader.readByte(), (byte) reader.readByte());
+            int lo = reader.readByte() & 0xff;
+            int hi = reader.readByte() & 0xff;
+            sourceColors[i] = (hi << 8) | lo;
+            colors[i] = NclrUtils.bgr555ToColor((byte) lo, (byte) hi);
         }
 
         if (numColors > 0 && colors[numColors - 1].equals(NclrUtils.irColor)) //honestly no clue why this is a thing
@@ -217,8 +229,16 @@ public class Palette extends GenericNtrFile
 
         writer.setPosition(storedPos);
 
-        for(Color color : colors) {
-            writer.write(NclrUtils.colorToBGR555(color));
+        for (int i = 0; i < colors.length; i++) {
+            byte[] packed = NclrUtils.colorToBGR555(colors[i]);
+            int value = (packed[0] & 0xff) | ((packed[1] & 0xff) << 8);
+            // If this colour is unchanged since it was read (its repacked 15 bits still match the source),
+            // re-emit the original 16-bit value so bit 15 is preserved. An edited colour won't match and
+            // falls through to the freshly packed value (bit 15 = 0), which is correct for new data.
+            if (sourceColors != null && i < sourceColors.length && sourceColors[i] != NO_SOURCE && (sourceColors[i] & 0x7FFF) == (value & 0x7FFF))
+                value = sourceColors[i];
+            writer.writeByte((byte) (value & 0xff));
+            writer.writeByte((byte) ((value >> 8) & 0xff));
         }
 
         return dataBuf.reader().getBuffer();
@@ -263,6 +283,9 @@ public class Palette extends GenericNtrFile
     public void setColors(Color[] colors)
     {
         this.colors = colors;
+        // The whole array was replaced with caller-supplied colours that have no relation to the file that
+        // was read, so drop the source values - none of them may restore a stale bit 15.
+        this.sourceColors = null;
     }
 
     /**
@@ -289,6 +312,10 @@ public class Palette extends GenericNtrFile
         if (i < 0 || i >= colors.length)
             throw new RuntimeException("Invalid index: " + i);
         colors[i] = color;
+        // This slot has been edited, so its original 16-bit value no longer applies - a subsequent save must
+        // pack the new colour fresh (bit 15 = 0) rather than restore the byte that used to be here.
+        if (sourceColors != null && i < sourceColors.length)
+            sourceColors[i] = NO_SOURCE;
     }
 
     /**
@@ -344,6 +371,15 @@ public class Palette extends GenericNtrFile
         for (int i = this.colors.length; i < numColors; i++)
             colors[i] = java.awt.Color.BLACK;
         this.colors = colors;
+        // Keep the source values aligned with the resized array: preserve the surviving prefix (so unedited
+        // colours still round-trip) and mark any newly-added slots as having no source.
+        if (sourceColors != null)
+        {
+            int[] resized = new int[numColors];
+            Arrays.fill(resized, NO_SOURCE);
+            System.arraycopy(sourceColors, 0, resized, 0, Math.min(sourceColors.length, numColors));
+            sourceColors = resized;
+        }
     }
 
     /**
@@ -394,6 +430,9 @@ public class Palette extends GenericNtrFile
         {
             p.colors[idx++] = new Color(c.getRGB());
         }
+        // Carry the source values so a copied palette still round-trips bit 15 (the copied colours are
+        // identical, so the same restoration applies). Without this, copy-then-save re-clears bit 15.
+        p.sourceColors = (sourceColors != null ? sourceColors.clone() : null);
 
         return p;
     }
@@ -408,6 +447,10 @@ public class Palette extends GenericNtrFile
             return false;
         }
         Palette palette = (Palette) o;
+        // Deliberately not comparing sourceColors: two palettes with the same colours are equal even if one was
+        // read from a file (and so carries the unused BGR555 bit 15) and the other was built in memory. Bit 15
+        // is ignored by the DS 2D engine, so it is below the granularity of colour equality; it only affects the
+        // exact bytes save() emits. copyOf carries sourceColors, so a copy still both equals and serialises like its original.
         return numColors == palette.numColors && bitDepth == palette.bitDepth && compNum == palette.compNum && ir == palette.ir && Arrays.equals(colors, palette.colors);
     }
 
