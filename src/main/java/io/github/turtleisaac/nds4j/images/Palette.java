@@ -41,6 +41,23 @@ public class Palette extends GenericNtrFile
     private int compNum = 0;
     private boolean ir = false;
 
+    // The 32-bit word at TTLP offset 0x1C. Zero for ordinary palettes but non-zero for some extended
+    // ones, so it is preserved rather than re-emitted as 0 (which shrank/altered those files). Not part
+    // of colour identity, so it is excluded from equals(), like sourceColors.
+    private int paletteUnknown1 = 0;
+
+    // Blocks that follow the TTLP section (some files carry a trailing PMCP palette-count-map block, so
+    // numBlocks is 2). Preserved verbatim; without this a load/save cycle dropped them and rewrote the
+    // block count as 1. Excluded from equals() as a serialisation-only detail.
+    private byte[] trailingBlocks = new byte[0];
+
+    // The raw palette-length word at TTLP offset 0x20 as read from the file, or NO_SOURCE if this
+    // palette was built in memory or has been resized. Some files over-declare it (e.g. the full
+    // extended-palette VRAM size, or 0 meaning "use the section size") while storing fewer colours; the
+    // reader normalises it to locate the data, but the original value must be re-emitted to stay
+    // byte-exact. The actual colour byte count still drives the file layout.
+    private long sourcePaletteLengthField = NO_SOURCE;
+
     // The raw 16-bit BGR555 values as read from a file, kept so an unedited colour round-trips byte-for-byte.
     // BGR555 only uses 15 bits, but retail palettes set the unused bit 15 and java.awt.Color cannot carry it,
     // so without this a plain load/save would clear it (0xFFFF -> 0x7FFF). Null for palettes not read from a file;
@@ -90,18 +107,19 @@ public class Palette extends GenericNtrFile
         int compNum = reader.readByte();
         reader.skip(1);
 
-        int paletteUnknown1 = reader.readInt();
-        long paletteLength= reader.readUInt32();
-
-        if(paletteLength == 0 || paletteLength > paletteSectionSize)
-            paletteLength= paletteSectionSize - 0x18;
+        this.paletteUnknown1 = reader.readInt();
+        this.sourcePaletteLengthField = reader.readUInt32();
 
         long colorStartOffset= reader.readUInt32();
 
-        int numColors = 256;
-
-        if (paletteLength / 2 < numColors)
-            numColors = (int) (paletteLength / 2);
+        // One colour per two bytes of palette data. The count is the actual extent of the colour data
+        // in the TTLP section (from the colour start to the end of the section), NOT the declared
+        // palette-length word at 0x20: retail files both over-declare it (VRAM hints) and under-declare
+        // it, and a former cap of 256 also truncated the extended palettes some files carry (several
+        // 16-/256-colour sub-palettes stored consecutively, e.g. the shared opening-sequence NCLRs).
+        // Trusting the word dropped colours and shrank those files; the section bounds are the truth.
+        long colorDataBytes = (NTR_HEADER_SIZE + paletteSectionSize) - (0x18 + colorStartOffset);
+        int numColors = (int) (colorDataBytes / 2);
 
         this.numColors = numColors;
         colors = new Color[numColors];
@@ -122,6 +140,10 @@ public class Palette extends GenericNtrFile
         {
             this.ir = true;
         }
+
+        int trailingStart = NTR_HEADER_SIZE + (int) paletteSectionSize;
+        if (trailingStart < fileSize)
+            trailingBlocks = Arrays.copyOfRange(data, trailingStart, fileSize);
     }
 
     /**
@@ -208,7 +230,10 @@ public class Palette extends GenericNtrFile
         // went unnoticed, but it is what an external tool would trust.
         int extSize = size + 0x18 + NTR_HEADER_SIZE;
 
-        writeGenericNtrHeader(writer, extSize, 1);
+        // Include any preserved trailing blocks (e.g. PMCP) in the file size and block count so a file
+        // that carried them round-trips exactly. Palettes built in memory have neither (numBlocks 0).
+        int blockCount = numBlocks != 0 ? numBlocks : 1;
+        writeGenericNtrHeader(writer, extSize + trailingBlocks.length, blockCount);
 
         // writer position is now 0x10
 
@@ -224,8 +249,13 @@ public class Palette extends GenericNtrFile
         writer.writeShort((short) (bitDepth == 4 ? 0x3 : 0x4)); // 0x18
         writer.writeByte((byte) (compNum)); // 0x1A
 
+        writer.setPosition(NTR_HEADER_SIZE + 0x0C);
+        writer.writeInt(paletteUnknown1); // 0x1C
+
         writer.setPosition(NTR_HEADER_SIZE + 0x10);
-        writer.writeInt(size);
+        // Re-emit the file's original palette-length word when it round-trips (it may over-declare or be
+        // 0); a resized/in-memory palette falls back to the true colour byte count.
+        writer.writeInt(sourcePaletteLengthField != NO_SOURCE ? (int) sourcePaletteLengthField : size);
 
         writer.setPosition(storedPos);
 
@@ -240,6 +270,8 @@ public class Palette extends GenericNtrFile
             writer.writeByte((byte) (value & 0xff));
             writer.writeByte((byte) ((value >> 8) & 0xff));
         }
+
+        writer.write(trailingBlocks);
 
         return dataBuf.reader().getBuffer();
     }
@@ -286,6 +318,7 @@ public class Palette extends GenericNtrFile
         // The whole array was replaced with caller-supplied colours that have no relation to the file that
         // was read, so drop the source values - none of them may restore a stale bit 15.
         this.sourceColors = null;
+        this.sourcePaletteLengthField = NO_SOURCE; // the file's declared length no longer applies to caller data
     }
 
     /**
@@ -380,6 +413,7 @@ public class Palette extends GenericNtrFile
             System.arraycopy(sourceColors, 0, resized, 0, Math.min(sourceColors.length, numColors));
             sourceColors = resized;
         }
+        sourcePaletteLengthField = NO_SOURCE; // colour count changed; recompute the length word on save
     }
 
     /**
@@ -424,6 +458,9 @@ public class Palette extends GenericNtrFile
         p.bitDepth = bitDepth;
         p.compNum = compNum;
         p.ir = ir;
+        p.paletteUnknown1 = paletteUnknown1;
+        p.trailingBlocks = trailingBlocks.clone();
+        p.sourcePaletteLengthField = sourcePaletteLengthField;
 
         int idx = 0;
         for (Color c : colors)

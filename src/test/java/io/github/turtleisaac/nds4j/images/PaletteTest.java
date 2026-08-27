@@ -99,4 +99,22 @@ public class PaletteTest
         assertThat(new Palette(bulbasaurPalette.save(), 0))
                 .isEqualTo(bulbasaurPalette);
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces every NCLR in the ROM byte-for-byte")
+    void writtenNclrRoundTripsByteExactAcrossRom()
+    {
+        // The equals()-based tests above don't compare the raw bytes, so they missed several NCLR
+        // header/section quirks (the 256-colour cap, the 0x1C word, a trailing PMCP block, and the
+        // over-/under-declared palette-length word). A byte-level round-trip over the whole ROM is
+        // what actually pins them down.
+        java.util.List<byte[]> nclrFiles = NtrFixtures.collect(rom, "RLCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(nclrFiles.isEmpty(), "no RLCN files found in the test ROM");
+        for (int i = 0; i < nclrFiles.size(); i++)
+        {
+            byte[] original = nclrFiles.get(i);
+            byte[] written = new Palette(original, 0).save();
+            assertThat(written).as("RLCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
 }

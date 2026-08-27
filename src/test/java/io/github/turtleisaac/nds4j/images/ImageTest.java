@@ -304,4 +304,21 @@ public class ImageTest
         assertThat(scanned.getEncryptionKey())
                 .isEqualTo(written.getEncryptionKey());
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces every NCGR in the ROM byte-for-byte")
+    void writtenNcgrRoundTripsByteExactAcrossRom()
+    {
+        // The written-equals tests above compare via equals(), which does not check the NTR header or
+        // the preserved source-header fields (the 0xFFFF "unspecified" tile width/height and the 0x20
+        // flag). A byte-level round-trip over every NCGR in the ROM is what actually guards that.
+        java.util.List<byte[]> ncgrFiles = NtrFixtures.collect(rom, "RGCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(ncgrFiles.isEmpty(), "no RGCN files found in the test ROM");
+        for (int i = 0; i < ncgrFiles.size(); i++)
+        {
+            byte[] original = ncgrFiles.get(i);
+            byte[] written = new IndexedImage(original, 0, 0, 1, 1, true).save();
+            assertThat(written).as("RGCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
 }
