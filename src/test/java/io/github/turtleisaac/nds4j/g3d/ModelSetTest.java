@@ -101,6 +101,52 @@ public class ModelSetTest
     }
 
     @Test
+    @DisplayName("the display-list interpreter emits exactly the vertex count each model header declares")
+    void geometryMatchesHeaderVertexCount()
+    {
+        // The NNS model header records the total vertex count; a correct interpreter emits exactly that
+        // many while walking the shapes' display lists. This is a strong, self-checking oracle for the
+        // whole geometry decode over every model in the ROM.
+        int models = 0;
+        for (byte[] file : nsbmdFiles)
+        {
+            for (Model model : new ModelSet(file).getModels())
+            {
+                assertThat(model.getVertexCount())
+                        .as("model %s vertex count", model.getName())
+                        .isEqualTo(model.getExpectedVertexCount());
+                models++;
+            }
+        }
+        assertThat(models).as("the ROM should contain models").isGreaterThan(0);
+    }
+
+    @Test
+    @DisplayName("meshes and OBJ export are coherent")
+    void meshesAndObjExport()
+    {
+        Model model = nsbmdFiles.stream().map(ModelSet::new)
+                .flatMap(ms -> ms.getModels().stream())
+                .filter(m -> m.getVertexCount() > 0).findFirst().orElse(null);
+        Assumptions.assumeTrue(model != null, "need a model with geometry");
+
+        int triangleVerts = 0;
+        for (Model.Mesh mesh : model.getMeshes())
+        {
+            assertThat(mesh.getPositions().length).isEqualTo(mesh.getVertexCount() * 3);
+            assertThat(mesh.getTexcoords().length).isEqualTo(mesh.getVertexCount() * 2);
+            assertThat(mesh.getTriangleIndices().length % 3).isZero();
+            for (int idx : mesh.getTriangleIndices())
+                assertThat(idx).isBetween(0, mesh.getVertexCount() - 1);
+            triangleVerts += mesh.getTriangleCount() * 3;
+        }
+        String obj = model.toObj();
+        assertThat(obj).contains("v ").contains("f ");
+        // one OBJ face line per triangle
+        assertThat(obj.lines().filter(l -> l.startsWith("f ")).count()).isEqualTo((long) triangleVerts / 3);
+    }
+
+    @Test
     @DisplayName("most models embed their textures, and all declare a model block")
     void embeddedTextureReporting()
     {

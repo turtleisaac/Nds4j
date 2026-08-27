@@ -19,16 +19,23 @@
 
 package io.github.turtleisaac.nds4j.g3d;
 
+import io.github.turtleisaac.nds4j.framework.MemBuf;
+
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * An object representation of an NSBMD file (a Nitro 3D model, magic {@code BMD0}).
+ * An object representation of an NSBMD file (a Nitro 3D model set, magic {@code BMD0}).
  * <p>
- * An NSBMD holds an {@code MDL0} model block and, in the common case, an embedded {@code TEX0}
- * texture block (5274 of the 5482 models in the Gen IV ROMs embed their textures). The container is
- * read and preserved by {@link G3dFile}, so an unedited file round-trips byte-for-byte; the model
- * geometry, materials and skeleton inside {@code MDL0} are decoded on top of that in later work.
+ * An NSBMD holds an {@code MDL0} block naming one or more {@link Model}s and, in the common case, an
+ * embedded {@code TEX0} texture block (5274 of the 5482 models in the Gen IV ROMs embed their
+ * textures). The container is read and preserved by {@link G3dFile}, so an unedited file round-trips
+ * byte-for-byte; the {@link Model} geometry inside {@code MDL0} is decoded on top of that.
  */
 public class ModelSet extends G3dFile
 {
+    private final List<Model> models = new ArrayList<>();
+
     /**
      * Generates an object representation of an NSBMD file.
      * @param data a <code>byte[]</code> representation of an NSBMD file
@@ -37,12 +44,37 @@ public class ModelSet extends G3dFile
     {
         super("BMD0");
         readContainer(data);
-        if (indexOfBlock("MDL0") < 0)
+        int mdl0Index = indexOfBlock("MDL0");
+        if (mdl0Index < 0)
             throw new RuntimeException("Not a valid BMD0 file: missing MDL0 block.");
+        parseModels(block(mdl0Index));
+    }
+
+    private void parseModels(byte[] mdl0)
+    {
+        MemBuf buf = MemBuf.create(mdl0);
+        MemBuf.MemBufReader reader = buf.reader();
+        reader.setPosition(8); // model dictionary follows the MDL0 magic + size
+        G3dDictionary modelDict = new G3dDictionary(reader);
+        for (int i = 0; i < modelDict.size(); i++)
+        {
+            byte[] rec = modelDict.getRecord(i); // 4-byte offset to the model, relative to the MDL0 block
+            int modelStart = (rec[0] & 0xFF) | ((rec[1] & 0xFF) << 8) | ((rec[2] & 0xFF) << 16) | ((rec[3] & 0xFF) << 24);
+            models.add(new Model(mdl0, modelStart, modelDict.getName(i)));
+        }
     }
 
     /**
-     * Gets whether this model embeds its own textures (a {@code TEX0} block).
+     * Gets the models in this file.
+     * @return a <code>List</code> of {@link Model}
+     */
+    public List<Model> getModels()
+    {
+        return models;
+    }
+
+    /**
+     * Gets whether this file embeds its own textures (a {@code TEX0} block).
      * @return a <code>boolean</code>
      */
     public boolean hasEmbeddedTextures()
@@ -53,6 +85,6 @@ public class ModelSet extends G3dFile
     @Override
     public String toString()
     {
-        return "ModelSet" + (hasEmbeddedTextures() ? "[with textures]" : "[no textures]");
+        return String.format("ModelSet[%d models%s]", models.size(), hasEmbeddedTextures() ? ", with textures" : "");
     }
 }
