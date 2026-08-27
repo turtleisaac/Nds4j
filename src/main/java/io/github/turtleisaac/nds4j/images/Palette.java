@@ -41,10 +41,11 @@ public class Palette extends GenericNtrFile
     private int compNum = 0;
     private boolean ir = false;
 
-    // The 32-bit word at TTLP offset 0x1C. Zero for ordinary palettes but non-zero for some extended
-    // ones, so it is preserved rather than re-emitted as 0 (which shrank/altered those files). Not part
-    // of colour identity, so it is excluded from equals(), like sourceColors.
-    private int paletteUnknown1 = 0;
+    // The 32-bit flag word at TTLP offset 0x1C. Across all five retail ROMs it is 0 or 1, and 1 occurs
+    // only on 8bpp palettes, tracking those loaded as extended (multi-bank / >256-colour) palettes; it
+    // is 0 for every 4bpp palette and every ordinary single-bank one. Preserved (rather than re-emitted
+    // as 0, which altered those files) but excluded from equals() as a serialisation-only detail.
+    private int extendedPaletteFlag = 0;
 
     // Blocks that follow the TTLP section (some files carry a trailing PMCP palette-count-map block, so
     // numBlocks is 2). Preserved verbatim; without this a load/save cycle dropped them and rewrote the
@@ -107,7 +108,7 @@ public class Palette extends GenericNtrFile
         int compNum = reader.readByte();
         reader.skip(1);
 
-        this.paletteUnknown1 = reader.readInt();
+        this.extendedPaletteFlag = reader.readInt();
         this.sourcePaletteLengthField = reader.readUInt32();
 
         long colorStartOffset= reader.readUInt32();
@@ -250,7 +251,7 @@ public class Palette extends GenericNtrFile
         writer.writeByte((byte) (compNum)); // 0x1A
 
         writer.setPosition(NTR_HEADER_SIZE + 0x0C);
-        writer.writeInt(paletteUnknown1); // 0x1C
+        writer.writeInt(extendedPaletteFlag); // 0x1C
 
         writer.setPosition(NTR_HEADER_SIZE + 0x10);
         // Re-emit the file's original palette-length word when it round-trips (it may over-declare or be
@@ -458,7 +459,7 @@ public class Palette extends GenericNtrFile
         p.bitDepth = bitDepth;
         p.compNum = compNum;
         p.ir = ir;
-        p.paletteUnknown1 = paletteUnknown1;
+        p.extendedPaletteFlag = extendedPaletteFlag;
         p.trailingBlocks = trailingBlocks.clone();
         p.sourcePaletteLengthField = sourcePaletteLengthField;
 

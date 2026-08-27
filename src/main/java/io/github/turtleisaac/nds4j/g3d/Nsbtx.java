@@ -27,7 +27,9 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * An object representation of an NSBTX file (a Nitro 3D texture archive, magic {@code BTX0}).
@@ -187,6 +189,37 @@ public class Nsbtx extends GenericNtrFile
     public List<Palette> getPalettes()
     {
         return palettes;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        Nsbtx nsbtx = (Nsbtx) o;
+        // The blocks fully determine the archive (textures/palettes are a parsed view over them), so
+        // comparing them plus the offset table is a complete value equality.
+        return numBlocks == nsbtx.numBlocks
+                && fileSize == nsbtx.fileSize
+                && Arrays.equals(blockOffsets, nsbtx.blockOffsets)
+                && Arrays.deepEquals(blocks, nsbtx.blocks);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = Objects.hash(numBlocks, fileSize);
+        result = 31 * result + Arrays.hashCode(blockOffsets);
+        result = 31 * result + Arrays.deepHashCode(blocks);
+        return result;
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("Nsbtx[%d textures, %d palettes]", textures.size(), palettes.size());
     }
 
     /**

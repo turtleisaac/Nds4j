@@ -89,6 +89,19 @@ public class NsbtxTest
     }
 
     @Test
+    @DisplayName("a saved NSBTX re-reads equal to the original object")
+    void writtenNsbtxEqualsOriginalObject()
+    {
+        for (int i = 0; i < nsbtxFiles.size(); i++)
+        {
+            Nsbtx original = new Nsbtx(nsbtxFiles.get(i));
+            Nsbtx reloaded = new Nsbtx(original.save());
+            assertThat(reloaded).as("BTX0 file #%d must equal itself after a save/load cycle", i).isEqualTo(original);
+            assertThat(reloaded.hashCode()).isEqualTo(original.hashCode());
+        }
+    }
+
+    @Test
     @DisplayName("every texture decodes to an image of its declared size")
     void everyTextureDecodes()
     {

@@ -57,7 +57,9 @@ public class CellBank extends GenericNtrFile
     private long kbecReserved0x28;
     private long partitionDataOffset;
     private long tacuOffset;
-    private int uextUnknown;
+    // The single content word of the UEXT ("TXEU") section. It is 0 in every NCER and NANR across the
+    // five retail ROMs, i.e. a reserved/unused word; preserved and reproduced regardless.
+    private int uextReserved;
 
     // The partition (VRAM transfer) and TACU sections that follow the cell/OAM data inside the KBEC
     // block, captured verbatim. Their internal layout (alignment, padding, the exact size words) varies
@@ -290,7 +292,7 @@ public class CellBank extends GenericNtrFile
         }
 
         int uextSectionSize = reader.readInt();
-        uextUnknown = reader.readInt();
+        uextReserved = reader.readInt();
     }
 
 
@@ -345,7 +347,7 @@ public class CellBank extends GenericNtrFile
 
             writer.writeString("TXEU");
             writer.writeInt(12); // section size (magic + size + one word of contents)
-            writer.writeInt(uextUnknown);
+            writer.writeInt(uextReserved);
         }
 
         int storedPos = writer.getPosition();
@@ -601,7 +603,7 @@ public class CellBank extends GenericNtrFile
                 && partitionDataOffset == that.partitionDataOffset
                 && tacuOffset == that.tacuOffset
                 && kbecReserved0x28 == that.kbecReserved0x28
-                && uextUnknown == that.uextUnknown
+                && uextReserved == that.uextReserved
                 && labelCount == that.labelCount
                 && Arrays.equals(cells, that.cells)
                 && Arrays.equals(auxiliaryData, that.auxiliaryData)
@@ -612,7 +614,7 @@ public class CellBank extends GenericNtrFile
     public int hashCode()
     {
         int result = Objects.hash(bankType, mappingType, vramTransfer, tacu, numBlocks, bankDataOffset,
-                partitionDataOffset, tacuOffset, kbecReserved0x28, uextUnknown, labelCount);
+                partitionDataOffset, tacuOffset, kbecReserved0x28, uextReserved, labelCount);
         result = 31 * result + Arrays.hashCode(cells);
         result = 31 * result + Arrays.hashCode(auxiliaryData);
         result = 31 * result + Arrays.hashCode(extraLabels);

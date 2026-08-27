@@ -83,12 +83,16 @@ public class IndexedImage extends GenericNtrFile
     private int encryptionKey = -1;
 
     // Raw NCGR character-header fields that save() otherwise recomputes. Preserved so an unedited image
-    // round-trips byte-for-byte: party-icon NCGRs store 0xFFFF "unspecified" tile width/height and a 0x10
-    // flag at 0x20, which the reader replaces with a computed layout. Only restored when the image has not
-    // been resized (its pixel dimensions still match what was read); an edited/resized image writes fresh
-    // values. Absent for images not read from a file.
+    // round-trips byte-for-byte: some NCGRs store 0xFFFF "unspecified" tile width/height, which the
+    // reader replaces with a computed layout. Only restored when the image has not been resized (its
+    // pixel dimensions still match what was read); an edited/resized image writes fresh values. Absent
+    // for images not read from a file.
+    //
+    // srcUnspecifiedSizeFlag is the u16 at char-header offset 0x20: across all five retail ROMs it is
+    // exactly 0x10 when the tile width/height are the 0xFFFF "unspecified" sentinel and 0x0 otherwise,
+    // i.e. it marks a character set with no explicit size (dimensions supplied by the consumer).
     private boolean hasSourceHeader = false;
-    private int srcCharHeightField, srcCharWidthField, srcUnknown0x20, srcWidthPx, srcHeightPx;
+    private int srcCharHeightField, srcCharWidthField, srcUnspecifiedSizeFlag, srcWidthPx, srcHeightPx;
 
     private boolean sopc;
 
@@ -162,7 +166,7 @@ public class IndexedImage extends GenericNtrFile
         {
             numColors = 16;
         }
-        this.srcUnknown0x20 = reader.readUInt16(); // 0x20 - captured raw so save() can round-trip it exactly
+        this.srcUnspecifiedSizeFlag = reader.readUInt16(); // 0x20 - captured raw so save() can round-trip it exactly
 
         this.mappingType = reader.readUInt16(); // 0x22
 
@@ -595,7 +599,7 @@ public class IndexedImage extends GenericNtrFile
             writer.writeShort((short) srcCharHeightField); // 0x18
             writer.writeShort((short) srcCharWidthField);  // 0x1A
             writer.setPosition(NcgrUtils.charHeaderPos + 16);
-            writer.writeShort((short) srcUnknown0x20);     // 0x20
+            writer.writeShort((short) srcUnspecifiedSizeFlag);     // 0x20
             writer.setPosition(endPos);
         }
 
