@@ -22,6 +22,8 @@ package io.github.turtleisaac.nds4j.images;
 import io.github.turtleisaac.nds4j.framework.GenericNtrFile;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
+import java.awt.Color;
+import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -301,6 +303,138 @@ public class Screen extends GenericNtrFile
     {
         entries[i] = (short) (flip ? (entry(i) | V_FLIP_BIT) : (entry(i) & ~V_FLIP_BIT));
     }
+
+    /* BEGIN SECTION: rendering and write-back across the NCGR/NCLR layers */
+
+    /**
+     * Assembles this screen into a visible image, drawing each tile from the supplied graphics.
+     * <p>
+     * A screen only names tiles; the pixels come from a companion NCGR ({@link IndexedImage}) and the
+     * colours from a companion NCLR ({@link Palette}). Each 8x8 entry is looked up in the NCGR by its
+     * tile index, mirrored per its flip flags, and coloured through the entry's 16-colour sub-palette
+     * (for 4bpp graphics) or the palette directly (for 8bpp). Colour index 0 is drawn opaque here; use
+     * {@link #getTransparentImage(IndexedImage, Palette)} to treat it as transparent.
+     *
+     * @param ncgr the tile graphics this screen indexes into, loaded with the default 1-tile chunking
+     * @param palette the colours to draw the tiles with
+     * @return a <code>BufferedImage</code> the size of the screen
+     */
+    public BufferedImage getImage(IndexedImage ncgr, Palette palette)
+    {
+        return render(ncgr, palette, false);
+    }
+
+    /**
+     * Same as {@link #getImage(IndexedImage, Palette)}, but colour index 0 of each tile is left
+     * transparent, as the DS 2D engine treats it.
+     * @param ncgr the tile graphics this screen indexes into
+     * @param palette the colours to draw the tiles with
+     * @return a <code>BufferedImage</code> the size of the screen, with an alpha channel
+     */
+    public BufferedImage getTransparentImage(IndexedImage ncgr, Palette palette)
+    {
+        return render(ncgr, palette, true);
+    }
+
+    /**
+     * Renders a single 8x8 tile entry (transparent on colour index 0), as it appears on the screen.
+     * @param ncgr the tile graphics this screen indexes into
+     * @param palette the colours to draw the tile with
+     * @param entryIndex the index of the entry, in row-major order
+     * @return an 8x8 <code>BufferedImage</code> with an alpha channel
+     */
+    public BufferedImage getTileImage(IndexedImage ncgr, Palette palette, int entryIndex)
+    {
+        BufferedImage tile = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+        drawEntry(tile, ncgr, palette, entryIndex, 0, 0, true);
+        return tile;
+    }
+
+    private BufferedImage render(IndexedImage ncgr, Palette palette, boolean transparent)
+    {
+        int type = transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
+        BufferedImage output = new BufferedImage(width, height, type);
+
+        int columns = width / 8;
+        for (int i = 0; i < entries.length; i++)
+        {
+            int col = i % columns;
+            int row = i / columns;
+            drawEntry(output, ncgr, palette, i, col * 8, row * 8, transparent);
+        }
+        return output;
+    }
+
+    // Draws entry i into dest with its top-left corner at (destX, destY). Shared by the whole-screen and
+    // single-tile renderers so the tile lookup, flip and sub-palette handling live in exactly one place.
+    private void drawEntry(BufferedImage dest, IndexedImage ncgr, Palette palette, int i, int destX, int destY, boolean transparent)
+    {
+        int tilesPerRow = ncgr.getWidth() / 8;
+        if (tilesPerRow == 0)
+            throw new RuntimeException("The NCGR is narrower than one tile.");
+
+        int tileIndex = getTileIndex(i);
+        int paletteIndex = getPaletteIndex(i);
+        boolean hFlip = isHorizontalFlip(i);
+        boolean vFlip = isVerticalFlip(i);
+        int tileCol = tileIndex % tilesPerRow;
+        int tileRow = tileIndex / tilesPerRow;
+
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                int srcX = tileCol * 8 + (hFlip ? 7 - x : x);
+                int srcY = tileRow * 8 + (vFlip ? 7 - y : y);
+
+                // A tile index that runs past the end of the NCGR leaves that cell blank rather than
+                // throwing, so a screen paired with a smaller-than-expected tileset still renders.
+                if (srcX >= ncgr.getWidth() || srcY >= ncgr.getHeight())
+                    continue;
+
+                int value = ncgr.getPixelValue(srcX, srcY);
+                if (transparent && value == 0)
+                    continue;
+
+                int colorIndex = ncgr.getBitDepth() == 4 ? paletteIndex * 16 + value : value;
+                Color color = colorIndex < palette.getNumColors() ? palette.getColor(colorIndex) : Color.BLACK;
+                dest.setRGB(destX + x, destY + y, transparent ? (0xFF000000 | (color.getRGB() & 0xFFFFFF)) : color.getRGB());
+            }
+        }
+    }
+
+    /**
+     * Writes a colour index into the NCGR tile that backs a given screen pixel, mirroring the entry's
+     * flip flags so the edit lands on the correct source pixel. Because several entries can name the
+     * same tile, editing one changes every entry that shares that tile — the NCGR is the single source
+     * of pixels. Persist the change by saving the NCGR.
+     *
+     * @param ncgr the tile graphics this screen indexes into
+     * @param screenX the x coordinate on the assembled screen, in pixels
+     * @param screenY the y coordinate on the assembled screen, in pixels
+     * @param value the colour index to write (0-15 for 4bpp, 0-255 for 8bpp; the raw tile value, not
+     *              offset by the entry's sub-palette)
+     */
+    public void setSourcePixel(IndexedImage ncgr, int screenX, int screenY, int value)
+    {
+        if (screenX < 0 || screenX >= width || screenY < 0 || screenY >= height)
+            throw new RuntimeException(String.format("Pixel (%d, %d) is outside this %dx%d screen.", screenX, screenY, width, height));
+
+        int columns = width / 8;
+        int i = (screenY / 8) * columns + (screenX / 8);
+        int tilesPerRow = ncgr.getWidth() / 8;
+        int tileIndex = getTileIndex(i);
+        int tileCol = tileIndex % tilesPerRow;
+        int tileRow = tileIndex / tilesPerRow;
+
+        int inTileX = screenX % 8;
+        int inTileY = screenY % 8;
+        int srcX = tileCol * 8 + (isHorizontalFlip(i) ? 7 - inTileX : inTileX);
+        int srcY = tileRow * 8 + (isVerticalFlip(i) ? 7 - inTileY : inTileY);
+        ncgr.setPixelValue(srcX, srcY, value);
+    }
+
+    /* END SECTION: rendering and write-back */
 
     @Override
     public boolean equals(Object o)

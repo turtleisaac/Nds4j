@@ -22,9 +22,10 @@ package io.github.turtleisaac.nds4j.images;
 import io.github.turtleisaac.nds4j.framework.GenericNtrFile;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.util.ArrayList;
+import java.awt.Graphics2D;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -62,6 +63,10 @@ public class CellAnimation extends GenericNtrFile
     // Whether the file carries the trailing LBAL (per-animation names) and UEXT sections. Retail NANRs
     // always do (numBlocks == 3); a bare NANR (numBlocks == 1) omits them, mirroring CellBank/NCER.
     private boolean labelEnabled;
+
+    // The companion cell bank (NCER) whose cells this file animates. Not part of the NANR itself; set
+    // by the consumer with setCellBank so a frame can be rendered. Never serialised.
+    private CellBank cellBank;
 
     // The two 32-bit words that follow the three section offsets in the KNBA header (file offsets
     // 0x28-0x2F). The first is consistently zero; the second is a secondary pointer into the result
@@ -319,6 +324,88 @@ public class CellAnimation extends GenericNtrFile
         return animations.length;
     }
 
+    /* BEGIN SECTION: rendering and write-back across the NCER/NCGR layers */
+
+    /**
+     * Associates the companion cell bank (NCER) whose cells this animation plays. The bank must have
+     * its own parent NCGR set (via {@link CellBank#setParentImage}) before any frame is rendered, since
+     * that is where the pixels come from. Not stored in the file.
+     * @param cellBank a {@link CellBank}
+     */
+    public void setCellBank(CellBank cellBank)
+    {
+        this.cellBank = cellBank;
+    }
+
+    /**
+     * Gets the companion cell bank set with {@link #setCellBank}, or null if none has been set.
+     * @return a {@link CellBank}
+     */
+    public CellBank getCellBank()
+    {
+        return cellBank;
+    }
+
+    /**
+     * Renders a single animation frame: the cell it names, assembled from the companion NCER/NCGR and
+     * transformed by the frame's scale, rotation and translation. The result is a transparent image the
+     * size of the cell bank's canvas ({@link CellBank#NCER_CANVAS_SIZE}).
+     *
+     * @param frame the frame to render
+     * @return a transparent <code>BufferedImage</code>
+     * @throws IllegalStateException if no cell bank has been associated with {@link #setCellBank}
+     */
+    public BufferedImage getFrameImage(Animation.Frame frame)
+    {
+        requireCellBank();
+
+        BufferedImage cell = cellBank.getTransparentNcerImage(frame.getCellIndex());
+        BufferedImage output = new BufferedImage(cell.getWidth(), cell.getHeight(), BufferedImage.TYPE_INT_ARGB);
+
+        double centerX = cell.getWidth() / 2.0;
+        double centerY = cell.getHeight() / 2.0;
+
+        // Apply the frame transform about the centre of the canvas: translate, then rotate (a full turn
+        // is 0x10000), then scale. Rotation is negated so a positive angle turns the same way the DS 2D
+        // engine does (clockwise on screen).
+        AffineTransform transform = new AffineTransform();
+        transform.translate(frame.getTranslateX(), frame.getTranslateY());
+        transform.translate(centerX, centerY);
+        transform.rotate(-frame.getRotation() / 65536.0 * 2 * Math.PI);
+        transform.scale(frame.getScaleX(), frame.getScaleY());
+        transform.translate(-centerX, -centerY);
+
+        Graphics2D g = output.createGraphics();
+        g.drawImage(cell, transform, null);
+        g.dispose();
+        return output;
+    }
+
+    /**
+     * Returns the editable assembled image of the cell a frame names, as a
+     * {@link CellBank.Cell.CellImage}. Editing its pixels and calling its {@code save()} writes the
+     * change down into the source NCGR &mdash; this is how a pixel edit on an animation frame flows
+     * back through the NCER to the graphics. The frame's transform is a display-time effect and is not
+     * applied here (it does not belong in the stored pixels).
+     *
+     * @param frame the frame whose cell to edit
+     * @return a {@link CellBank.Cell.CellImage} backing that frame's cell
+     * @throws IllegalStateException if no cell bank has been associated with {@link #setCellBank}
+     */
+    public CellBank.Cell.CellImage getFrameCellImage(Animation.Frame frame)
+    {
+        requireCellBank();
+        return cellBank.getCellImage(frame.getCellIndex());
+    }
+
+    private void requireCellBank()
+    {
+        if (cellBank == null)
+            throw new IllegalStateException("No cell bank set; call setCellBank(CellBank) before rendering frames.");
+    }
+
+    /* END SECTION: rendering and write-back */
+
     @Override
     public boolean equals(Object o)
     {
@@ -536,9 +623,139 @@ public class CellAnimation extends GenericNtrFile
              */
             public void setCellIndex(int cellIndex)
             {
-                int off = (int) resultOffset;
-                resultPool[off] = (byte) (cellIndex & 0xFF);
-                resultPool[off + 1] = (byte) ((cellIndex >> 8) & 0xFF);
+                writeS16(0, cellIndex);
+            }
+
+            // The frame's pooled result stores the cell index first, then a transform whose size and
+            // shape depend on the parent animation's element type:
+            //   index (0):       s16 index, u16 pad                                                (4 bytes)
+            //   translation (2): s16 index, u16 pad, s16 px, s16 py                                (8 bytes)
+            //   SRT (1):         s16 index, s16 rotation, s32 scaleX, s32 scaleY, s16 px, s16 py  (16 bytes)
+            // Scales are 20.12 fixed point (0x1000 = 1.0); rotation is a signed 16-bit angle where a
+            // full turn is 0x10000. The accessors below read and write these fields in place, so they
+            // do not affect the byte-exact round-trip unless a value is actually changed.
+
+            /**
+             * Gets this frame's translation along x, in pixels. Zero for the index element type, which
+             * carries no transform.
+             * @return an <code>int</code>
+             */
+            public int getTranslateX()
+            {
+                if (getElement() == ELEMENT_SRT) return readS16(12);
+                if (getElement() == ELEMENT_TRANSLATION) return readS16(4);
+                return 0;
+            }
+
+            /**
+             * Gets this frame's translation along y, in pixels. Zero for the index element type.
+             * @return an <code>int</code>
+             */
+            public int getTranslateY()
+            {
+                if (getElement() == ELEMENT_SRT) return readS16(14);
+                if (getElement() == ELEMENT_TRANSLATION) return readS16(6);
+                return 0;
+            }
+
+            /**
+             * Sets this frame's translation, in pixels.
+             * @param x an <code>int</code>
+             * @param y an <code>int</code>
+             * @throws IllegalStateException if the parent animation is the index element type, which has no transform
+             */
+            public void setTranslate(int x, int y)
+            {
+                if (getElement() == ELEMENT_SRT) { writeS16(12, x); writeS16(14, y); }
+                else if (getElement() == ELEMENT_TRANSLATION) { writeS16(4, x); writeS16(6, y); }
+                else throw new IllegalStateException("The index element type carries no translation.");
+            }
+
+            /**
+             * Gets this frame's rotation as a signed 16-bit angle (a full turn is 0x10000). Zero for
+             * element types that carry no rotation.
+             * @return an <code>int</code>
+             */
+            public int getRotation()
+            {
+                return getElement() == ELEMENT_SRT ? readS16(2) : 0;
+            }
+
+            /**
+             * Sets this frame's rotation as a signed 16-bit angle (a full turn is 0x10000).
+             * @param rotation an <code>int</code>
+             * @throws IllegalStateException if the parent animation is not the SRT element type
+             */
+            public void setRotation(int rotation)
+            {
+                requireSrt();
+                writeS16(2, rotation);
+            }
+
+            /**
+             * Gets this frame's scale along x. 1.0 for element types that carry no scale.
+             * @return a <code>double</code>
+             */
+            public double getScaleX()
+            {
+                return getElement() == ELEMENT_SRT ? readS32(4) / 4096.0 : 1.0;
+            }
+
+            /**
+             * Gets this frame's scale along y. 1.0 for element types that carry no scale.
+             * @return a <code>double</code>
+             */
+            public double getScaleY()
+            {
+                return getElement() == ELEMENT_SRT ? readS32(8) / 4096.0 : 1.0;
+            }
+
+            /**
+             * Sets this frame's scale.
+             * @param scaleX a <code>double</code>
+             * @param scaleY a <code>double</code>
+             * @throws IllegalStateException if the parent animation is not the SRT element type
+             */
+            public void setScale(double scaleX, double scaleY)
+            {
+                requireSrt();
+                writeS32(4, (int) Math.round(scaleX * 4096.0));
+                writeS32(8, (int) Math.round(scaleY * 4096.0));
+            }
+
+            private void requireSrt()
+            {
+                if (getElement() != ELEMENT_SRT)
+                    throw new IllegalStateException("Only the SRT element type carries scale and rotation.");
+            }
+
+            private int readS16(int rel)
+            {
+                int o = (int) resultOffset + rel;
+                return (short) ((resultPool[o] & 0xFF) | ((resultPool[o + 1] & 0xFF) << 8));
+            }
+
+            private void writeS16(int rel, int value)
+            {
+                int o = (int) resultOffset + rel;
+                resultPool[o] = (byte) (value & 0xFF);
+                resultPool[o + 1] = (byte) ((value >> 8) & 0xFF);
+            }
+
+            private int readS32(int rel)
+            {
+                int o = (int) resultOffset + rel;
+                return (resultPool[o] & 0xFF) | ((resultPool[o + 1] & 0xFF) << 8)
+                        | ((resultPool[o + 2] & 0xFF) << 16) | ((resultPool[o + 3] & 0xFF) << 24);
+            }
+
+            private void writeS32(int rel, int value)
+            {
+                int o = (int) resultOffset + rel;
+                resultPool[o] = (byte) (value & 0xFF);
+                resultPool[o + 1] = (byte) ((value >> 8) & 0xFF);
+                resultPool[o + 2] = (byte) ((value >> 16) & 0xFF);
+                resultPool[o + 3] = (byte) ((value >> 24) & 0xFF);
             }
 
             @Override

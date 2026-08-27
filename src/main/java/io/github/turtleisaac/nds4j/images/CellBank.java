@@ -514,6 +514,43 @@ public class CellBank extends GenericNtrFile
         return output;
     }
 
+    /** The side length of the square canvas the cell assemblers composite OAMs onto. */
+    public static final int NCER_CANVAS_SIZE = 80;
+
+    /**
+     * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM colour index 0 is
+     * left transparent) so the assembled cell can be composited &mdash; for instance under an
+     * animation transform supplied by a {@link CellAnimation}.
+     * @param i the index of the cell
+     * @return an <code>NCER_CANVAS_SIZE</code>-square <code>BufferedImage</code> with an alpha channel
+     */
+    public BufferedImage getTransparentNcerImage(int i)
+    {
+        Cell cell = cells[i];
+
+        BufferedImage output = new BufferedImage(NCER_CANVAS_SIZE, NCER_CANVAS_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = (Graphics2D) output.getGraphics();
+
+        Cell.OAM.OamImage[] images = cell.getImages();
+        for (int x = 0; x < images.length; x++)
+        {
+            Cell.OAM oam = cell.oams[x];
+            g.drawImage(images[x].getTransparentImage(), oam.xCoord + output.getWidth() / 2, oam.yCoord + output.getHeight() / 2, null);
+        }
+        g.dispose();
+
+        return output;
+    }
+
+    /**
+     * Gets the number of cells in this bank.
+     * @return an <code>int</code>
+     */
+    public int getNumCells()
+    {
+        return cells.length;
+    }
+
     /**
      * An individual "Cell", or "Bank" within an NCER.
      * In theory, this represents one assembled image.
