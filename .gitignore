@@ -38,3 +38,8 @@ build/
 .DS_Store
 ### ROMs (never commit copyrighted game files) ###
 *.nds
+
+### Vendored reference binary: NitroSystemTool.jar reads the Nitro 3D formats
+### (NSBMD/NSBTX/NSBCA/NSBTP/NSBVA). Kept locally as a reference for future 3D support work,
+### not redistributed.
+/NitroSystemTool.jar
