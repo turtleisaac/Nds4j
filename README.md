@@ -34,6 +34,8 @@ Formats currently implemented
 | NCGR      | `images.IndexedImage`    | &check; | &check; |         &cross;         |
 | NCLR      | `images.Palette`         | &check; | &check; |         &cross;         |
 | NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
+| NANR      | `images.CellAnimation`   | &check; | &check; |         &cross;         |
+| NSCR      | `images.Screen`          | &check; | &check; |         &cross;         |
 | ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
 
 Likely future supported formats
@@ -41,8 +43,6 @@ Likely future supported formats
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-* NANR
-* NSCR
 * NSBTX
 * NSBMD
 * NSBCA
