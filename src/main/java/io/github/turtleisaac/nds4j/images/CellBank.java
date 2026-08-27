@@ -24,6 +24,8 @@ import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * An object representation of an NCER file
@@ -35,8 +37,39 @@ public class CellBank extends GenericNtrFile
     private boolean vramTransfer;
     private boolean tacu;
 
+    // The number of name entries in the LBAL section. This is independent of the cell count: a file may
+    // label only the first few of its cells, or carry *more* names than it has cells. The first
+    // min(labelCount, cells) names map onto cells (Cell.name); any beyond the cell count are kept in
+    // extraLabels so the section round-trips exactly.
+    private int labelCount;
+    private String[] extraLabels = new String[0];
+
+    // The VRAM-transfer partition header's two leading words (max partition size, and the offset to the
+    // first per-cell entry), preserved so the section is reproduced exactly. Only meaningful when
+    // vramTransfer is set. The per-cell partition offset/size pairs live on each Cell.
+    private int maxPartitionSize;
+    private int firstPartitionDataOffset;
+
+    // Raw KBEC-header fields that are not otherwise reconstructed, kept so the file round-trips exactly:
+    // the pointer to the cell data (0x1C), the reserved word at 0x28, the two section pointers (VRAM
+    // partition at 0x24, TACU at 0x2C), and the trailing word of the UEXT section.
+    private long bankDataOffset;
+    private long kbecReserved0x28;
+    private long partitionDataOffset;
+    private long tacuOffset;
+    private int uextUnknown;
+
+    // The partition (VRAM transfer) and TACU sections that follow the cell/OAM data inside the KBEC
+    // block, captured verbatim. Their internal layout (alignment, padding, the exact size words) varies
+    // and is not worth reconstructing field by field; preserving the bytes keeps the file byte-exact.
+    // The parsed per-cell partition and TACU values are still exposed for reading.
+    private byte[] auxiliaryData = new byte[0];
+
     private Cell[] cells;
     private IndexedImage image;
+
+    // The size, in bytes, of one OAM entry on disk (three 16-bit attributes).
+    private static final int OAM_SIZE = 6;
 
     /**
      * Generates an object representation of an NCER file
@@ -65,21 +98,19 @@ public class CellBank extends GenericNtrFile
         long cellBankSectionSize = reader.readUInt32(); // 0x14
         int numBanks = reader.readUInt16(); // 0x18
         bankType = reader.readUInt16(); // 0x1A
-        long bankDataOffset = reader.readUInt32(); // 0x1C
+        bankDataOffset = reader.readUInt32(); // 0x1C
 
         mappingType = (int) (reader.readUInt32() & 0xFF); // 0x20
 
-        int partitionDataOffset = reader.readInt(); // 0x24
-        reader.skip(4);
-        int tacuOffset = reader.readInt();
+        partitionDataOffset = reader.readUInt32(); // 0x24
+        kbecReserved0x28 = reader.readUInt32(); // 0x28
+        tacuOffset = reader.readUInt32(); // 0x2C
 
         vramTransfer = partitionDataOffset != 0;
         tacu = tacuOffset != 0;
 
         int storedPos = reader.getPosition();
 
-        int maxPartitionSize = 0;
-        int firstPartitionDataOffset = 0;
         int[][] partitionData = new int[numBanks][2];
         if (vramTransfer)
         {
@@ -191,6 +222,18 @@ public class CellBank extends GenericNtrFile
             reader.setPosition(storedPos);
         }
 
+        // Capture whatever follows the cell descriptors and their OAMs inside the KBEC block: the VRAM
+        // partition and/or TACU sections, plus any alignment. The cell/OAM data is a fixed-size grid, so
+        // its end is computable, and everything from there to the end of the block is preserved verbatim.
+        int cellDescriptorSize = (bankType == 0) ? 8 : 0x10;
+        int totalOams = 0;
+        for (Cell cell : cells)
+            totalOams += cell.oams.length;
+        int cellDataEnd = NTR_HEADER_SIZE + 0x20 + numBanks * cellDescriptorSize + totalOams * OAM_SIZE;
+        int cellBankSectionEnd = NTR_HEADER_SIZE + (int) cellBankSectionSize;
+        reader.setPosition(cellDataEnd);
+        auxiliaryData = reader.readBytes(cellBankSectionEnd - cellDataEnd);
+
         if (!labelEnabled)
             return;
 
@@ -203,27 +246,41 @@ public class CellBank extends GenericNtrFile
             throw new RuntimeException("Not a valid RECN file.");
         }
 
-        long[] stringOffsets = new long[numBanks + 1];
         int labelSectionSize = reader.readInt();
-        stringOffsets[stringOffsets.length - 1] = labelSectionSize - 8 - (4L *numBanks);
-        for (int i = 0; i < numBanks; i++)
+
+        // The offset table has one entry per name, and there is no count for it: the number of names is
+        // neither the cell count (a file can name only some cells, or carry more names than cells) nor
+        // stored anywhere. The string data begins right after the table, so a genuine offset is always
+        // smaller than the section payload, while the first bytes of the string data (ASCII) read back
+        // as a large word. Read offsets until one is too large to be an offset.
+        java.util.List<Long> offsets = new java.util.ArrayList<>();
+        while (true)
         {
             long offset = reader.readUInt32();
             if (offset >= labelSectionSize - 8)
             {
                 reader.setPosition(reader.getPosition() - 4);
-                offset = -1;
+                break;
             }
-            stringOffsets[i] = offset;
+            offsets.add(offset);
         }
+        labelCount = offsets.size();
 
-        for (int i = 0; i < stringOffsets.length - 1; i++)
+        // Names are stored back-to-back after the table; each runs to the next name's offset, and the
+        // last runs to the end of the string region. The first names map to cells; any surplus is kept
+        // aside so it can be written back out.
+        int stringRegionSize = labelSectionSize - 8 - 4 * labelCount;
+        java.util.List<String> surplus = new java.util.ArrayList<>();
+        for (int i = 0; i < labelCount; i++)
         {
-            if (stringOffsets[i] != -1)
-            {
-                cells[i].name = reader.readString((int) (stringOffsets[i+1] - stringOffsets[i])).trim();
-            }
+            long end = (i + 1 < labelCount) ? offsets.get(i + 1) : stringRegionSize;
+            String name = reader.readString((int) (end - offsets.get(i))).trim();
+            if (i < cells.length)
+                cells[i].name = name;
+            else
+                surplus.add(name);
         }
+        extraLabels = surplus.toArray(new String[0]);
 
         //uext data
         String uextMagic = reader.readString(4); // (note: this isn't guaranteed to be 4-byte aligned)
@@ -233,7 +290,7 @@ public class CellBank extends GenericNtrFile
         }
 
         int uextSectionSize = reader.readInt();
-        int uextUnknown = reader.readInt();
+        uextUnknown = reader.readInt();
     }
 
 
@@ -247,108 +304,51 @@ public class CellBank extends GenericNtrFile
         MemBuf.MemBufWriter writer = dataBuf.writer();
 
         writer.skip(NTR_HEADER_SIZE);
-        writer.write(NcerUtils.kbecHeader);
-        int storedPos = writer.getPosition();
 
-        writer.setPosition(NTR_HEADER_SIZE + 8);
-//        writer.writeUInt32(cellBankSectionSize); // 0x14
+        // KBEC header
+        writer.writeString("KBEC"); // 0x10
+        int sectionSizePos = writer.getPosition();
+        writer.skip(4); // 0x14 section size, patched in below
         writer.writeShort((short) cells.length); // 0x18
         writer.writeShort((short) bankType); // 0x1A
-        writer.skip(4); // bankData offset goes here - todo
-        writer.writeInt(mappingType); // 0x20
+        writer.writeUInt32(bankDataOffset); // 0x1C
+        writer.writeUInt32(mappingType); // 0x20
+        writer.writeUInt32(partitionDataOffset); // 0x24 (VRAM partition section pointer, 0 if none)
+        writer.writeUInt32(kbecReserved0x28); // 0x28
+        writer.writeUInt32(tacuOffset); // 0x2C (TACU section pointer, 0 if none)
 
-        writer.setPosition(storedPos);
-        MemBuf bankBuf = MemBuf.create();
-        MemBuf.MemBufWriter bankWriter = bankBuf.writer();
-
+        // cell descriptors, then their OAMs
         int oamCount = 0;
-        // write banks
         for (Cell cell : cells)
         {
-            NcerUtils.writeCell(bankWriter, cell, oamCount, bankType);
+            NcerUtils.writeCell(writer, cell, oamCount, bankType);
             oamCount += cell.oams.length;
         }
-
-        // write OAMs
         for (Cell cell : cells)
         {
-            NcerUtils.writeOams(bankWriter, cell);
+            NcerUtils.writeOams(writer, cell);
         }
 
-        int partitionDataOffset = writer.getPosition() + bankWriter.getPosition();
-
-        if (vramTransfer)
-        {
-            bankWriter.writeInt(0xC80); // maxPartitionSize
-            bankWriter.writeInt(8); // first partitionData entry offset (relative to partitionDataOffset)
-
-            // write partition data
-            for (Cell cell : cells)
-            {
-                bankWriter.writeInt(cell.partitionOffset);
-                bankWriter.writeInt(cell.partitionSize);
-            }
-        }
-
-        writer.write(bankBuf.reader().getBuffer());
-
-        if (vramTransfer)
-        {
-            storedPos = writer.getPosition();
-            writer.setPosition(NTR_HEADER_SIZE + 0x14);
-            writer.writeInt(partitionDataOffset - 8 - NTR_HEADER_SIZE); // writes where the partition data (vram transfer) data section starts
-            writer.setPosition(storedPos);
-        }
-
-        if (tacu)
-        {
-            storedPos = writer.getPosition();
-            writer.setPosition(NTR_HEADER_SIZE + 0x1C);
-            writer.writeInt(storedPos - 8 - NTR_HEADER_SIZE); // writes where the TACU section starts
-            writer.setPosition(storedPos);
-        }
-
-        if (tacu)
-        {
-            writer.writeString("TACU");
-            int tacuSize = 8 + (4 * cells.length);
-            tacuSize += 16 - (tacuSize % 16);
-            writer.writeInt(tacuSize + 8);
-            writer.writeShort((short) cells.length); //todo verify this?
-            writer.writeShort((short) 1); //todo verify this?
-            writer.writeInt(8); // pointer to attributes data (relative to start of TACU + 4)
-
-            for (Cell cell : cells) {
-                writer.writeInt(cell.tacuData);
-            }
-
-            writer.skip(tacuSize + 8 - (writer.getPosition() - storedPos)); // this should be the end of TACU
-        }
+        // the preserved VRAM partition / TACU sections that follow, verbatim
+        writer.write(auxiliaryData);
 
         int bankSectionEnd = writer.getPosition();
-        writer.setPosition(NTR_HEADER_SIZE + 4); // writes the length of the bank section
+        writer.setPosition(sectionSizePos); // 0x14: length of the KBEC section
         writer.writeInt(bankSectionEnd - NTR_HEADER_SIZE);
         writer.setPosition(bankSectionEnd);
 
         if (numBlocks > 1)
         {
-            // write label section
-
-            MemBuf labelBuf = MemBuf.create();
-            MemBuf.MemBufWriter labelWriter = labelBuf.writer();
-
-            labelWriter.writeString("LBAL");
-            NcerUtils.writeLabelSection(labelWriter, cells);
-            writer.write(labelBuf.reader().getBuffer());
-
-            // write UEXT section
+            // label section: labelCount names (the first ones the cells', any surplus preserved), then UEXT
+            writer.writeString("LBAL");
+            NcerUtils.writeLabelSection(writer, cells, labelCount, extraLabels);
 
             writer.writeString("TXEU");
-            writer.writeInt(12); // seems to always be the size?
-            writer.writeInt(0);
+            writer.writeInt(12); // section size (magic + size + one word of contents)
+            writer.writeInt(uextUnknown);
         }
 
-        storedPos = writer.getPosition();
+        int storedPos = writer.getPosition();
         writer.setPosition(0); //total file size
 
         writeGenericNtrHeader(writer, storedPos, numBlocks);
@@ -362,13 +362,7 @@ public class CellBank extends GenericNtrFile
      * Internal private class for actions relating to reading/writing NCER files
      */
     private static class NcerUtils {
-        private static final byte[] kbecHeader =
-                {
-                        0x4B, 0x42, 0x45, 0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-                };
-
-        private static final int oamSize = 6;
+        private static final int oamSize = OAM_SIZE;
 
         private static void writeCell(MemBuf.MemBufWriter writer, Cell cell, int oamCount, int bankType)
         {
@@ -427,28 +421,31 @@ public class CellBank extends GenericNtrFile
             }
         }
 
-        private static void writeLabelSection(MemBuf.MemBufWriter writer, Cell[] cells)
+        // Writes the LBAL body after its already-written magic: a table of per-name string offsets
+        // followed by the NUL-terminated names, with the section size patched in. labelCount names are
+        // emitted (retail files often label only the first few cells), matching what the reader detected.
+        private static void writeLabelSection(MemBuf.MemBufWriter writer, Cell[] cells, int labelCount, String[] extraLabels)
         {
-            int stringStartOffset = 8 + (4 * cells.length);
-            writer.setPosition(stringStartOffset);
+            int sectionStart = writer.getPosition() - 4; // back up to the "LBAL" magic
+            int stringStartOffset = 8 + (4 * labelCount);
+            writer.setPosition(sectionStart + stringStartOffset);
 
-            long[] offsets = new long[cells.length];
-            for (int i = 0; i < cells.length; i++)
+            long[] offsets = new long[labelCount];
+            for (int i = 0; i < labelCount; i++)
             {
-                offsets[i] = writer.getPosition() - stringStartOffset;
-                writer.writeString(cells[i].name + "\0");
+                offsets[i] = writer.getPosition() - (sectionStart + stringStartOffset);
+                String name = (i < cells.length) ? cells[i].name : extraLabels[i - cells.length];
+                writer.writeString(name + "\0");
             }
 
             int labelEnd = writer.getPosition();
 
-            writer.setPosition(8); // start of offsets section
-            for (int i = 0; i < cells.length; i++)
-            {
-                writer.writeUInt32(offsets[i]);
-            }
+            writer.setPosition(sectionStart + 8); // start of the offset table
+            for (long offset : offsets)
+                writer.writeUInt32(offset);
 
-            writer.setPosition(4); // section size offset
-            writer.writeInt(labelEnd);
+            writer.setPosition(sectionStart + 4); // section-size field
+            writer.writeInt(labelEnd - sectionStart);
             writer.setPosition(labelEnd);
         }
     }
@@ -556,6 +553,70 @@ public class CellBank extends GenericNtrFile
     public int getNumCells()
     {
         return cells.length;
+    }
+
+    /**
+     * Gets this bank's cell layout type: 0 (no per-cell bounding rectangle) or 1 (each cell carries an
+     * 8-byte bounding rectangle).
+     * @return an <code>int</code>
+     */
+    public int getBankType()
+    {
+        return bankType;
+    }
+
+    /**
+     * Gets the tile mapping type used to interpret OAM tile offsets (32, 64, 128 or 256).
+     * @return an <code>int</code>
+     */
+    public int getMappingType()
+    {
+        return mappingType;
+    }
+
+    /**
+     * Gets the cell at index <code>i</code>.
+     * @param i the index of the cell
+     * @return a {@link Cell}
+     */
+    public Cell getCell(int i)
+    {
+        return cells[i];
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        CellBank that = (CellBank) o;
+        return bankType == that.bankType
+                && mappingType == that.mappingType
+                && vramTransfer == that.vramTransfer
+                && tacu == that.tacu
+                && numBlocks == that.numBlocks
+                && bankDataOffset == that.bankDataOffset
+                && partitionDataOffset == that.partitionDataOffset
+                && tacuOffset == that.tacuOffset
+                && kbecReserved0x28 == that.kbecReserved0x28
+                && uextUnknown == that.uextUnknown
+                && labelCount == that.labelCount
+                && Arrays.equals(cells, that.cells)
+                && Arrays.equals(auxiliaryData, that.auxiliaryData)
+                && Arrays.equals(extraLabels, that.extraLabels);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = Objects.hash(bankType, mappingType, vramTransfer, tacu, numBlocks, bankDataOffset,
+                partitionDataOffset, tacuOffset, kbecReserved0x28, uextUnknown, labelCount);
+        result = 31 * result + Arrays.hashCode(cells);
+        result = 31 * result + Arrays.hashCode(auxiliaryData);
+        result = 31 * result + Arrays.hashCode(extraLabels);
+        return result;
     }
 
     /**
@@ -696,12 +757,55 @@ public class CellBank extends GenericNtrFile
             return name;
         }
 
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            Cell cell = (Cell) o;
+            return tacuData == cell.tacuData
+                    && maxX == cell.maxX && maxY == cell.maxY && minX == cell.minX && minY == cell.minY
+                    && partitionOffset == cell.partitionOffset && partitionSize == cell.partitionSize
+                    && Objects.equals(name, cell.name)
+                    && Objects.equals(attributes, cell.attributes)
+                    && Arrays.equals(oams, cell.oams);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            int result = Objects.hash(name, tacuData, maxX, maxY, minX, minY, attributes, partitionOffset, partitionSize);
+            result = 31 * result + Arrays.hashCode(oams);
+            return result;
+        }
+
         class CellAttribute {
             boolean hFlip;
             boolean vFlip;
             boolean hvFlip;
             boolean boundingRectangle;
             int boundingSphereRadius;
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o)
+                    return true;
+                if (o == null || getClass() != o.getClass())
+                    return false;
+                CellAttribute that = (CellAttribute) o;
+                return hFlip == that.hFlip && vFlip == that.vFlip && hvFlip == that.hvFlip
+                        && boundingRectangle == that.boundingRectangle
+                        && boundingSphereRadius == that.boundingSphereRadius;
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(hFlip, vFlip, hvFlip, boundingRectangle, boundingSphereRadius);
+            }
         }
 
         public CellImage getImage()
@@ -733,6 +837,92 @@ public class CellBank extends GenericNtrFile
             int tileOffset;
             int priority;
             int palette;
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o)
+                    return true;
+                if (o == null || getClass() != o.getClass())
+                    return false;
+                OAM oam = (OAM) o;
+                return yCoord == oam.yCoord && rotation == oam.rotation && sizeDisable == oam.sizeDisable
+                        && mode == oam.mode && mosaic == oam.mosaic && colors == oam.colors && shape == oam.shape
+                        && xCoord == oam.xCoord && rotationScaling == oam.rotationScaling && size == oam.size
+                        && tileOffset == oam.tileOffset && priority == oam.priority && palette == oam.palette;
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(yCoord, rotation, sizeDisable, mode, mosaic, colors, shape,
+                        xCoord, rotationScaling, size, tileOffset, priority, palette);
+            }
+
+            /** @return this OAM's y position, as a signed offset from the cell origin */
+            public int getYCoord() { return yCoord; }
+            /** @param yCoord this OAM's y position, as a signed offset from the cell origin */
+            public void setYCoord(int yCoord) { this.yCoord = yCoord; }
+
+            /** @return this OAM's x position, as a signed offset from the cell origin */
+            public int getXCoord() { return xCoord; }
+            /** @param xCoord this OAM's x position, as a signed offset from the cell origin */
+            public void setXCoord(int xCoord) { this.xCoord = xCoord; }
+
+            /** @return this OAM's shape index (0 square, 1 wide, 2 tall), which with the size selects its dimensions */
+            public int getShape() { return shape; }
+            /** @param shape this OAM's shape index (0 square, 1 wide, 2 tall) */
+            public void setShape(int shape) { this.shape = shape; }
+
+            /** @return this OAM's size index (0-3), which with the shape selects its dimensions */
+            public int getSize() { return size; }
+            /** @param size this OAM's size index (0-3) */
+            public void setSize(int size) { this.size = size; }
+
+            /** @return the tile offset into the NCGR this OAM draws from */
+            public int getTileOffset() { return tileOffset; }
+            /** @param tileOffset the tile offset into the NCGR this OAM draws from */
+            public void setTileOffset(int tileOffset) { this.tileOffset = tileOffset; }
+
+            /** @return the 16-colour sub-palette index this OAM uses */
+            public int getPalette() { return palette; }
+            /** @param palette the 16-colour sub-palette index this OAM uses */
+            public void setPalette(int palette) { this.palette = palette; }
+
+            /** @return this OAM's priority (0-3) */
+            public int getPriority() { return priority; }
+            /** @param priority this OAM's priority (0-3) */
+            public void setPriority(int priority) { this.priority = priority; }
+
+            /** @return this OAM's graphics mode (0 normal, 1 semi-transparent, 2 window) */
+            public int getMode() { return mode; }
+            /** @param mode this OAM's graphics mode (0 normal, 1 semi-transparent, 2 window) */
+            public void setMode(int mode) { this.mode = mode; }
+
+            /** @return whether this OAM uses mosaic */
+            public boolean isMosaic() { return mosaic; }
+            /** @param mosaic whether this OAM uses mosaic */
+            public void setMosaic(boolean mosaic) { this.mosaic = mosaic; }
+
+            /** @return the colour count of this OAM's tiles (16 or 256) */
+            public int getColors() { return colors; }
+            /** @param colors the colour count of this OAM's tiles (16 or 256) */
+            public void setColors(int colors) { this.colors = colors; }
+
+            /** @return whether this OAM is affine (rotation/scaling) rather than a plain sprite */
+            public boolean isRotation() { return rotation; }
+            /** @param rotation whether this OAM is affine (rotation/scaling) rather than a plain sprite */
+            public void setRotation(boolean rotation) { this.rotation = rotation; }
+
+            /** @return for an affine OAM, whether double-size is set; for a plain OAM, whether it is disabled */
+            public boolean isSizeDisable() { return sizeDisable; }
+            /** @param sizeDisable for an affine OAM, whether double-size is set; for a plain OAM, whether it is disabled */
+            public void setSizeDisable(boolean sizeDisable) { this.sizeDisable = sizeDisable; }
+
+            /** @return the affine (rotation/scaling) parameter set index this OAM uses */
+            public int getRotationScaling() { return rotationScaling; }
+            /** @param rotationScaling the affine (rotation/scaling) parameter set index this OAM uses */
+            public void setRotationScaling(int rotationScaling) { this.rotationScaling = rotationScaling; }
 
             public OamImage getImage(int i, int[] index)
             {
