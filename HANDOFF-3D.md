@@ -377,6 +377,25 @@ Every item below is delivered. Rendered checkpoints in `g3d_out/` (see each entr
    converts, `g3dcvtr foo.nsbmd` dumps a binary's structure; real `.imd` samples live at
    `github.com/gainax3/retsam_00jupc/tree/HEAD/src/data/rsc`.
 
+### 9b. Byte-identical authoring — the layered push (in progress)
+
+The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dcvtr / retail). Status by layer:
+- **Container** (NTR header + block offset table) — byte-exact (`G3dFile.assembleContainer`, verbatim blocks).
+- **Resource dictionaries** — byte-exact, **100% / 5388** retail dicts (`G3dDictionary.reorderPreorder`,
+  pre-order DFS, RE'd against g3dcvtr under wine — §9a.6).
+- **Geometry display lists** — byte-exact, **100% / 19433** retail lists / **~47% of all MDL0 bytes**
+  (`DisplayList.decodeCommands`/`encodeCommands` — the lossless GPU-command codec; `Model.Mesh.getRawDisplayList`
+  exposes the verbatim stream). This is what unlocks byte-identical geometry *editing* (decode → edit a VTX
+  operand → re-encode changes only those bytes) and preserves quads/strips/all vertex formats that the
+  triangle view drops.
+- **In-place edits** (colour/palette/alpha) — byte-exact (`G3dFile.writeBlockU8/U16`).
+- **Still fixed-struct surface** (the remaining ~half of an MDL0): the model header/box, node SRT structs,
+  material structs and SBC stream, plus the TEX0 texel/palette layout for embedded textures. These are
+  fixed-layout and mechanical to match against the retail-reassembly + g3dcvtr oracle (now both available);
+  a full-model re-encoder that rebuilds them from semantics is the next increment. The genuinely hard part
+  for *authoring new geometry* remains g3dcvtr's stripping optimiser (byte-exact re-encode of an *existing*
+  model doesn't need it — the command codec already reproduces its stream).
+
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
 already decompresses them). Nothing here blocks PDSMS dropping the g3dcvtr binary.

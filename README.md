@@ -53,9 +53,12 @@ stack can **author** files from scratch and **preview** them, all in pure Java (
 
 * **Convert** &mdash; `g3d.ObjImporter` (Wavefront OBJ &rarr; geometry) + `g3d.ModelBuilder` author an NSBMD
   (untextured, textured, or multi-shape/multi-material with an embedded `TEX0`); `g3d.AnimationBuilder` authors
-  an NSBTA. The dictionary encoder (`g3d.G3dDictionary`) emits nodes in the same pre-order the NITRO tool
-  (`g3dcvtr`) does, so authored resource dictionaries are **byte-identical** to retail (verified against all
-  5388 retail dictionaries).
+  an NSBTA. Two of the format's hardest-to-reproduce sections encode **byte-identically** to NITRO's own tool:
+  the resource dictionaries (`g3d.G3dDictionary` emits nodes in the same pre-order `g3dcvtr` does &mdash;
+  verified against all 5388 retail dictionaries), and the geometry display lists (`g3d.DisplayList`'s
+  `decodeCommands`/`encodeCommands` losslessly round-trip the raw GPU command stream &mdash; verified
+  byte-for-byte over all 19433 retail display lists). Together with the container writer
+  (`G3dFile.assembleContainer`) that is ~half of an `MDL0`'s bytes reproduced exactly from a decoded model.
 * **Export** &mdash; `g3d.GltfExporter` (self-contained glTF 2.0, static or animated) and `Model.toObj()`.
 * **Preview** &mdash; `g3d.SoftwareRenderer` (headless rasteriser), `g3d.ModelViewer`/`ModelViewerFrame` (Swing
   orbit/scrub/play), `g3d.NitroAnimation` (composes all four animation tracks), `g3d.AnimatedGif`, and
