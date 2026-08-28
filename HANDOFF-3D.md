@@ -352,16 +352,26 @@ compression codec in `nds4j-3d-formats-first-class-plan` remain optional breadth
   edited → byte-valid; offset table untouched). Concrete: NSBMA `ColorChannel.setRaw/setRgb` +
   `ScalarChannel.set`; NSBTX `TextureSet.setPaletteColor` (incl. embedded TEX0 → `ModelSet.save()` re-emits
   a valid repainted model). Verified minimal/reversible + a visible manene recolour. Commit `0b8d6ad`.
-- **Full conversion (the g3dcvtr replacement) — NOT STARTED (the major frontier).** source (glTF/IMD-like)
-  → NSBMD/NSBTX/NSBCA/…: display-list encoding (quantise verts, choose primitive strips, emit the geometry
-  command stream), build NNS dictionaries incl. the **Patricia tree** (currently only preserved verbatim —
-  see `G3dDictionary.rawTree`; a writer must construct it), texture/palette encoding, and the container
-  offset table. This is the open-source win flagged in memory `g3dcvtr-re-resource`: **PDSMS depends on the
-  g3dcvtr binary**, and a native encoder drops it. RE the *writer* against `g3dcvtr` (fair-use) + the
-  gold-standard docs. **Oracle:** decode→encode→decode stable, and output loads in-game / re-reads
-  identically; match g3dcvtr's layout where a ROM expects it. Size-changing edits (add keyframes, longer
-  names) need the offset-table rebuild this frontier provides — the in-place editor above deliberately
-  covers only same-size edits until then.
+- **Full conversion (the g3dcvtr replacement) — the major frontier (started: structure mapped).** source
+  (glTF/IMD-like) → NSBMD/NSBTX/NSBCA/…: display-list encoding (quantise verts, choose primitive strips,
+  emit the geometry command stream), build NNS dictionaries incl. the **Patricia tree**, texture/palette
+  encoding, and the container offset table. The open-source win flagged in memory `g3dcvtr-re-resource`:
+  **PDSMS depends on the g3dcvtr binary**, and a native encoder drops it. RE the *writer* against `g3dcvtr`
+  (fair-use) + the gold-standard docs. **Oracle:** decode→encode→decode stable, output loads in-game /
+  re-reads identically; match g3dcvtr's layout where a ROM expects it. Size-changing edits (add keyframes,
+  longer names) need the offset-table + dictionary rebuild this provides — the in-place editor above
+  deliberately covers only same-size edits until then.
+  - **Leg-up — the `G3dDictionary` on-disk format is now fully mapped** (the one structure every NSB*
+    writer rebuilds; `G3dDictionary` currently preserves it verbatim as `rawTree`). After `u8 revision`,
+    `u8 count`: `u16 sizeDict` (total dict bytes = `2 + (10+count*4) + 4 + count*elemSize + count*16`),
+    then a 4-byte tree header (`u16 = 0x0008`, `u16 = 12 + 4*count`), then **(count+1) 4-byte Patricia
+    nodes** `{u8 refBit, u8 idxLeft, u8 idxRight, u8 idxEntry}`, then `u16 elemSize`, `u16 ofsData`, the
+    `count×elemSize` records, and the `count×16` names. Node[0] is the root sentinel (`refBit=0x7f`).
+    `refBit` is an MSB-first bit index into the name (`byte = refBit/8`, `bit = refBit&7`); the tree
+    branches on the bits where names differ (verified: lambert21/22/23 branch on byte 8 bits 0/1/5 →
+    refBits 0x40/0x41/0x45). What remains is to reproduce **NNS's exact insert order / refBit choice**
+    byte-for-byte (implement the standard NNS radix insertion, then validate `build(names,records)` against
+    every retail dict via byte compare — a fully headless oracle, no in-game step needed for this piece).
 
 **Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE from the
 **gold standard** (nsbmd_docs + Apicula, §6) and use the jar as a byte-level second opinion (NSBMA had no
