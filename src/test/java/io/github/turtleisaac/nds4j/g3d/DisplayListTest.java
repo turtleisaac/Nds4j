@@ -124,4 +124,48 @@ public class DisplayListTest
         System.out.printf("DisplayList: geometry-exact over %d meshes, %d triangles%n", meshesChecked, trianglesChecked);
         assertThat(meshesChecked).isGreaterThan(50);
     }
+
+    @Test
+    @DisplayName("the command codec round-trips every retail display list byte-for-byte")
+    void commandCodecIsByteExact()
+    {
+        int meshes = 0, commands = 0;
+        for (String romName : new String[]{"Platinum.nds", "HeartGold.nds", "Diamond.nds"})
+        {
+            NintendoDsRom rom;
+            try { rom = TestRoms.require(romName); }
+            catch (RuntimeException e) { continue; }
+            for (int i = 0; i < rom.getNumFiles(); i++)
+            {
+                if (!magic(rom.getFile(i)).equals("NARC")) continue;
+                Narc narc;
+                try { narc = new Narc(rom.getFile(i)); }
+                catch (RuntimeException e) { continue; }
+                for (int j = 0; j < narc.getNumFiles(); j++)
+                {
+                    if (!magic(narc.getFile(j)).equals("BMD0")) continue;
+                    ModelSet ms;
+                    try { ms = new ModelSet(narc.getFile(j)); }
+                    catch (RuntimeException e) { continue; }
+                    for (Model model : ms.getModels())
+                        for (Model.Mesh mesh : model.getMeshes())
+                        {
+                            byte[] dl = mesh.getRawDisplayList();
+                            assertThat(dl).as("mesh %s retains its display list", mesh.getName()).isNotNull();
+                            // lossless: the exact opcode stream (incl. NOP padding, quads/strips, every vertex
+                            // format and the 4-opcodes-per-word packing) re-emits byte-for-byte
+                            java.util.List<DisplayList.Command> cmds = DisplayList.decodeCommands(dl);
+                            assertThat(DisplayList.encodeCommands(cmds))
+                                    .as("display list of %s round-trips byte-for-byte", mesh.getName())
+                                    .isEqualTo(dl);
+                            commands += cmds.size();
+                            meshes++;
+                        }
+                }
+            }
+        }
+        Assumptions.assumeTrue(meshes > 0, "need retail meshes");
+        System.out.printf("DisplayList command codec: %d meshes byte-exact, %d commands%n", meshes, commands);
+        assertThat(meshes).isGreaterThan(1000);
+    }
 }

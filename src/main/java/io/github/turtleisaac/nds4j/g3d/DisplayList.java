@@ -26,22 +26,135 @@ import java.util.List;
 /**
  * The Nintendo DS geometry <b>display list</b> codec &mdash; the geometry half of source&rarr;NSB*
  * conversion. A display list is the packed stream of GPU commands (four opcode bytes per word, then each
- * command's parameters) that {@link Model} interprets to produce a mesh; this class {@link #encode}s a
- * triangle mesh back into a valid stream and {@link #decode}s one, so a converter can author geometry.
+ * command's parameters) that {@link Model} interprets to produce a mesh.
  * <p>
- * The encoder emits a straightforward, correct stream: each command as its own opcode word (padded with
- * {@code NOP}s, which consume no parameters) followed by its parameters, drawing separate triangles with
- * {@code TEXCOORD}/{@code VTX_16} per vertex. Positions are the mesh's <em>raw</em> (pre-{@code posScale})
- * coordinates &mdash; the 1.3.12 fixed range VTX_16 stores; texcoords are texel units (1.11.4). It does
- * not reproduce a retail list's exact stripping/compression byte-for-byte (the DS packs geometry many
- * valid ways), but the round-trip is <b>geometry-exact</b>: {@code decode(encode(mesh))} reproduces the
- * same triangles. Retail files still round-trip their bytes verbatim through {@link Model}/{@link ModelSet}.
+ * There are two levels:
+ * <ul>
+ *   <li><b>Byte-exact command codec</b> ({@link #decodeCommands} / {@link #encodeCommands}): a lossless view
+ *       of the raw GPU command stream as an ordered list of {@link Command}s. {@code encodeCommands(
+ *       decodeCommands(dl))} reproduces the bytes <b>exactly</b> &mdash; every opcode (including {@code NOP}
+ *       padding), operand word, primitive type (triangles / quads / strips) and the four-opcodes-per-word
+ *       packing &mdash; verified byte-for-byte over every display list in the retail Gen IV ROMs. This is the
+ *       representation to decode, edit, and re-emit geometry with byte-identity.</li>
+ *   <li><b>Triangle authoring</b> ({@link #encode} / {@link #decode}): a lossy convenience for authoring a
+ *       new mesh from plain vertex arrays. It emits separate triangles (one command per NOP-padded word) and
+ *       decodes any primitive to triangles. {@code decode(encode(mesh))} is <b>geometry-exact</b> (same
+ *       triangles) but not byte-exact &mdash; use the command codec when byte-identity matters.</li>
+ * </ul>
+ * Positions are the mesh's <em>raw</em> (pre-{@code posScale}) 1.3.12-fixed coordinates VTX_16 stores;
+ * texcoords are texel units (1.11.4).
  */
 public final class DisplayList
 {
     private DisplayList() {}
 
     private static final int NOP = 0x00, TEXCOORD = 0x22, VTX_16 = 0x23, BEGIN_VTXS = 0x40, END_VTXS = 0x41;
+
+    /**
+     * One GPU command: its opcode ({@code byte & 0xFF}) and its operand words (each a raw little-endian
+     * 32-bit value). The number of operand words is fixed per opcode ({@link #operandWords}).
+     */
+    public static final class Command
+    {
+        /** the GPU opcode (e.g. {@code 0x23} = VTX_16, {@code 0x40} = BEGIN_VTXS) */
+        public final int opcode;
+        /** the raw operand words, in order */
+        public final int[] operands;
+
+        public Command(int opcode, int[] operands)
+        {
+            this.opcode = opcode;
+            this.operands = operands;
+        }
+    }
+
+    /**
+     * The number of 32-bit operand words a GPU command consumes, per the DS geometry-engine command set
+     * (GBATEK "DS 3D Video"). Every opcode a retail Gen IV display list uses is covered; unknown opcodes
+     * return -1 so a malformed stream fails loudly rather than desyncing.
+     * @param opcode the command opcode
+     * @return the operand-word count, or -1 if the opcode is unknown
+     */
+    public static int operandWords(int opcode)
+    {
+        switch (opcode)
+        {
+            case 0x00: case 0x11: case 0x15: case 0x41: return 0; // NOP, MTX_PUSH, MTX_IDENTITY, END_VTXS
+            case 0x10: case 0x12: case 0x13: case 0x14: return 1; // MTX_MODE/POP/STORE/RESTORE
+            case 0x16: case 0x18: return 16;                      // MTX_LOAD/MULT_4x4
+            case 0x17: case 0x19: return 12;                      // MTX_LOAD/MULT_4x3
+            case 0x1A: return 9;                                  // MTX_MULT_3x3
+            case 0x1B: case 0x1C: return 3;                       // MTX_SCALE, MTX_TRANS
+            case 0x20: case 0x21: case 0x22: return 1;            // COLOR, NORMAL, TEXCOORD
+            case 0x23: return 2;                                  // VTX_16
+            case 0x24: case 0x25: case 0x26: case 0x27: case 0x28: return 1; // VTX_10/XY/XZ/YZ/DIFF
+            case 0x29: case 0x2A: case 0x2B: return 1;            // POLYGON_ATTR, TEXIMAGE_PARAM, PLTT_BASE
+            case 0x30: case 0x31: case 0x32: case 0x33: return 1; // DIF_AMB, SPE_EMI, LIGHT_VECTOR, LIGHT_COLOR
+            case 0x34: return 32;                                 // SHININESS
+            case 0x40: return 1;                                  // BEGIN_VTXS
+            case 0x50: case 0x60: return 1;                       // SWAP_BUFFERS, VIEWPORT
+            case 0x70: return 3; case 0x71: return 2; case 0x72: return 1; // BOX/POS/VEC_TEST
+            default: return -1;
+        }
+    }
+
+    /**
+     * Decodes a display list losslessly into its ordered GPU commands (NOPs included). The inverse of
+     * {@link #encodeCommands}: {@code encodeCommands(decodeCommands(dl))} equals {@code dl} byte-for-byte.
+     * @param data the display-list bytes
+     * @return the ordered commands
+     */
+    public static List<Command> decodeCommands(byte[] data)
+    {
+        List<Command> commands = new ArrayList<>();
+        int pos = 0;
+        while (pos + 4 <= data.length)
+        {
+            int[] ops = {data[pos] & 0xFF, data[pos + 1] & 0xFF, data[pos + 2] & 0xFF, data[pos + 3] & 0xFF};
+            pos += 4;
+            int[] counts = new int[4];
+            for (int i = 0; i < 4; i++)
+            {
+                counts[i] = operandWords(ops[i]);
+                if (counts[i] < 0)
+                    throw new RuntimeException(String.format("Unknown display-list opcode 0x%02X", ops[i]));
+            }
+            // the four commands' operands follow the opcode word, in order
+            for (int i = 0; i < 4; i++)
+            {
+                int[] operands = new int[counts[i]];
+                for (int k = 0; k < counts[i]; k++)
+                {
+                    operands[k] = pos + 4 <= data.length ? (int) readU32(data, pos) : 0;
+                    pos += 4;
+                }
+                commands.add(new Command(ops[i], operands));
+            }
+        }
+        return commands;
+    }
+
+    /**
+     * Encodes GPU commands back into a display list, packing four opcodes per word followed by their operand
+     * words &mdash; the exact layout the DS uses, so a list obtained from {@link #decodeCommands} round-trips
+     * byte-for-byte.
+     * @param commands the ordered commands
+     * @return the display-list bytes
+     */
+    public static byte[] encodeCommands(List<Command> commands)
+    {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int n = commands.size();
+        for (int i = 0; i < n; i += 4)
+        {
+            for (int j = 0; j < 4; j++)
+                out.write(i + j < n ? commands.get(i + j).opcode : NOP);
+            for (int j = 0; j < 4 && i + j < n; j++)
+                for (int operand : commands.get(i + j).operands)
+                    putU32(out, operand);
+        }
+        return out.toByteArray();
+    }
 
     /** Decoded geometry: raw positions (x,y,z), texcoords (s,t in texel units), and triangle indices. */
     public static final class Geometry

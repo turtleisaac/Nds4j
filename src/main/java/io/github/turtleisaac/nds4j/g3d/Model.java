@@ -541,7 +541,9 @@ public class Model
         int[] idx = new int[triangles.size()];
         for (int i = 0; i < idx.length; i++)
             idx[i] = triangles.get(i);
-        return new Mesh(meshName, pos3, uv2, idx);
+        Mesh mesh = new Mesh(meshName, pos3, uv2, idx);
+        mesh.rawDisplayList = java.util.Arrays.copyOfRange(d, dlStart, dlStart + dlSize);
+        return mesh;
     }
 
     private static void emit(double[] vtx, double[] uv, List<float[]> positions, List<float[]> texcoords, List<Integer> primVerts)
@@ -954,6 +956,7 @@ public class Model
         private Material material;          // the bound material (texture/palette), or null
         float[] rawPositions;              // pre-placement vertices (for re-posing by an animation)
         int nodeIndex;                     // the skeleton node this mesh is drawn under
+        byte[] rawDisplayList;             // the shape's verbatim GPU command stream (for byte-exact re-emit)
 
         Mesh(String name, float[] positions, float[] texcoords, int[] triangleIndices)
         {
@@ -978,6 +981,13 @@ public class Model
         public float[] getTexcoords() { return texcoords; }
         /** @return the triangle indices, 3 per triangle, into the vertex arrays */
         public int[] getTriangleIndices() { return triangleIndices; }
+        /**
+         * @return this shape's verbatim GPU command stream (the raw display-list bytes it was decoded from).
+         *         Feeding it to {@link DisplayList#decodeCommands} yields the exact commands (primitive type,
+         *         vertex formats, strips) that a triangle view loses, so geometry can be re-emitted
+         *         byte-for-byte. The array is a copy; mutating it does not affect the model.
+         */
+        public byte[] getRawDisplayList() { return rawDisplayList != null ? rawDisplayList.clone() : null; }
         /** @return the number of vertices */
         public int getVertexCount() { return positions.length / 3; }
         /** @return the number of triangles */
