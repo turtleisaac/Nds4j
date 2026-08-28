@@ -15,9 +15,9 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > `ModelViewer` is a headless-capable Swing/Java2D viewer (orbit, scrub, play, inspect, texture browser).
 > The **writer foundation** (`G3dFile.writeBlockU8/U16`) supports byte-valid in-place edits — NSBMA
 > colour/alpha keyframes and NSBTX palette recolour (incl. embedded TEX0, so `ModelSet.save()` re-emits
-> a valid repainted model). **197 tests green.** See §4 for the #26 fix, §6 for the gold-standard
-> references, and §10 for what's done vs the **one remaining frontier: full source→NSB* conversion**
-> (the g3dcvtr replacement) and true camera-facing **billboard rendering**.
+> a valid repainted model). Camera-facing **BB/BBY billboards** render (a sprite tracks the camera).
+> **199 tests green.** See §4 for the #26 fix, §6 for the gold-standard references, and §10 for what's
+> done vs the **one remaining frontier: full source→NSB* conversion** (the g3dcvtr replacement).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -72,11 +72,11 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
   samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
   the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 197 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+**Test suite:** 199 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
 `g3d/GltfExporterTest.java`, `g3d/GltfAnimationTest.java`, `g3d/SkeletalAnimationSetTest.java`,
 `g3d/TextureAndVisibilityAnimationTest.java`, `g3d/MaterialColorAnimationTest.java`,
 `g3d/SoftwareRendererTest.java`, `g3d/AnimatedPreviewTest.java`, `g3d/ModelViewerTest.java`,
-`g3d/NsbEditingTest.java`. Run:
+`g3d/NsbEditingTest.java`, `g3d/BillboardTest.java`. Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
@@ -328,13 +328,15 @@ The §4 numbered tasks and every earlier §10 follow-up are done (all read forma
   `Model.pose()` to <1e-3). *Known limits:* glTF core can't portably animate NSBTP/NSBVA, and non-uniform
   SSC node scale shears under standard TRS composition (SoftwareRenderer stays the NNS-exact renderer).
 
-### F2 — Interactive viewer ✅ DONE (billboards are the one gap)
+### F2 — Interactive viewer ✅ DONE (incl. billboards)
 `ModelViewer.renderView` composites the 3D viewport + an inspection HUD (counts, animation+scrub, material
 list, node list with billboard flags, texture browser) with or without a display; `ModelViewerFrame` is
 the Swing shell (mouse-orbit, frame scrubber, 30fps play/pause). Pure Swing/Java2D per §3. Commit `8cabc60`.
-**Still open:** true camera-facing `BB`/`BBY` billboard *rendering*. `Model.isBillboardNode(n)` now flags
-them (inspector labels them); the renderer still draws billboards at their authored orientation. Doing it
-right means re-orienting a billboard node's geometry toward the camera per frame in `SoftwareRenderer`.
+**Camera-facing billboards done** (`efeabc3`): `SoftwareRenderer` draws a `BB`/`BBY` node's raw local
+geometry around its projected world pivot in screen space (unlit), so a sprite tracks the camera as the
+model orbits (Platinum `hero` stays full-face at every yaw). `Model.getNodeWorldTranslation/Scale` expose
+the pivot. Uses the bind-pose pivot (billboards are effect quads, rarely skeletally posed); a per-frame
+posed pivot for a skinned billboard would be the only refinement.
 
 ### F3 — Remaining read formats ✅ DONE (NSBMA); SPA N/A for these ROMs
 `MaterialColorAnimationSet` (NSBMA / `BMA0`, **absent from the jar**, RE'd from files): per material, five
