@@ -676,6 +676,88 @@ public class Model
     }
 
     /**
+     * @return the model's global position scale (a magnify factor applied to every decoded vertex). The
+     *         decoded {@link Mesh#getPositions()} already include it; {@link Mesh#getRawPositions()} do
+     *         not.
+     */
+    public double getPositionScale()
+    {
+        return posScale;
+    }
+
+    /**
+     * @param node a node index
+     * @return the index of that node's parent in the skeleton, or -1 for a root node
+     */
+    public int getNodeParent(int node)
+    {
+        return (nodeParent != null && node >= 0 && node < nodeParent.length) ? nodeParent[node] : -1;
+    }
+
+    /**
+     * Computes each node's <em>local</em> transform (translation, per-axis scale, 3&times;3 rotation),
+     * either at the bind pose or as re-posed by a skeletal animation &mdash; the building block a
+     * hierarchical exporter (e.g. {@link GltfExporter}) needs to emit an animated node tree. Unlike
+     * {@link #pose}, these are the per-node <em>locals</em> (not composed world matrices, and not applied
+     * to geometry), so a consumer can hand them to a scene graph that composes the hierarchy itself.
+     * @param animation the animation to sample, or null for the bind pose
+     * @param frame the frame to sample (ignored when {@code animation} is null)
+     * @return one {@link NodeTransform} per node, in node order
+     */
+    public NodeTransform[] localTransforms(SkeletalAnimationSet.Animation animation, int frame)
+    {
+        int count = nodeLocals.length;
+        List<SkeletalAnimationSet.NodeAnim> animNodes = animation != null ? animation.getNodes() : null;
+        NodeTransform[] out = new NodeTransform[count];
+        for (int n = 0; n < count; n++)
+        {
+            Srt bind = nodeLocals[n];
+            double[] t = bind.t, s = bind.s, r = bind.r;
+            if (animNodes != null)
+            {
+                SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
+                double[] at = na != null ? na.translationAt(frame) : null;
+                double[] as = na != null ? na.scaleAt(frame) : null;
+                double[] ar = na != null ? na.rotationAt(frame) : null;
+                if (at != null) t = at;
+                if (as != null) s = as;
+                if (ar != null) r = ar;
+            }
+            out[n] = new NodeTransform(t.clone(), s.clone(), r.clone());
+        }
+        return out;
+    }
+
+    /**
+     * A node's local transform as separate translation, per-axis scale and a 3&times;3 rotation
+     * (row-major, NNS row-vector convention {@code v' = v * r}). The scale is kept apart from the
+     * rotation deliberately (see the class docs); a consumer that composes it into a single matrix per
+     * the standard {@code T*R*S} rule will shear non-uniformly-scaled children exactly as a generic
+     * scene graph does &mdash; the reference NNS behaviour is reproduced faithfully only by
+     * {@link SoftwareRenderer}.
+     */
+    public static final class NodeTransform
+    {
+        private final double[] translation;
+        private final double[] scale;
+        private final double[] rotation;
+
+        NodeTransform(double[] translation, double[] scale, double[] rotation)
+        {
+            this.translation = translation;
+            this.scale = scale;
+            this.rotation = rotation;
+        }
+
+        /** @return translation (x,y,z), model units (not scaled by the model's position scale) */
+        public double[] getTranslation() { return translation; }
+        /** @return per-axis scale (x,y,z) */
+        public double[] getScale() { return scale; }
+        /** @return the 3&times;3 rotation, row-major, row-vector convention */
+        public double[] getRotation() { return rotation; }
+    }
+
+    /**
      * @return true if this model has a single (identity) node, the case where the decoded geometry is
      *         already positionally correct (multi-node placement needs node transforms, still to come)
      */
@@ -789,6 +871,13 @@ public class Model
         public String getName() { return name; }
         /** @return the vertex positions, 3 floats (x,y,z) per vertex, in model space */
         public float[] getPositions() { return positions; }
+        /**
+         * @return the raw pre-placement vertex positions, 3 floats (x,y,z) per vertex, in the mesh's own
+         *         node-local space &mdash; before the node world transform and before the model's
+         *         position scale. This is what a hierarchical exporter places under the mesh's skeleton
+         *         node (see {@link #getNodeIndex()}).
+         */
+        public float[] getRawPositions() { return rawPositions; }
         /** @return the texture coordinates, 2 floats (s,t) per vertex, in texel units */
         public float[] getTexcoords() { return texcoords; }
         /** @return the triangle indices, 3 per triangle, into the vertex arrays */
