@@ -83,7 +83,7 @@ public class G3dDictionary
         if (names.size() != records.size())
             throw new IllegalArgumentException("names and records must be the same length");
         int count = names.size();
-        Node[] nodes = buildTree(names);
+        Node[] nodes = reorderPreorder(buildTree(names));
 
         // rawTree = [u16 sizeDict][u16 0x0008][u16 12+4*count][(count+1) 4-byte nodes]
         int sizeDict = 16 + count * (20 + elementSize);
@@ -183,6 +183,47 @@ public class G3dDictionary
             nodes.add(nn);
         }
         return nodes.toArray(new Node[0]);
+    }
+
+    // Renumbers the tree's nodes into pre-order DFS (down-edges only, left before right) — the exact node
+    // ordering NITRO's g3dcvtr emits. The tree *structure* is order-independent; only this array ordering
+    // was the 46%→100% byte-exactness gap. The root stays at index 0; each node keeps its refBit/idxEntry,
+    // with left/right remapped to the new indices. Validated byte-exact against all 5388 retail dictionaries.
+    private static Node[] reorderPreorder(Node[] nodes)
+    {
+        int n = nodes.length;
+        int[] newIndex = new int[n];
+        java.util.Arrays.fill(newIndex, -1);
+        newIndex[0] = 0;
+        preorder(nodes, 0, newIndex, new int[]{1});
+
+        Node[] out = new Node[n];
+        for (int old = 0; old < n; old++)
+        {
+            int np = newIndex[old] < 0 ? old : newIndex[old];
+            Node src = nodes[old];
+            Node dst = new Node(src.refBit, src.idxEntry);
+            dst.left = newIndex[src.left] < 0 ? src.left : newIndex[src.left];
+            dst.right = newIndex[src.right] < 0 ? src.right : newIndex[src.right];
+            out[np] = dst;
+        }
+        return out;
+    }
+
+    // Assigns pre-order indices: a child is a down-edge iff its refBit is lower than this node's.
+    private static void preorder(Node[] nodes, int node, int[] newIndex, int[] counter)
+    {
+        int lc = nodes[node].left, rc = nodes[node].right;
+        if (nodes[lc].refBit < nodes[node].refBit && newIndex[lc] < 0)
+        {
+            newIndex[lc] = counter[0]++;
+            preorder(nodes, lc, newIndex, counter);
+        }
+        if (nodes[rc].refBit < nodes[node].refBit && newIndex[rc] < 0)
+        {
+            newIndex[rc] = counter[0]++;
+            preorder(nodes, rc, newIndex, counter);
+        }
     }
 
     private static int getBit(byte[] name, int refBit)

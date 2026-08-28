@@ -27,53 +27,67 @@ Special thanks to [red031000](https://github.com/red031000) for helping me figur
 Formats currently implemented
 -----------------------------
 
-| Format    | Corresponding Java Class | Reading | Writing | Full Editing Capability |
-|:----------|:-------------------------|:-------:|:-------:|:-----------------------:|
-| NDS ROM   | `NintendoDsRom`          | &check; | &check; |         &check;         |
-| NARC      | `Narc`                   | &check; | &check; |         &check;         |
-| NCGR      | `images.IndexedImage`    | &check; | &check; |         &cross;         |
-| NCLR      | `images.Palette`         | &check; | &check; |         &cross;         |
-| NCER      | `images.CellBank`        | &check; | &check; |         &cross;         |
-| NANR      | `images.CellAnimation`   | &check; | &check; |         &cross;         |
-| NSCR      | `images.Screen`          | &check; | &check; |         &cross;         |
-| NSBTX     | `g3d.TextureSet`         | &check; | &check; |         &cross;         |
-| ARM9/ARM7 | `binaries.MainCodeFile`  | &check; |         |                         |
+| Format    | Corresponding Java Class          | Reading | Writing | Full Editing Capability |
+|:----------|:----------------------------------|:-------:|:-------:|:-----------------------:|
+| NDS ROM   | `NintendoDsRom`                   | &check; | &check; |         &check;         |
+| NARC      | `Narc`                            | &check; | &check; |         &check;         |
+| NCGR      | `images.IndexedImage`             | &check; | &check; |         &cross;         |
+| NCLR      | `images.Palette`                  | &check; | &check; |         &cross;         |
+| NCER      | `images.CellBank`                 | &check; | &check; |         &cross;         |
+| NANR      | `images.CellAnimation`            | &check; | &check; |         &cross;         |
+| NSCR      | `images.Screen`                   | &check; | &check; |         &cross;         |
+| NSBMD     | `g3d.ModelSet` / `g3d.Model`      | &check; | &check; |         &check;         |
+| NSBTX     | `g3d.TextureSet`                  | &check; | &check; |         &check;         |
+| NSBCA     | `g3d.SkeletalAnimationSet`        | &check; | &check; |         &cross;         |
+| NSBTA     | `g3d.TextureSrtAnimationSet`      | &check; | &check; |         &check;         |
+| NSBTP     | `g3d.TexturePatternAnimationSet`  | &check; | &check; |         &cross;         |
+| NSBVA     | `g3d.VisibilityAnimationSet`      | &check; | &check; |         &cross;         |
+| NSBMA     | `g3d.MaterialColorAnimationSet`   | &check; | &check; |         &check;         |
+| SPA / SPL | `g3d.ParticleSet`                 | &check; | &check; |         &cross;         |
+| Nitro LZ  | `framework.NitroLz` (LZ10/LZ11)   | &check; | &check; |         &check;         |
+| ARM9/ARM7 | `binaries.MainCodeFile`           | &check; |         |                         |
+
+All of the Nitro 3D (`NSB*`) and `SPA` formats round-trip **byte-for-byte** across the retail Gen IV ROMs and
+were reverse-engineered natively (no third-party reader is wrapped or depended upon). Beyond reading, the 3D
+stack can **author** files from scratch and **preview** them, all in pure Java (no native/OS-specific deps):
+
+* **Convert** &mdash; `g3d.ObjImporter` (Wavefront OBJ &rarr; geometry) + `g3d.ModelBuilder` author an NSBMD
+  (untextured, textured, or multi-shape/multi-material with an embedded `TEX0`); `g3d.AnimationBuilder` authors
+  an NSBTA. The dictionary encoder (`g3d.G3dDictionary`) emits nodes in the same pre-order the NITRO tool
+  (`g3dcvtr`) does, so authored resource dictionaries are **byte-identical** to retail (verified against all
+  5388 retail dictionaries).
+* **Export** &mdash; `g3d.GltfExporter` (self-contained glTF 2.0, static or animated) and `Model.toObj()`.
+* **Preview** &mdash; `g3d.SoftwareRenderer` (headless rasteriser), `g3d.ModelViewer`/`ModelViewerFrame` (Swing
+  orbit/scrub/play), `g3d.NitroAnimation` (composes all four animation tracks), `g3d.AnimatedGif`, and
+  `g3d.ParticleRenderer` (plays an `SPA` move effect).
+* **Edit** &mdash; `G3dFile.writeBlockU8/U16` for byte-valid in-place edits (e.g. `NSBMA` colour/alpha keyframes,
+  `TextureSet.setPaletteColor` recolour incl. the embedded `TEX0`).
 
 Likely future supported formats
 --------------------------------
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-The Nitro 3D (`NSB*`) formats below are a priority group. They will receive full first-class support
-built natively in Nds4j &mdash; each fully reverse-engineered and rebuilt to the same standard as every
-other format here (byte-for-byte round-tripping, `framework.GenericNtrFile`/`MemBuf`, informative
-exceptions, `equals()`, and unit tests validated against retail ROMs). A third-party reader is being
-kept on hand purely as a decoding reference to check against; it will not be wrapped or depended upon.
-Note that `NSBTA` and `NSBMA` have no third-party reader to reference and must be worked out entirely
-from documentation and the retail files themselves.
-
-* NSBMD &mdash; model
-* NSBCA &mdash; joint/skeletal animation
-* NSBTA &mdash; texture SRT (scale/rotate/translate) animation
-* NSBTP &mdash; texture pattern animation
-* NSBMA &mdash; material colour animation
-* NSBVA &mdash; visibility animation
-* SPA &mdash; particle effects
+The entire Nitro 3D (`NSB*`) and `SPA` priority group is now supported (see the table above), fully
+reverse-engineered natively and validated byte-for-byte against the retail ROMs. The general
+`LZ10`/`LZ11` compression codec (`framework.NitroLz`) is done too. What remains:
 
 The 2D graphics companions below round out the `NCLR`/`NCGR`/`NSCR`/`NCER`/`NANR` set already
 supported. They aren't used by the Pokémon Gen IV games but are common across other DS titles.
+(`framework.NitroLz` already decompresses the many `NCGR`/`NSCR`/`NCER`/`NANR` resources that ship
+LZ-compressed.)
 
 * NMCR &mdash; multi-cell resource (composes several `NCER` cells into one object)
 * NMAR &mdash; multi-cell animation resource (animates an `NMCR`)
 * NFTR &mdash; Nitro font resource
 * NTFT / NTFP / NTFI &mdash; raw texture texel / palette / index data
 
-The following is infrastructure rather than a single format, but it gates a large share of the files
-above: many `NSB*`, `NCGR`, and other resources are stored compressed. Supporting the general Nitro
-codecs (and rounding out the ROM container) is a prerequisite for the rest.
+Remaining infrastructure / breadth:
 
-* General Nitro compression &mdash; LZ10, LZ11, Huffman, RLE (`framework.BLZCoder` currently only
-    covers the ARM-code BLZ variant)
+* The remaining Nitro compression codecs &mdash; Huffman and RLE (`framework.NitroLz` covers LZ10/LZ11;
+    `framework.BLZCoder` covers the ARM-code BLZ variant)
+* Animation *writers* for `NSBCA`/`NSBTP`/`NSBVA`/`NSBMA` (the `g3d.AnimationBuilder` recipe for `NSBTA`
+    generalizes to them); a glTF (as well as OBJ) import front-end
 * ROM banner / icon &mdash; the cartridge icon bitmap and multilingual titles
 
 The following are themselves likely, but are not part of my immediate needs or goals due

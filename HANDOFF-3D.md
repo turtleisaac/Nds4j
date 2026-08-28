@@ -365,12 +365,17 @@ Every item below is delivered. Rendered checkpoints in `g3d_out/` (see each entr
    (`NitroLz`): general LZ10/LZ11 decompress + compress, validated on the retail ROMs (decode-to-known-magic
    400/400, round-trip identity), feeding the 3D pipeline — a real LZ11 NSBMD decompresses and renders
    (`g3d_out/lz_decompressed_model.png`).
-6. **g3dcvtr byte-exact layout — dictionary numbering confirmed unrecoverable ✅.** Independently re-verified
-   §10 F4: over 5388 retail dicts, **no** deterministic insertion order (record, bytewise-sorted, or
-   texture-data-offset) beats the 46% byte-exact rate — the other 54%'s node array order reflects the lost
-   pre-sort authoring order, so byte-exact *authoring* from names alone is information-theoretically
-   impossible. Byte-*valid* authoring (100% functional) and byte-*exact* re-encode of existing files
-   (verbatim preservation via `assembleContainer`) both hold; that is the achievable bar.
+6. **g3dcvtr byte-exact dictionary numbering — SOLVED, 46%→100% ✅.** The earlier "unrecoverable" conclusion
+   was **wrong**. With `g3dcvtr.exe` now runnable under wine (`G3DCVTR/`, `wine g3dcvtr.exe foo.imd -emdl`),
+   generating reference dictionaries with controlled names (author a tiny `.imd`, vary the `material_array`
+   names) revealed the rule: g3dcvtr keeps **declaration order on disk** (it does *not* sort) and numbers the
+   crit-bit tree's nodes in **pre-order DFS** (down-edges only, left before right). The tree *structure* is
+   order-independent; only the array numbering was the gap. `G3dDictionary.reorderPreorder` applies it and
+   now matches **all 5388 retail dictionaries byte-for-byte** (was 2468). So authored NSB* resource
+   dictionaries are byte-identical to NITRO's own tool. (Record/sorted/data-offset insertion orders all
+   plateaued at ≤46% — pre-order was the missing piece.) **RE workflow for the next agent:** `g3dcvtr foo.imd`
+   converts, `g3dcvtr foo.nsbmd` dumps a binary's structure; real `.imd` samples live at
+   `github.com/gainax3/retsam_00jupc/tree/HEAD/src/data/rsc`.
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`

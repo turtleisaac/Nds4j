@@ -167,8 +167,10 @@ public class G3dDictionaryBuildTest
         // every built tree must be a valid, re-parseable dictionary
         assertThat(tally[1]).as("every built tree resolves all names").isEqualTo(tally[0]);
         assertThat(tally[2]).as("every built dictionary re-parses identically").isEqualTo(tally[0]);
-        // node numbering matches retail for a meaningful fraction (documents byte-exactness)
-        assertThat(tally[3]).as("many match retail byte-for-byte").isGreaterThan(tally[0] / 5);
+        // node numbering is byte-exact for EVERY retail dictionary: the builder emits nodes in the same
+        // pre-order DFS ordering g3dcvtr uses (RE'd against g3dcvtr itself — see reorderPreorder). This was
+        // 46% until the pre-order fix; it is now 100%, so authored NSB* dictionaries byte-match NITRO's tool.
+        assertThat(tally[3]).as("every built dictionary is byte-identical to retail").isEqualTo(tally[0]);
     }
 
     @Test
