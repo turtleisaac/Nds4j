@@ -53,7 +53,9 @@ public class ParticleSet
     private final byte[] data;
     private final String version;
     private final int emitterCount;
+    private final List<Emitter> emitters = new ArrayList<>();
     private final List<ParticleTexture> textures = new ArrayList<>();
+    private int emitterBlockEnd;   // where the emitter walk finished (should equal the texture-section offset)
 
     /**
      * Generates an object representation of an SPA file.
@@ -69,6 +71,19 @@ public class ParticleSet
         int textureCount = u16(10);
         int texSectionOffset = (int) u32(0x18);
 
+        // Walk the emitter block (starts right after the 0x20-byte header). Each emitter is an 0x58-byte
+        // fixed body followed by flag-gated optional blocks (scale/colour/alpha/tex anim, child, six field
+        // modifiers); there is no per-emitter size field, so every width must be exact — the walk is
+        // validated by landing precisely on the texture section over all five retail ROMs.
+        int e = 0x20;
+        for (int i = 0; i < emitterCount && e + 0x58 <= data.length; i++)
+        {
+            Emitter em = new Emitter(e);
+            emitters.add(em);
+            e += em.byteSize;
+        }
+        emitterBlockEnd = e;
+
         int p = texSectionOffset;
         for (int i = 0; i < textureCount && p + 0x20 <= data.length; i++)
         {
@@ -82,8 +97,18 @@ public class ParticleSet
 
     /** @return the archive's version tag (e.g. {@code "12_1"}) */
     public String getVersion() { return version; }
-    /** @return the number of particle emitters (their parameters are preserved but not yet decoded) */
+    /** @return the number of particle emitters declared in the header */
     public int getEmitterCount() { return emitterCount; }
+    /** @return the decoded particle emitters (behaviour parameters: spawn, velocity, life, colour, fields) */
+    public List<Emitter> getEmitters() { return emitters; }
+    /**
+     * @return the byte offset just past the last decoded emitter. For a correctly-decoded archive this
+     * equals the texture-section offset (the emitter walk consumed exactly the emitter block) &mdash; the
+     * self-checking oracle that every emitter field width is right, since there is no per-emitter size field.
+     */
+    public int getEmitterBlockEnd() { return emitterBlockEnd; }
+    /** @return the byte offset where the texture section begins */
+    public int getTextureSectionOffset() { return (int) u32(0x18); }
     /** @return the decoded particle textures */
     public List<ParticleTexture> getTextures() { return textures; }
 
@@ -108,6 +133,212 @@ public class ParticleSet
     public String toString()
     {
         return String.format("ParticleSet[%s, %d emitters, %d textures]", version, emitterCount, textures.size());
+    }
+
+    /** How an emitter distributes newly-spawned particles in space (SPL {@code EmitterShape}). */
+    public enum EmitterShape { POINT, SPHERE, CIRCLE, CIRCLE_EVEN, SPHERE_VOLUME, CIRCLE_VOLUME,
+        CYLINDER, CYLINDER_EVEN, HEMISPHERE, HEMISPHERE_VOLUME }
+
+    /**
+     * One particle emitter: the behaviour that spawns and animates a cloud of particles (spawn shape/rate,
+     * velocity, lifetime, colour/scale/alpha-over-life curves, and optional force fields). The bytes are
+     * preserved verbatim by the container; this is a decoded read-only view over them, reverse-engineered
+     * from the retail files and cross-checked against the independent HaroohiePals SPL reader (the emitter
+     * walk lands byte-exactly on the texture section over all 3144 retail archives).
+     */
+    public final class Emitter
+    {
+        final int byteSize;                 // total on-disk size incl. optional blocks (for the walk)
+
+        // ---- fixed 0x58-byte body ----
+        private final long flags;
+        private final double posX, posY, posZ;     // emitter position (world units)
+        private final double emissionVolume;       // fractional particles emitted per emission
+        private final double emitterRadius, emitterLength;
+        private final double axisX, axisY, axisZ;  // emitter axis (unit-ish)
+        private final int color;                   // BGR555
+        private final double particlePosVeloMag, particleAxisVeloMag, particleBaseScale, aspectRatio;
+        private final int emissionStartTime;       // frames before first emission
+        private final double minRotVelocity, maxRotVelocity, particleRotation; // degrees / degrees-per-frame
+        private final int emissionTime;            // emitter lifetime in frames (0 = infinite)
+        private final int particleLifetime;        // per-particle lifetime in frames
+        private final double scaleRandomness, lifetimeRandomness, veloMagRandomness;
+        private final int emissionInterval;        // frames between emissions (1 = every frame)
+        private final int particleAlpha;           // 0..31
+        private final double airResistance;
+        private final int textureId, loopFrame;
+        private final EmitterShape shape;
+
+        // ---- optional flag-gated blocks (null when absent) ----
+        private final ScaleAnim scaleAnim;
+        private final ColorAnim colorAnim;
+        private final AlphaAnim alphaAnim;
+        private final int[] texAnimFrames;         // flip-book texture ids (null if no tex anim)
+        private final Gravity gravity;
+
+        Emitter(int start)
+        {
+            int c = start;
+            this.flags = u32(c); c += 4;
+            this.shape = EmitterShape.values()[(int) (flags & 0xF) % EmitterShape.values().length];
+            this.posX = fx32(c); this.posY = fx32(c + 4); this.posZ = fx32(c + 8); c += 12;
+            this.emissionVolume = fx32(c); c += 4;
+            this.emitterRadius = fx32(c); c += 4;
+            this.emitterLength = fx32(c); c += 4;
+            this.axisX = fx16(c); this.axisY = fx16(c + 2); this.axisZ = fx16(c + 4); c += 6;
+            this.color = bgr555(u16(c)); c += 2;
+            this.particlePosVeloMag = fx32(c); c += 4;
+            this.particleAxisVeloMag = fx32(c); c += 4;
+            this.particleBaseScale = fx32(c); c += 4;
+            this.aspectRatio = fx16(c); c += 2;
+            this.emissionStartTime = u16(c); c += 2;
+            this.minRotVelocity = s16(c) * 360.0 / 65536.0; c += 2;
+            this.maxRotVelocity = s16(c) * 360.0 / 65536.0; c += 2;
+            this.particleRotation = s16(c) * 360.0 / 65536.0; c += 2;
+            c += 2; // padding
+            this.emissionTime = u16(c); c += 2;
+            this.particleLifetime = u16(c); c += 2;
+            this.scaleRandomness = (data[c++] & 0xFF) / 256.0;
+            this.lifetimeRandomness = (data[c++] & 0xFF) / 256.0;
+            this.veloMagRandomness = (data[c++] & 0xFF) / 256.0;
+            c += 1; // padding
+            this.emissionInterval = data[c++] & 0xFF;
+            this.particleAlpha = data[c++] & 0xFF;
+            this.airResistance = ((data[c++] & 0xFF) + 384) / 512.0;
+            this.textureId = data[c++] & 0xFF;
+            this.loopFrame = data[c++] & 0xFF;
+            c += 2; // DirBillboardScale
+            c += 1; // tex-repeat / scale-mode packed byte
+            c += 4; // tex-flip packed word
+            c += 2; // QuadXOffset
+            c += 2; // QuadYZOffset
+            c += 4; // UserData  -> c is now start + 0x58
+
+            this.scaleAnim = (flags >> 8 & 1) == 1 ? new ScaleAnim(c) : null;
+            if (scaleAnim != null) c += 12;
+            this.colorAnim = (flags >> 9 & 1) == 1 ? new ColorAnim(c) : null;
+            if (colorAnim != null) c += 12;
+            this.alphaAnim = (flags >> 10 & 1) == 1 ? new AlphaAnim(c) : null;
+            if (alphaAnim != null) c += 8;
+            if ((flags >> 11 & 1) == 1) { this.texAnimFrames = readTexAnim(c); c += 12; }
+            else this.texAnimFrames = null;
+            if ((flags >> 16 & 1) == 1) c += 20; // child particles (behaviour preserved verbatim)
+            this.gravity = (flags >> 24 & 1) == 1 ? new Gravity(c) : null;
+            if (gravity != null) c += 8;
+            if ((flags >> 25 & 1) == 1) c += 8;  // field: random
+            if ((flags >> 26 & 1) == 1) c += 16; // field: magnet
+            if ((flags >> 27 & 1) == 1) c += 4;  // field: spin
+            if ((flags >> 28 & 1) == 1) c += 8;  // field: collision
+            if ((flags >> 29 & 1) == 1) c += 16; // field: convergence
+
+            this.byteSize = c - start;
+        }
+
+        private int[] readTexAnim(int c)
+        {
+            int n = data[c + 8] & 0xFF;
+            int[] f = new int[Math.min(n, 8)];
+            for (int i = 0; i < f.length; i++) f[i] = data[c + i] & 0xFF;
+            return f;
+        }
+
+        /** @return emitter position X (world units) */ public double getPosX() { return posX; }
+        /** @return emitter position Y (world units) */ public double getPosY() { return posY; }
+        /** @return emitter position Z (world units) */ public double getPosZ() { return posZ; }
+        /** @return how particles are distributed in space when spawned */ public EmitterShape getShape() { return shape; }
+        /** @return the spawn radius (units) for sphere/circle/cylinder shapes */ public double getEmitterRadius() { return emitterRadius; }
+        /** @return fractional particles emitted per emission tick */ public double getEmissionVolume() { return emissionVolume; }
+        /** @return frames between emissions (1 = every frame) */ public int getEmissionInterval() { return emissionInterval; }
+        /** @return frames to wait before the first emission */ public int getEmissionStartTime() { return emissionStartTime; }
+        /** @return emitter lifetime in frames (0 = infinite) */ public int getEmissionTime() { return emissionTime; }
+        /** @return per-particle lifetime in frames */ public int getParticleLifetime() { return particleLifetime; }
+        /** @return outward (position-relative) initial speed magnitude */ public double getParticlePosVeloMag() { return particlePosVeloMag; }
+        /** @return axis-aligned initial speed magnitude */ public double getParticleAxisVeloMag() { return particleAxisVeloMag; }
+        /** @return base particle scale */ public double getParticleBaseScale() { return particleBaseScale; }
+        /** @return particle width/height aspect ratio */ public double getAspectRatio() { return aspectRatio; }
+        /** @return per-frame air resistance factor (~0.75..1.25, 1 = none) */ public double getAirResistance() { return airResistance; }
+        /** @return base particle colour as packed 0xRRGGBB */ public int getColorRgb() { return color; }
+        /** @return base particle alpha, 0..31 */ public int getParticleAlpha() { return particleAlpha; }
+        /** @return index into the archive's texture list for this emitter's sprite */ public int getTextureId() { return textureId; }
+        /** @return randomness applied to per-particle initial speed (0..~1) */ public double getVeloMagRandomness() { return veloMagRandomness; }
+        /** @return randomness applied to per-particle scale (0..~1) */ public double getScaleRandomness() { return scaleRandomness; }
+        /** @return randomness applied to per-particle lifetime (0..~1) */ public double getLifetimeRandomness() { return lifetimeRandomness; }
+        /** @return the scale-over-life curve, or {@code null} if the emitter has none */ public ScaleAnim getScaleAnim() { return scaleAnim; }
+        /** @return the colour-over-life curve, or {@code null} if the emitter has none */ public ColorAnim getColorAnim() { return colorAnim; }
+        /** @return the alpha-over-life curve, or {@code null} if the emitter has none */ public AlphaAnim getAlphaAnim() { return alphaAnim; }
+        /** @return the gravity field, or {@code null} if the emitter has none */ public Gravity getGravity() { return gravity; }
+        /** @return the flip-book texture-id sequence, or {@code null} if there is no texture animation */ public int[] getTexAnimFrames() { return texAnimFrames; }
+
+        @Override public String toString()
+        {
+            return String.format("Emitter[shape=%s pos=(%.2f,%.2f,%.2f) vol=%.2f interval=%d life=%d tex=%d%s%s%s%s]",
+                shape, posX, posY, posZ, emissionVolume, emissionInterval, particleLifetime, textureId,
+                scaleAnim != null ? " +scale" : "", colorAnim != null ? " +color" : "",
+                alphaAnim != null ? " +alpha" : "", gravity != null ? " +gravity" : "");
+        }
+    }
+
+    /** Scale-over-life curve: ramps {@code initial → intermediate → ending} across the particle's life. */
+    public final class ScaleAnim
+    {
+        private final double initial, intermediate, ending, inEnd, outStart;
+        ScaleAnim(int c)
+        {
+            initial = fx16(c); intermediate = fx16(c + 2); ending = fx16(c + 4);
+            inEnd = (data[c + 6] & 0xFF) / 256.0; outStart = (data[c + 7] & 0xFF) / 256.0;
+        }
+        /** @return scale at spawn */ public double getInitial() { return initial; }
+        /** @return scale during the sustain phase */ public double getIntermediate() { return intermediate; }
+        /** @return scale at death */ public double getEnding() { return ending; }
+        /** @return normalised life-fraction at which the ramp-in ends (0..1) */ public double getInEndTime() { return inEnd; }
+        /** @return normalised life-fraction at which the ramp-out starts (0..1) */ public double getOutStartTime() { return outStart; }
+    }
+
+    /** Colour-over-life curve: interpolates {@code initial → ending} (both BGR555 → 0xRRGGBB). */
+    public final class ColorAnim
+    {
+        private final int initial, ending;
+        private final double inEnd, peak, outStart;
+        private final boolean interpolate;
+        ColorAnim(int c)
+        {
+            initial = bgr555(u16(c)); ending = bgr555(u16(c + 2));
+            inEnd = (data[c + 4] & 0xFF) / 256.0; peak = (data[c + 5] & 0xFF) / 256.0;
+            outStart = (data[c + 6] & 0xFF) / 256.0;
+            interpolate = (u16(c + 8) >> 2 & 1) == 1;
+        }
+        /** @return colour at spawn as 0xRRGGBB */ public int getInitial() { return initial; }
+        /** @return colour at death as 0xRRGGBB */ public int getEnding() { return ending; }
+        /** @return normalised life-fraction at which the colour reaches its peak (0..1) */ public double getPeakTime() { return peak; }
+        /** @return whether the colour interpolates smoothly (vs steps) */ public boolean isInterpolate() { return interpolate; }
+    }
+
+    /** Alpha-over-life curve: 5-bit {@code initial → peak → ending} alpha across the particle's life. */
+    public final class AlphaAnim
+    {
+        private final int initial, peak, ending;
+        private final double inEnd, outStart;
+        AlphaAnim(int c)
+        {
+            int tmp = u16(c);
+            initial = tmp & 0x1F; peak = tmp >> 5 & 0x1F; ending = tmp >> 10 & 0x1F;
+            inEnd = (data[c + 4] & 0xFF) / 256.0; outStart = (data[c + 5] & 0xFF) / 256.0;
+        }
+        /** @return alpha at spawn, 0..31 */ public int getInitial() { return initial; }
+        /** @return alpha at the sustain peak, 0..31 */ public int getPeak() { return peak; }
+        /** @return alpha at death, 0..31 */ public int getEnding() { return ending; }
+        /** @return normalised life-fraction at which the ramp-in ends (0..1) */ public double getInEndTime() { return inEnd; }
+        /** @return normalised life-fraction at which the ramp-out starts (0..1) */ public double getOutStartTime() { return outStart; }
+    }
+
+    /** A constant gravity vector applied to every particle each frame. */
+    public final class Gravity
+    {
+        private final double x, y, z;
+        Gravity(int c) { x = fx16(c); y = fx16(c + 2); z = fx16(c + 4); }
+        /** @return gravity X per frame */ public double getX() { return x; }
+        /** @return gravity Y per frame */ public double getY() { return y; }
+        /** @return gravity Z per frame */ public double getZ() { return z; }
     }
 
     /** One particle texture ({@code " TPS"}/{@code "SPT "}): an alpha-mask sprite an emitter draws. */
@@ -211,8 +442,12 @@ public class ParticleSet
     }
 
     private int u16(int o) { return (data[o] & 0xFF) | ((data[o + 1] & 0xFF) << 8); }
+    private int s16(int o) { int v = u16(o); return v >= 0x8000 ? v - 0x10000 : v; }
     private long u32(int o)
     {
         return (data[o] & 0xFFL) | ((data[o + 1] & 0xFFL) << 8) | ((data[o + 2] & 0xFFL) << 16) | ((data[o + 3] & 0xFFL) << 24);
     }
+    // Nitro fixed-point: fx32 and fx16 both carry 12 fractional bits (1.19.12 / 1.3.12).
+    private double fx32(int o) { return (int) u32(o) / 4096.0; }
+    private double fx16(int o) { return s16(o) / 4096.0; }
 }

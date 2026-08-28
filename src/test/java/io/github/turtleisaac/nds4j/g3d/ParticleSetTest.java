@@ -114,6 +114,45 @@ public class ParticleSetTest
     }
 
     @Test
+    @DisplayName("every emitter's fields decode: the walk lands exactly on the texture section")
+    void emitterWalkIsByteExact()
+    {
+        int files = 0, walkedExact = 0, emitters = 0, withAnim = 0, withGravity = 0;
+        for (String romName : new String[]{"Platinum.nds", "HeartGold.nds", "SoulSilver.nds", "Diamond.nds", "Pearl.nds"})
+        {
+            List<byte[]> spa;
+            try { spa = collect(romName); }
+            catch (RuntimeException e) { continue; }
+            for (byte[] file : spa)
+            {
+                ParticleSet set = new ParticleSet(file);
+                files++;
+                // There is no per-emitter size field: if any field width were wrong the walk would desync,
+                // so landing precisely on the texture section proves the whole emitter struct is correct.
+                assertThat(set.getEmitters()).hasSize(set.getEmitterCount());
+                if (set.getEmitterBlockEnd() == set.getTextureSectionOffset())
+                    walkedExact++;
+                for (ParticleSet.Emitter em : set.getEmitters())
+                {
+                    emitters++;
+                    assertThat(em.getShape()).isNotNull();
+                    assertThat(em.getParticleAlpha()).isBetween(0, 31);
+                    assertThat(em.getEmissionInterval()).isGreaterThanOrEqualTo(0);
+                    if (em.getScaleAnim() != null || em.getColorAnim() != null || em.getAlphaAnim() != null) withAnim++;
+                    if (em.getGravity() != null) withGravity++;
+                }
+            }
+        }
+        Assumptions.assumeTrue(files > 0, "no SPA files found in any available ROM");
+        System.out.printf("SPA emitters: %d files, %d/%d walked byte-exact, %d emitters (%d with anim, %d with gravity)%n",
+                files, walkedExact, files, emitters, withAnim, withGravity);
+        // the emitter struct is fully RE'd, so every archive must walk exactly onto its texture section
+        assertThat(walkedExact).as("all emitter blocks decode byte-exactly").isEqualTo(files);
+        assertThat(emitters).isGreaterThan(1000);
+        assertThat(withAnim).as("many emitters carry over-life curves").isGreaterThan(100);
+    }
+
+    @Test
     @DisplayName("a known archive decodes its emitters/textures and sprite sizes")
     void knownArchive()
     {
