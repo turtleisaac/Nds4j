@@ -20,6 +20,7 @@
 package io.github.turtleisaac.nds4j.g3d;
 
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,8 +32,10 @@ import java.util.Map;
  * orthographic 3/4 view, per-face flat shading, a z-buffer and nearest-neighbour texture sampling with
  * a DS-style alpha test. For a rich, viewer-grade export use {@link GltfExporter}.
  * <p>
- * Render a model at its bind pose, or pass the per-mesh positions from {@link Model#pose} to render an
- * animation frame.
+ * Render a model at its bind pose, pass the per-mesh positions from {@link Model#pose} to render a
+ * skeletal frame, or pass a {@link NitroAnimation.Frame} to apply <em>all four</em> animation tracks at
+ * once (skeleton pose, texture-SRT UV scroll, texture-pattern swap and node visibility). The
+ * {@link #renderFrames} helper rasterises a whole animation for an animated GIF (see {@link AnimatedGif}).
  */
 public final class SoftwareRenderer
 {
@@ -52,7 +55,7 @@ public final class SoftwareRenderer
     public static BufferedImage render(Model model, TextureSet textures, int width, int height,
                                        double yawDegrees, double pitchDegrees)
     {
-        List<float[]> positions = new java.util.ArrayList<>();
+        List<float[]> positions = new ArrayList<>();
         for (Model.Mesh mesh : model.getMeshes())
             positions.add(mesh.getPositions());
         return render(model, positions, textures, width, height, yawDegrees, pitchDegrees);
@@ -74,6 +77,75 @@ public final class SoftwareRenderer
     public static BufferedImage render(Model model, List<float[]> positions, TextureSet textures,
                                        int width, int height, double yawDegrees, double pitchDegrees)
     {
+        return render(model, positions, textures, null, width, height, yawDegrees, pitchDegrees);
+    }
+
+    /**
+     * Renders a fully-animated frame: the skeleton pose, texture-SRT UVs, texture-pattern swap and node
+     * visibility from a {@link NitroAnimation.Frame} are all applied.
+     * @param model the model
+     * @param frame the sampled animation frame (see {@link NitroAnimation#sample})
+     * @param textures the textures its materials reference, or null
+     * @param width the image width in pixels
+     * @param height the image height in pixels
+     * @param yawDegrees rotation about the vertical axis, in degrees
+     * @param pitchDegrees rotation about the horizontal axis, in degrees
+     * @return a rendered {@link BufferedImage}
+     */
+    public static BufferedImage render(Model model, NitroAnimation.Frame frame, TextureSet textures,
+                                       int width, int height, double yawDegrees, double pitchDegrees)
+    {
+        return render(model, frame.getPositions(), textures, frame, width, height, yawDegrees, pitchDegrees);
+    }
+
+    /**
+     * Rasterises every frame of an animation, framed on the animation's overall extent so the model does
+     * not jitter as parts move (each frame shares one camera). Feed the result to {@link AnimatedGif}.
+     * @param model the model
+     * @param animation the animation to play
+     * @param textures the textures its materials reference, or null
+     * @param width the image width in pixels
+     * @param height the image height in pixels
+     * @param yawDegrees rotation about the vertical axis, in degrees
+     * @param pitchDegrees rotation about the horizontal axis, in degrees
+     * @return one {@link BufferedImage} per frame
+     */
+    public static List<BufferedImage> renderFrames(Model model, NitroAnimation animation, TextureSet textures,
+                                                   int width, int height, double yawDegrees, double pitchDegrees)
+    {
+        int frames = animation.getFrameCount();
+        List<NitroAnimation.Frame> sampled = new ArrayList<>(frames);
+        for (int f = 0; f < frames; f++)
+            sampled.add(animation.sample(model, f));
+
+        // A single camera for the whole clip: fit to the union of every frame's bounding box.
+        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
+        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        for (NitroAnimation.Frame fr : sampled)
+            accumulateBounds(fr.getPositions(), min, max);
+        Camera cam = frameCamera(min, max, width, height);
+
+        List<BufferedImage> out = new ArrayList<>(frames);
+        for (NitroAnimation.Frame fr : sampled)
+            out.add(rasterizeFrame(model, fr.getPositions(), textures, fr, width, height, yawDegrees, pitchDegrees, cam));
+        return out;
+    }
+
+    private static BufferedImage render(Model model, List<float[]> positions, TextureSet textures,
+                                        NitroAnimation.Frame frame, int width, int height,
+                                        double yawDegrees, double pitchDegrees)
+    {
+        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
+        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        accumulateBounds(positions, min, max);
+        Camera cam = frameCamera(min, max, width, height);
+        return rasterizeFrame(model, positions, textures, frame, width, height, yawDegrees, pitchDegrees, cam);
+    }
+
+    private static BufferedImage rasterizeFrame(Model model, List<float[]> positions, TextureSet textures,
+                                                NitroAnimation.Frame frame, int width, int height,
+                                                double yawDegrees, double pitchDegrees, Camera cam)
+    {
         List<Model.Mesh> meshes = model.getMeshes();
         BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < height; y++)
@@ -83,27 +155,11 @@ public final class SoftwareRenderer
             for (int x = 0; x < width; x++)
                 img.setRGB(x, y, rgb);
         }
-
-        // frame the model: centre on its bounding box, scale to fill ~80% of the image
-        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
-        for (float[] p : positions)
-            for (int i = 0; i < p.length; i += 3)
-                for (int c = 0; c < 3; c++)
-                {
-                    min[c] = Math.min(min[c], p[i + c]);
-                    max[c] = Math.max(max[c], p[i + c]);
-                }
-        if (min[0] > max[0])
+        if (cam == null)
             return img; // nothing to draw
-        float[] centre = {(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2};
-        float extent = Math.max(max[0] - min[0], Math.max(max[1] - min[1], max[2] - min[2]));
-        if (extent <= 0)
-            extent = 1;
 
         double yaw = Math.toRadians(yawDegrees), pitch = Math.toRadians(pitchDegrees);
         double cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-        double scale = Math.min(width, height) * 0.8 / extent;
         double[] light = normalise(0.35, 0.5, 0.78);
 
         double[] zbuf = new double[width * height];
@@ -114,26 +170,39 @@ public final class SoftwareRenderer
         double[][] uvw = new double[3][2];
         for (int m = 0; m < meshes.size(); m++)
         {
+            if (frame != null && !frame.isVisible(m))
+                continue;
             Model.Mesh mesh = meshes.get(m);
             float[] pos = positions.get(m);
             float[] uv = mesh.getTexcoords();
             int[] idx = mesh.getTriangleIndices();
-            BufferedImage tex = textureFor(mesh, textures, texCache);
+            BufferedImage tex = textureFor(mesh, textures, frame, m, texCache);
             int tw = tex != null ? tex.getWidth() : 0, th = tex != null ? tex.getHeight() : 0;
+            float[] uvMat = frame != null ? frame.uvMatrixFor(m) : null;
 
             for (int t = 0; t + 2 < idx.length; t += 3)
             {
                 for (int k = 0; k < 3; k++)
                 {
                     int v = idx[t + k];
-                    double x = pos[v * 3] - centre[0], y = pos[v * 3 + 1] - centre[1], z = pos[v * 3 + 2] - centre[2];
+                    double x = pos[v * 3] - cam.centre[0], y = pos[v * 3 + 1] - cam.centre[1], z = pos[v * 3 + 2] - cam.centre[2];
                     double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
                     double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
-                    c[k][0] = width / 2.0 + x1 * scale;
-                    c[k][1] = height / 2.0 - y2 * scale;
+                    c[k][0] = width / 2.0 + x1 * cam.scale;
+                    c[k][1] = height / 2.0 - y2 * cam.scale;
                     c[k][2] = z2;
-                    uvw[k][0] = uv[v * 2];
-                    uvw[k][1] = uv[v * 2 + 1];
+                    // UVs are carried in normalised [0,1] space so the texture matrix (a scroll/scale/rot
+                    // from NSBTA) can be applied uniformly; the sampler scales back up by the texture size.
+                    double s = tw > 0 ? uv[v * 2] / tw : uv[v * 2];
+                    double tt = th > 0 ? uv[v * 2 + 1] / th : uv[v * 2 + 1];
+                    if (uvMat != null)
+                    {
+                        double ns = uvMat[0] * s + uvMat[2] * tt + uvMat[4];
+                        double nt = uvMat[1] * s + uvMat[3] * tt + uvMat[5];
+                        s = ns; tt = nt;
+                    }
+                    uvw[k][0] = s;
+                    uvw[k][1] = tt;
                 }
                 double shade = shadeFor(c, light);
                 rasterize(img, zbuf, width, height, c, uvw, tex, tw, th, shade);
@@ -142,16 +211,64 @@ public final class SoftwareRenderer
         return img;
     }
 
-    private static BufferedImage textureFor(Model.Mesh mesh, TextureSet textures, Map<String, BufferedImage> cache)
+    // A fitted orthographic camera: the model centre and a scale that fills ~80% of the image.
+    private static final class Camera
     {
-        Model.Material mat = mesh.getMaterial();
-        if (textures == null || mat == null || mat.getTextureName() == null)
+        final float[] centre;
+        final double scale;
+        Camera(float[] centre, double scale) { this.centre = centre; this.scale = scale; }
+    }
+
+    private static void accumulateBounds(List<float[]> positions, float[] min, float[] max)
+    {
+        for (float[] p : positions)
+            for (int i = 0; i < p.length; i += 3)
+                for (int c = 0; c < 3; c++)
+                {
+                    min[c] = Math.min(min[c], p[i + c]);
+                    max[c] = Math.max(max[c], p[i + c]);
+                }
+    }
+
+    private static Camera frameCamera(float[] min, float[] max, int width, int height)
+    {
+        if (min[0] > max[0])
             return null;
-        return cache.computeIfAbsent(mat.getTextureName(), name -> {
-            TextureSet.Texture t = textures.getTexture(name);
+        float[] centre = {(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2};
+        float extent = Math.max(max[0] - min[0], Math.max(max[1] - min[1], max[2] - min[2]));
+        if (extent <= 0)
+            extent = 1;
+        return new Camera(centre, Math.min(width, height) * 0.8 / extent);
+    }
+
+    private static BufferedImage textureFor(Model.Mesh mesh, TextureSet textures, NitroAnimation.Frame frame,
+                                            int meshIndex, Map<String, BufferedImage> cache)
+    {
+        if (textures == null)
+            return null;
+        // A texture-pattern (NSBTP) frame overrides which texture/palette this mesh samples.
+        String[] override = frame != null ? frame.textureOverrideFor(meshIndex) : null;
+        String texName = override != null ? override[0] : null;
+        String pltName = override != null ? override[1] : null;
+        if (texName == null)
+        {
+            Model.Material mat = mesh.getMaterial();
+            if (mat == null || mat.getTextureName() == null)
+                return null;
+            texName = mat.getTextureName();
+            pltName = mat.getPaletteName();
+        }
+        String key = texName + " " + pltName;
+        final String tName = texName, pName = pltName;
+        return cache.computeIfAbsent(key, k -> {
+            TextureSet.Texture t = textures.getTexture(tName);
             if (t == null)
                 return null;
-            try { return textures.getImage(t); }
+            try
+            {
+                TextureSet.Palette p = pName != null ? textures.getPalette(pName) : null;
+                return p != null ? textures.getImage(t, p) : textures.getImage(t);
+            }
             catch (RuntimeException e) { return null; }
         });
     }
@@ -195,8 +312,9 @@ public final class SoftwareRenderer
                 int r, gg, b;
                 if (tex != null)
                 {
-                    double s = w0 * uv[0][0] + w1 * uv[1][0] + w2 * uv[2][0];
-                    double tt = w0 * uv[0][1] + w1 * uv[1][1] + w2 * uv[2][1];
+                    // interpolate normalised UV, then scale to texel space for nearest-neighbour lookup
+                    double s = (w0 * uv[0][0] + w1 * uv[1][0] + w2 * uv[2][0]) * tw;
+                    double tt = (w0 * uv[0][1] + w1 * uv[1][1] + w2 * uv[2][1]) * th;
                     int argb = tex.getRGB(floorMod((int) Math.floor(s), tw), floorMod((int) Math.floor(tt), th));
                     if ((argb >>> 24) < 128)
                         continue; // alpha test

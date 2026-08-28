@@ -799,6 +799,8 @@ public class Model
         public int getTriangleCount() { return triangleIndices.length / 3; }
         /** @return the material bound to this mesh, or null if it draws untextured */
         public Material getMaterial() { return material; }
+        /** @return the skeleton node (bone) index this mesh is drawn under (for visibility animation) */
+        public int getNodeIndex() { return nodeIndex; }
     }
 
     /**

@@ -189,6 +189,19 @@ public class TextureSet extends G3dFile
     }
 
     /**
+     * Gets the palette with the given name, or null.
+     * @param name a palette name
+     * @return a {@link Palette} or null
+     */
+    public Palette getPalette(String name)
+    {
+        for (Palette p : palettes)
+            if (p.name.equals(name))
+                return p;
+        return null;
+    }
+
+    /**
      * Decodes the named texture to an image (choosing a palette automatically).
      * @param name a texture name
      * @return a <code>BufferedImage</code>
