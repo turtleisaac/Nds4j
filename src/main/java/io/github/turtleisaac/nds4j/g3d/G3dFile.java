@@ -149,6 +149,26 @@ public abstract class G3dFile extends GenericNtrFile
     }
 
     /**
+     * Emits the container with block {@code index} replaced by {@code replacement} (which must be the same
+     * length, so the offset table and file size are unchanged). The file's own state is untouched. This is
+     * how a subclass re-emits after rebuilding a block's contents in place (e.g. re-encoding a model's
+     * dictionaries and display lists) while keeping every other block verbatim.
+     * @param index the block to replace
+     * @param replacement the new block bytes (same length as the original)
+     * @return the reassembled file bytes
+     */
+    protected byte[] saveReplacing(int index, byte[] replacement)
+    {
+        if (replacement.length != blocks[index].length)
+            throw new IllegalArgumentException(String.format(
+                    "replacement block length %d != original %d", replacement.length, blocks[index].length));
+        byte[] original = blocks[index];
+        blocks[index] = replacement;
+        try { return save(); }
+        finally { blocks[index] = original; }
+    }
+
+    /**
      * Writes a byte into block {@code i} at {@code offset}, in place. This is the primitive the writer
      * side is built on: because {@link #save()} emits each block verbatim, a same-size edit made through
      * here is reflected exactly, so an <em>unedited</em> file still round-trips byte-for-byte while an

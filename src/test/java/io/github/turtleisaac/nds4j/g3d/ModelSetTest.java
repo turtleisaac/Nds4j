@@ -122,6 +122,23 @@ public class ModelSetTest
     }
 
     @Test
+    @DisplayName("reencodeModels() rebuilds every dictionary and display list byte-for-byte")
+    void reencodeIsByteExact()
+    {
+        // Re-encoding from the decoded structure (dictionaries via G3dDictionary.build, display lists via the
+        // command codec, fixed structs verbatim) must reproduce an unedited model byte-for-byte. This is the
+        // byte-exact re-encode path that survives edits, exercised over every model in the ROM.
+        int models = 0;
+        for (byte[] file : nsbmdFiles)
+        {
+            ModelSet ms = new ModelSet(file);
+            assertThat(ms.reencodeModels()).as("re-encoded model is byte-identical").isEqualTo(file);
+            models++;
+        }
+        assertThat(models).as("the ROM should contain models").isGreaterThan(0);
+    }
+
+    @Test
     @DisplayName("MTX_SCALE (op 0x1B) is consumed without desyncing the display-list stream")
     void mtxScaleModelsStayInSync()
     {

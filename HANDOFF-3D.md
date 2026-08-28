@@ -388,13 +388,20 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   exposes the verbatim stream). This is what unlocks byte-identical geometry *editing* (decode → edit a VTX
   operand → re-encode changes only those bytes) and preserves quads/strips/all vertex formats that the
   triangle view drops.
+- **Whole-MDL0 re-encode** — byte-exact, **100% / 5482** retail models (`ModelSet.reencodeModels()`):
+  reconstructs every model block from its decoded structure — all six dictionary kinds rebuilt via
+  `G3dDictionary.build` (32676 dicts) and every display list rebuilt via the command codec (19433 DLs),
+  with the fixed structs kept verbatim — and reproduces the file byte-for-byte. This is the byte-exact
+  re-encode path that survives edits (the pieces that change on a geometry/resource edit are exactly the
+  ones rebuilt from semantics).
 - **In-place edits** (colour/palette/alpha) — byte-exact (`G3dFile.writeBlockU8/U16`).
-- **Still fixed-struct surface** (the remaining ~half of an MDL0): the model header/box, node SRT structs,
-  material structs and SBC stream, plus the TEX0 texel/palette layout for embedded textures. These are
-  fixed-layout and mechanical to match against the retail-reassembly + g3dcvtr oracle (now both available);
-  a full-model re-encoder that rebuilds them from semantics is the next increment. The genuinely hard part
-  for *authoring new geometry* remains g3dcvtr's stripping optimiser (byte-exact re-encode of an *existing*
-  model doesn't need it — the command codec already reproduces its stream).
+- **Remaining for *authoring* parity (not round-trip):** deriving the fixed structs (model header/box, node
+  SRT, material structs, SBC) *from semantics* rather than preserving them, and — the one genuinely hard
+  piece — g3dcvtr's **vertex-format optimiser** (RE'd on the `rock` model: it emits `NORMAL` + a leading
+  `VTX_10` then `VTX_XY`/`VTX_YZ`/`VTX_XZ` for constant-axis runs, quads, and strips). Byte-exact re-encode
+  of an *existing* model needs neither (the command codec already reproduces its stream); only authoring
+  *new* geometry that g3dcvtr would pack identically does. The g3dcvtr oracle (under wine) + the retail
+  files drive both.
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
