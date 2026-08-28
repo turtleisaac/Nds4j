@@ -278,6 +278,127 @@ public class TextureSet extends G3dFile
         return img;
     }
 
+    /**
+     * Gets the raw on-disk texel bytes of a texture &mdash; the data an encoder must reproduce.
+     * @param texture a texture from this set
+     * @return the texel bytes, or null for a format whose length is not fixed here (compressed 4x4)
+     */
+    public byte[] getRawTextureData(Texture texture)
+    {
+        int w = texture.getWidth(), h = texture.getHeight();
+        int bytes;
+        switch (texture.getFormat())
+        {
+            case FORMAT_PLTT4:   bytes = w * h / 4; break;
+            case FORMAT_PLTT16:  bytes = w * h / 2; break;
+            case FORMAT_PLTT256: bytes = w * h; break;
+            case FORMAT_A3I5: case FORMAT_A5I3: bytes = w * h; break;
+            case FORMAT_DIRECT:  bytes = w * h * 2; break;
+            default: return null;
+        }
+        int base = texDataOfs + texture.getDataOffset();
+        if (base < 0 || base + bytes > tex0.length)
+            return null;
+        return java.util.Arrays.copyOfRange(tex0, base, base + bytes);
+    }
+
+    /**
+     * Overwrites a texture's raw texel bytes in the live {@code TEX0} block &mdash; the writer path for
+     * replacing a texture's pixels (e.g. with {@link #encodeTextureData} output). Same-size, in place, so
+     * an unedited file still round-trips byte-for-byte and the owning container's {@code save()} emits the
+     * edited texture.
+     * @param texture the texture to overwrite
+     * @param data the new texel bytes (must match {@link #getRawTextureData}'s length)
+     * @return true if written, false if the length is wrong or the format is unsupported
+     */
+    public boolean overwriteRawTextureData(Texture texture, byte[] data)
+    {
+        byte[] cur = getRawTextureData(texture);
+        if (cur == null || cur.length != data.length)
+            return false;
+        int base = texDataOfs + texture.getDataOffset();
+        System.arraycopy(data, 0, tex0, base, data.length);
+        return true;
+    }
+
+    /**
+     * Encodes an image back into a texture's on-disk texel bytes &mdash; the writer-side counterpart to
+     * {@link #getImage(Texture, Palette)}, for source&rarr;NSB* conversion. Paletted formats map each
+     * pixel to its palette index (colour 0 handles transparency); direct colour packs {@code BGR555}.
+     * Re-encoding a decoded texture reproduces its bytes exactly when the palette colours are distinct.
+     * @param img the image (its size must match the texture)
+     * @param texture the target texture (for format/size)
+     * @param palette the palette to index against (ignored for direct colour)
+     * @return the encoded texel bytes, or null for an unsupported format (A3I5/A5I3/compressed 4x4)
+     */
+    /**
+     * Encodes an image into texel bytes, choosing the same palette {@link #getImage(Texture)} decodes
+     * against.
+     * @param img the image
+     * @param texture the target texture
+     * @return the encoded texel bytes, or null for an unsupported format
+     */
+    public byte[] encodeTextureData(BufferedImage img, Texture texture)
+    {
+        return encodeTextureData(img, texture, choosePalette(texture));
+    }
+
+    public byte[] encodeTextureData(BufferedImage img, Texture texture, Palette palette)
+    {
+        switch (texture.getFormat())
+        {
+            case FORMAT_PLTT4:   return encodePaletted(img, texture, palette, 2);
+            case FORMAT_PLTT16:  return encodePaletted(img, texture, palette, 4);
+            case FORMAT_PLTT256: return encodePaletted(img, texture, palette, 8);
+            case FORMAT_DIRECT:  return encodeDirect(img);
+            default: return null;
+        }
+    }
+
+    private byte[] encodePaletted(BufferedImage img, Texture texture, Palette palette, int bpp)
+    {
+        int w = img.getWidth(), h = img.getHeight();
+        boolean color0Transparent = texture.isColor0Transparent();
+        int colors = 1 << bpp;
+        // reverse map colour -> lowest index (skip index 0 when it means "transparent")
+        java.util.Map<Integer, Integer> byColor = new java.util.HashMap<>();
+        for (int i = colors - 1; i >= (color0Transparent ? 1 : 0); i--)
+            byColor.put(colorValue(palette, i) & 0xFFFFFF, i);
+
+        int perByte = 8 / bpp;
+        byte[] out = new byte[w * h / perByte];
+        for (int p = 0; p < w * h; p++)
+        {
+            int argb = img.getRGB(p % w, p / w);
+            int index;
+            if (color0Transparent && (argb >>> 24) < 128)
+                index = 0;
+            else
+                index = byColor.getOrDefault(argb & 0xFFFFFF, 0);
+            out[p / perByte] |= (index & ((1 << bpp) - 1)) << ((p % perByte) * bpp);
+        }
+        return out;
+    }
+
+    private byte[] encodeDirect(BufferedImage img)
+    {
+        int w = img.getWidth(), h = img.getHeight();
+        byte[] out = new byte[w * h * 2];
+        for (int p = 0; p < w * h; p++)
+        {
+            int argb = img.getRGB(p % w, p / w);
+            int r = ((argb >> 16) & 0xFF) * 31 / 255;
+            int g = ((argb >> 8) & 0xFF) * 31 / 255;
+            int b = (argb & 0xFF) * 31 / 255;
+            int v = r | (g << 5) | (b << 10);
+            if ((argb >>> 24) >= 128)
+                v |= 0x8000; // alpha/opaque bit
+            out[p * 2] = (byte) v;
+            out[p * 2 + 1] = (byte) (v >> 8);
+        }
+        return out;
+    }
+
     private void decodePalette(BufferedImage img, Texture texture, Palette palette, int bitsPerPixel)
     {
         int w = img.getWidth(), h = img.getHeight();
