@@ -155,6 +155,50 @@ public class ObjImportTest
     }
 
     @Test
+    @DisplayName("a multi-part model authors N shapes, each bound to its own material and texture")
+    void authorsMultiMaterialModel()
+    {
+        // Three quads at different heights, each with a distinct solid texture.
+        java.util.List<ModelBuilder.Part> parts = new java.util.ArrayList<>();
+        int[] colors = {0xF80000, 0x00F800, 0x0000F8};
+        for (int i = 0; i < 3; i++)
+        {
+            float y0 = -3 + i * 2, y1 = y0 + 2;
+            float[] pos = {-2, y0, 0,  2, y0, 0,  2, y1, 0,  -2, y1, 0};
+            int[] tris = {0, 1, 2, 0, 2, 3};
+            BufferedImage tex = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) tex.setRGB(x, y, 0xFF000000 | colors[i]);
+            float[] uv = {0, 8,  8, 8,  8, 0,  0, 0};
+            parts.add(new ModelBuilder.Part("p" + i, pos, uv, tris, tex));
+        }
+
+        byte[] nsbmd = ModelBuilder.buildMultiTextured("bands", parts);
+        ModelSet ms = new ModelSet(nsbmd);
+        Model m = ms.getModels().get(0);
+
+        assertThat(m.getMeshes()).hasSize(3);
+        assertThat(m.getMaterials()).hasSize(3);
+        assertThat(ms.getEmbeddedTextures().getTextures()).hasSize(3);
+        // the whole geometry decodes (vertex-count oracle over all three shapes)
+        assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
+        assertThat(m.getVertexCount()).isEqualTo(3 * 6); // 3 quads * 2 tris * 3 verts
+
+        // each shape binds its own material -> its own texture, and each texture is the authored solid colour
+        for (int i = 0; i < 3; i++)
+        {
+            Model.Mesh mesh = m.getMeshes().get(i);
+            assertThat(mesh.getMaterial()).as("mesh %d has a material", i).isNotNull();
+            String texName = mesh.getMaterial().getTextureName();
+            assertThat(texName).isNotNull();
+            assertThat(ms.getEmbeddedTextures().getImage(texName).getRGB(0, 0) & 0xFFFFFF)
+                    .as("shape %s samples its own texture colour", mesh.getName())
+                    .isEqualTo(colors[Integer.parseInt(mesh.getName().substring(mesh.getName().length() - 1))]);
+        }
+
+        assertThat(ms.save()).as("authored multi-material NSBMD round-trips its own bytes").isEqualTo(nsbmd);
+    }
+
+    @Test
     @DisplayName("ModelBuilder picks a posScale so large geometry survives the fixed-point range")
     void largeGeometryGetsPosScale()
     {
