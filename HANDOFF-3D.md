@@ -25,8 +25,12 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > particle sprites decoded). **225 tests green — the F1–F4 roadmap AND the entire §9 breadth list are complete.**
 > The §9 follow-ups are now delivered too: **SPA emitter decode + particle previewer** (`ParticleSet.Emitter`,
 > `ParticleRenderer`), an **OBJ import front-end** with **textured and multi-shape/multi-material authoring**
-> (`ObjImporter`, `ModelBuilder`), an **animation writer** (`AnimationBuilder`, NSBTA), **MTX_SCALE** resolved
-> as a non-gap, a **posed billboard** pivot, and a general **Nitro LZ10/LZ11 codec** (`NitroLz`). See §4 for the
+> (`ObjImporter`, `ModelBuilder`), a native **`.imd`→NSB\* translator byte-identical to g3dcvtr** (`ImdImporter`,
+> covering **all three g3dcvtr modes** `-emdl`/`-eboth`/`-etex`, **multi-node trees with full node transforms**,
+> multi-material and multi-shape; SBC matrix-stack allocator and node local matrices validated byte-for-byte,
+> exposed as an enriched class-based API into the flagship `ModelSet`/`TextureSet`), an **animation writer**
+> (`AnimationBuilder`, NSBTA), **MTX_SCALE** resolved as a non-gap, a **posed billboard** pivot, and a general
+> **Nitro LZ10/LZ11 codec** (`NitroLz`). See §4 for the
 > #26 fix, §6 for the gold-standard references, §9a for the delivered breadth list, and §10 for the roadmap.
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
@@ -72,6 +76,7 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `ParticleSet` (SPA/SPL) | " APS" particle archive → **fully-decoded emitters** (`Emitter`: spawn/velocity/life/colour+scale+alpha curves/fields) + " TPS" sprite textures; byte-exact | done |
 | `ParticleRenderer` | headless pure-JVM previewer that **plays** an SPA move effect (simulate emitters → additive sprite composite → deterministic clip) | done |
 | `ObjImporter` | Wavefront OBJ (v/vt/f, polygons, negative indices) → flat vertex/uv/triangle arrays | done |
+| `ImdImporter` | native **`.imd`→NSB\*** translator, **byte-identical to g3dcvtr** (`-emdl`/`-eboth`/`-etex`); multi-node + full node transforms + multi-material/shape; enriched class API → `ModelSet`/`TextureSet` | done |
 | `ModelBuilder` | author NSBMD from arrays: untextured / textured (embedded TEX0) / **multi-shape multi-material**; auto posScale + header box | done |
 | `AnimationBuilder` | author **NSBTA** (texture-SRT) from scratch (constant/keyframe channels) — the animation-writer recipe | done |
 | `NitroLz` (framework) | general **Nitro LZ10/LZ11** codec: decompress + compress, round-trip-exact; feeds the 3D pipeline (compressed NSBMD) | done |
@@ -407,53 +412,65 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   `G3dDictionary`, `assembleContainer`). This is the native g3dcvtr replacement PDSMS needs; the genuinely
   hard optimiser is *not needed* because the `.imd` already contains its output. All fixtures + expected
   bytes are checked in (`src/test/resources/imd/`, CI-safe — no wine).
-  - **Byte-exact coverage (single node):** single- and **multi-material / multi-shape** textured models —
-    billboard/non-billboard, hardware-lit/vertex-coloured — model-only (`toNsbmd`) *and* with the texture
-    embedded (`toNsbmdWithTextures`, the `-eboth` TEX0). Material state is **derived** from the `.imd`
+  - **All three g3dcvtr output modes are byte-exact:** `-emdl` (`toNsbmd`), `-eboth` (`toNsbmdWithTextures`,
+    embedded TEX0) *and* `-etex` (`toNsbtx`, a standalone NSBTX = BTX0-wrapped TEX0). Coverage: **multi-node
+    trees with full node local transforms**, **multi-material / multi-shape** textured models —
+    billboard/non-billboard, hardware-lit/vertex-coloured. Material state is **derived** from the `.imd`
     (`polygon_attr` = lights | mode<<4 | face-cull | alpha<<16; `teximage_param` wrap/flip from `tex_tiling`);
     `polygon_attr_mask`=`0x3f1ff8ff` and material `misc`=`0x1fce` are constant (verified across variants). The
     shape set is N structs + N DLs; the material set groups materials by shared texture/palette (dict entries
-    ordered by name), with the SBC emitting one `MAT`/`SHP` pair per node display and the `NODEDESC` **store**
-    flag + `firstUnusedMtxStackId=1` when >1 shape. Fixtures: `rock`/`book`/`pole` (single), `two`/`twotex`
-    (multi-material/shape), `v_flip`/`v_decal` (material state), `*_both` (embedded TEX0). The `.imd` bitmap
-    is 4-hex-digit big-endian words stored little-endian (`"1100"`→`00 11`); palette is `.imd` hex → LE BGR555.
-  - **Multi-*node* — RE'd, not yet implemented (the remaining frontier).** g3dcvtr's `modeltree` rejects
-    naive hand-crafted node hierarchies (`Internal Error`); a **joint root (`kind="null"`) + mesh child** is
-    accepted (see `/tmp` probes `jn`=2-node, `jn3`=3-node during this work). Identity node structs are the
-    same `07 f8 00 10`. The multi-node **SBC is a tree walk with matrix-stack store/restore**, e.g. `jn`:
-    `NODEDESC(root, store slot0) · NODE(mesh) · POSSCALE·MAT·SHP·POSSCALE|end · NODEDESC(mesh,parent=root) ·
-    RET`; siblings use `NODEDESC|0x40` (**restore** slot) — `jn3`: `… NODEDESC(mA,root) · NODEDESC+restore(mB,
-    root) · RET`. **Blockers for a future taker:** (a) crafting valid multi-*mesh* `.imd` inputs is hard
-    without real Maya samples — g3dcvtr silently draws only some nodes when the `node`/`display`/`matrix_array`
-    binding is off; (b) the general case needs g3dcvtr's node-tree→SBC compiler (stack-slot allocation +
-    store/restore ordering) and the non-identity node-transform encoding (T/R/S incl. pivot-compressed
-    rotations — the inverse of `Model.parseNodeLocals`). The single-node section encoders already generalize
-    list-wise; only the node set + SBC tree-walk are new.
-  - **Ghidra decompilation of g3dcvtr — multi-node is a matrix-stack-allocation compiler (now readable).**
-    Ran `analyzeHeadless` on `g3dcvtr.exe` (asserts embed `.\src\imd\modeltree.cpp` file/line, so functions
-    are locatable). The SBC generator is one big function (in this build `FUN_0041e030`) that walks the node
-    array and, per node, emits `NODEDESC`/`NODE`/`MAT`/`SHP`/`POSSCALE`/`RET` while managing a **matrix
-    stack**. Behavioural facts to port from (RE'd behaviour — do NOT copy Nintendo's code):
-    - emission primitives: an opcode maker (`6`=NODEDESC, `0x26`=NODEDESC|store, `0x46`=NODEDESC|restore) +
-      a byte writer; a NODEDESC writes `opcode, nodeId, parentId, optByte`, then a stack-slot byte when
-      store/restore is set. The store slot comes from a node field; the restore path reads a sibling's saved slot.
-    - the `modeltree.cpp:281`/`406` asserts are a **stack-lookup** (`FUN_00422910`) that must find the node's
-      parent on the stack — they fire (`Internal Error`) when the hand-crafted `node`/`display`/`matrix_array`
-      binding doesn't put the parent where the walk expects it. That is why naive multi-mesh `.imd`s were
-      rejected or drew only some nodes.
-    - a node is *drawn* (gets `NODE`+`MAT`+`SHP`) only when its first field == 1 (a mesh with a display bound to
-      its matrix); joint (`kind="null"`) nodes only get a `NODEDESC`. The joint-root+one-mesh `jn` case works;
-      multi-*mesh* needs the stack allocation reproduced so each mesh restores the right parent matrix.
-    **Port plan:** (1) reproduce the node-array walk + store/restore stack-slot allocation (push a node's matrix
-    when a later sibling/child needs it, restore before the sibling draw); (2) emit NODEDESC/NODE/MAT/SHP/
-    POSSCALE accordingly; (3) add the non-identity node-transform encoder (invert `Model.parseNodeLocals`);
-    (4) validate against g3dcvtr on hierarchies you *can* generate (start from `jn`, grow the tree). The
-    decompilation stays out-of-repo (it's Nintendo's) — the algorithm is the reference, none of the code is
-    committed. A discrete, sizeable task, now de-risked by having the algorithm in hand.
+    ordered by name). Fixtures: `rock`/`book`/`pole` (single), `two`/`twotex` (multi-material/shape),
+    `v_flip`/`v_decal` (material state), `star` (**3-node tree**), `xform` (**node translation + non-uniform
+    scale + rotation**), `rock.nsbtx` (**-etex**), `*_both` (embedded TEX0). The `.imd` bitmap is 4-hex-digit
+    big-endian words stored little-endian (`"1100"`→`00 11`); palette is `.imd` hex → LE BGR555.
+  - **Node local transforms — implemented byte-exact (`encodeNodeStruct`, inverse of `Model.parseNodeLocals`).**
+    The node struct is `flags(u16) · _00(fx16 = rotation[0][0]) · [translation 3×fx32] · [rotation] · [scale
+    3×fx32 + inverse 3×fx32]`; flags bit0/1/2 omit an identity translation/rotation/scale, bit3 selects pivot
+    compression. Rotation is stored **transposed**, `Mt = (Rz·Ry·Rx)ᵀ` from the Euler degrees (the convention,
+    brute-forced against g3dcvtr and confirmed). A **principal-axis** matrix (first row-major cell that is ±1
+    with a zero row+column) is **pivot-compressed** to two minor values `av,bv` with the pivot cell in flag bits
+    4–7 and sign flags `0x100`(pivot −1)/`0x200`(negate c)/`0x400`(negate d); everything else writes the full
+    3×3 remainder as 8×fx16. Validated byte-for-byte vs `g3dcvtr -emdl` over translation, non-uniform scale,
+    ±angles about X/Y/Z (incl. the 90° multi-pivot edge), arbitrary XYZ rotations, and combined T+S+R (19 samples).
+  - **Enriched class-based API (the flagship surface).** `ImdImporter.fromXml(String)`/`fromFile(File)` →
+    `named(...)` → `getModelName`/`hasTextures`/`getNodeNames`/`getNodeCount`/`getMaterialNames`/`getShapeCount`
+    accessors over the parsed model, then `toNsbmd()`/`toNsbmdWithTextures()`/`toNsbtx()` for bytes or
+    **`toModelSet()`/`toTextureSet()`** to land directly on the flagship `ModelSet`/`TextureSet`. Those two are
+    also reachable as **`ModelSet.fromImd(xml,name)`/`ModelSet.fromImd(file)`** and **`TextureSet.fromImd(...)`**,
+    so `.imd` authoring is a first-class citizen of the model API. The old `static` `toNsbmd`/… shortcuts remain.
+  - **Multi-*node* — implemented (`generateSbc` + generalized node set), validated against retail.** The SBC
+    render stream is a general pre-order walk of the `<node_array>` with a **matrix-stack store/restore
+    allocator** and a **material stack**, matching g3dcvtr byte-for-byte:
+    - a node whose matrix is reused (has children, or has >1 of its own draws) is `NODEDESC`-**stored** to the
+      lowest free stack slot (`0x26`); a node whose parent's matrix is no longer current **restores** it
+      (`0x46`, reading the parent's saved slot). Slots free when the owner's last child is processed;
+      `firstUnusedMtxStackId` = the stack high-water mark.
+    - each drawing node emits `NODE · [BB/BBY] · POSSCALE · {MAT[,SHP]}* · POSSCALE|end` (POSSCALE only when
+      the model is **magnified**, i.e. `pos_scale ≠ 0`); a **material used by more than one draw** is stored on
+      first use (`0x24`) / restored on reuse (`0x44`).
+    - **Validation:** a probe decoded every retail SBC into its node tree, regenerated it with this exact
+      algorithm and compared byte-for-byte: **single-node 2806/2806 (100%), two-node 45/45 (100%), overall
+      ~94.5%** across Platinum+HeartGold+Diamond. The port is covered by the `star` fixture (a null root + two
+      mesh children → the canonical store/restore/POSSCALE pattern, asserted byte-exact) plus the single-node
+      fixtures (regression). **Residual ~5.5%** are deep skeletal chains (a material-stack interaction on
+      long same-material chains) and one matrix-slot-numbering edge in store+restore nodes. (Node **local
+      transforms** — translation/scale/rotation incl. pivot-compressed rotations — are now encoded byte-exact;
+      see the node-transform bullet above.)
+    - The algorithm was RE'd with **Ghidra** (`analyzeHeadless` on `g3dcvtr.exe`; asserts embed
+      `.\src\imd\modeltree.cpp` file/line) *plus* the retail SBC corpus as oracle — the decompilation stays
+      out-of-repo (Nintendo's); only the RE'd behaviour is reproduced. Note g3dcvtr has a degenerate
+      micro-optimization for a **null-root + single identity-child** (`jn` probe: it defers the child's
+      `NODEDESC` past the draw) that no retail model uses; `generateSbc` emits the standard retail-style stream
+      there instead (valid and renderable, but not byte-equal to that one g3dcvtr edge path).
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
-*writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
-already decompresses them). Nothing here blocks PDSMS dropping the g3dcvtr binary.
+*writers* (the `AnimationBuilder` recipe generalizes; these are also g3dcvtr's `.ica`/`.itp`/`.iva`/`.ima`
+intermediate → NSB\* animation converters, i.e. the animation half of g3dcvtr — the *model* half `.imd`→NSBMD/
+NSBTX is done); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz` already decompresses them). Two g3dcvtr
+*variant flags* on the model path are also unported (both non-default, so retail output is unaffected and
+`ImdImporter` matches it): **`-s`** "store all matrices on the stack" (a non-optimal SBC that forces every node
+onto the matrix stack) and **`-texsrt`** "always output the texture-matrix data field" (emit a material texture
+SRT slot even when identity). Nothing here blocks PDSMS dropping the g3dcvtr binary for model conversion.
 
 ### 9b-note. Editable model source for a Gen IV decomp — a `model.json` direction (NOT a priority; parked idea)
 

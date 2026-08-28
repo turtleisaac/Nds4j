@@ -22,7 +22,10 @@ package io.github.turtleisaac.nds4j.g3d;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -36,48 +39,139 @@ import java.util.regex.Pattern;
  * strip/quad grouping, the node transforms and material state), translating it faithfully reproduces
  * {@code g3dcvtr}'s output <em>exactly</em> &mdash; without reimplementing the exporter's optimiser.
  * <p>
- * Verified byte-identical to {@code g3dcvtr -emdl} on its own sample models. Current coverage is the
- * single-node / single-material / single-shape textured model (billboard or not, hardware-lit or
- * vertex-coloured); multi-node/material/shape models extend the same section encoders. The geometry,
- * resource dictionaries and container are produced by the byte-exact primitives ({@link DisplayList},
- * {@link G3dDictionary}, {@link G3dFile}); this class adds the {@code .imd} parse and the MDL0 struct
- * encoders (model header/box, node, SBC render stream, material).
+ * Verified byte-identical to g3dcvtr across all three of its output modes &mdash; {@code -emdl} ({@link #toNsbmd()}),
+ * {@code -eboth} ({@link #toNsbmdWithTextures()}) and {@code -etex} ({@link #toNsbtx()}). Coverage: multi-node
+ * trees with full node local transforms (translation, non-uniform scale, and rotation &mdash; pivot-compressed
+ * for principal axes, full 3&times;3 otherwise), multiple materials (grouped by shared texture/palette) and
+ * multiple shapes, textured or vertex-coloured, billboard or not. The SBC render stream is a general node-tree
+ * walk with a matrix-stack store/restore allocator and a material stack, validated byte-for-byte against every
+ * retail single- and two-node model and the great majority of deeper trees (the residual are complex skeletal
+ * chains and a matrix-slot-numbering edge). The geometry, resource dictionaries and container are produced by
+ * the byte-exact primitives ({@link DisplayList}, {@link G3dDictionary}, {@link G3dFile}); this class adds the
+ * {@code .imd} parse and the MDL0/TEX0 struct encoders (model header/box, node set with local matrices, SBC
+ * render stream, material set, shape set, texture/palette).
+ * <p>
+ * Use the fluent, class-based API &mdash; {@link #fromXml(String)}/{@link #fromFile(File)}, {@link #named(String)},
+ * the {@code getX} accessors over the parsed model, and {@link #toModelSet()}/{@link #toTextureSet()} to land
+ * directly on the flagship {@link ModelSet}/{@link TextureSet} (also reachable via {@link ModelSet#fromImd} and
+ * {@link TextureSet#fromImd}). The {@code static} {@code toNsbmd}/{@code toNsbmdWithTextures}/{@code toNsbtx}
+ * shortcuts remain for one-liners.
  */
 public final class ImdImporter
 {
     private final String imd;
 
+    private String modelName = "model";
+
     private ImdImporter(String imd) { this.imd = imd; }
 
-    /**
-     * Translates {@code .imd} source into a model-only NSBMD (the {@code g3dcvtr -emdl} equivalent).
-     * @param imdXml the full contents of an {@code .imd} file
-     * @param modelName the model's name (g3dcvtr uses the source file's base name)
-     * @return the NSBMD file bytes, byte-identical to g3dcvtr for the supported model class
-     */
-    public static byte[] toNsbmd(String imdXml, String modelName)
+    // === factories =====================================================================================
+
+    /** Opens {@code .imd} source for conversion. Set the model name with {@link #named(String)} (default {@code "model"}). */
+    public static ImdImporter fromXml(String imdXml)
     {
-        return new ImdImporter(imdXml).build(modelName);
+        return new ImdImporter(imdXml);
     }
 
-    /**
-     * Translates {@code .imd} source into an NSBMD with its texture embedded as a {@code TEX0} block (the
-     * {@code g3dcvtr -eboth} equivalent) &mdash; the MDL0 block is identical to {@link #toNsbmd}, with the
-     * texture/palette from the {@code .imd}'s {@code tex_image}/{@code tex_palette} appended.
-     * @param imdXml the full contents of an {@code .imd} file
-     * @param modelName the model's name
-     * @return the NSBMD file bytes (MDL0 + TEX0), byte-identical to g3dcvtr for the supported model class
-     */
-    public static byte[] toNsbmdWithTextures(String imdXml, String modelName)
+    /** Opens an {@code .imd} file for conversion, taking the model name from the file's base name (as g3dcvtr does). */
+    public static ImdImporter fromFile(File file) throws IOException
     {
-        ImdImporter imp = new ImdImporter(imdXml);
-        byte[] mdl0 = imp.buildMdl0(modelName);
-        return G3dFile.assembleContainer("BMD0", 2, mdl0, imp.buildTex0());
+        String xml = new String(Files.readAllBytes(file.toPath()), StandardCharsets.ISO_8859_1);
+        String base = file.getName();
+        int dot = base.lastIndexOf('.');
+        return new ImdImporter(xml).named(dot < 0 ? base : base.substring(0, dot));
     }
 
-    private byte[] build(String modelName)
+    /** Sets the model name g3dcvtr would take from the source file's base name; returns {@code this} for chaining. */
+    public ImdImporter named(String modelName)
+    {
+        this.modelName = modelName;
+        return this;
+    }
+
+    // === enriched accessors (the parsed .imd structure) ================================================
+
+    /** The model name used when authoring the NSBMD. */
+    public String getModelName() { return modelName; }
+
+    /** Whether the {@code .imd} carries a texture ({@code tex_image}) — i.e. whether {@link #toNsbtx()} / embedding applies. */
+    public boolean hasTextures() { return Pattern.compile("<tex_image[\\s>]").matcher(imd).find(); }
+
+    /** The node names, in index order (the {@code <node_array>}). */
+    public List<String> getNodeNames()
+    {
+        List<String> names = new ArrayList<>();
+        for (Node nd : parseNodes()) names.add(nd.name);
+        return names;
+    }
+
+    /** The number of nodes in the model tree. */
+    public int getNodeCount() { return parseNodes().size(); }
+
+    /** The material names, in declaration order (the {@code <material_array>}). */
+    public List<String> getMaterialNames()
+    {
+        List<String> names = new ArrayList<>();
+        for (String el : blocks("material")) names.add(a(el, "name"));
+        return names;
+    }
+
+    /** The number of shapes (polygons) in the model. */
+    public int getShapeCount() { return blocks("polygon").size(); }
+
+    // === conversions (the g3dcvtr output modes) =======================================================
+
+    /** Authors a model-only NSBMD (the {@code g3dcvtr -emdl} equivalent), byte-identical to g3dcvtr. */
+    public byte[] toNsbmd()
     {
         return G3dFile.assembleContainer("BMD0", 2, buildMdl0(modelName));
+    }
+
+    /**
+     * Authors an NSBMD with the texture embedded as a {@code TEX0} block (the {@code g3dcvtr -eboth} equivalent):
+     * the MDL0 block is identical to {@link #toNsbmd()}, with the {@code tex_image}/{@code tex_palette} appended.
+     */
+    public byte[] toNsbmdWithTextures()
+    {
+        return G3dFile.assembleContainer("BMD0", 2, buildMdl0(modelName), buildTex0());
+    }
+
+    /** Authors a texture-only NSBTX (the {@code g3dcvtr -etex} equivalent) from the {@code .imd}'s texture/palette. */
+    public byte[] toNsbtx()
+    {
+        return G3dFile.assembleContainer("BTX0", 1, buildTex0());
+    }
+
+    /** Authors the model and returns it as a {@link ModelSet} (textures embedded when the {@code .imd} has them). */
+    public ModelSet toModelSet()
+    {
+        return new ModelSet(hasTextures() ? toNsbmdWithTextures() : toNsbmd());
+    }
+
+    /** Authors the texture archive and returns it as a {@link TextureSet}. */
+    public TextureSet toTextureSet()
+    {
+        return new TextureSet(toNsbtx());
+    }
+
+    // === back-compat static shortcuts =================================================================
+
+    /** Model-only NSBMD (the {@code g3dcvtr -emdl} equivalent). Shortcut for {@code fromXml(imdXml).named(modelName).toNsbmd()}. */
+    public static byte[] toNsbmd(String imdXml, String modelName)
+    {
+        return fromXml(imdXml).named(modelName).toNsbmd();
+    }
+
+    /** NSBMD with embedded TEX0 (the {@code g3dcvtr -eboth} equivalent). Shortcut for {@code fromXml(imdXml).named(modelName).toNsbmdWithTextures()}. */
+    public static byte[] toNsbmdWithTextures(String imdXml, String modelName)
+    {
+        return fromXml(imdXml).named(modelName).toNsbmdWithTextures();
+    }
+
+    /** Texture-only NSBTX (the {@code g3dcvtr -etex} equivalent). Shortcut for {@code fromXml(imdXml).toNsbtx()}. */
+    public static byte[] toNsbtx(String imdXml)
+    {
+        return fromXml(imdXml).toNsbtx();
     }
 
     private byte[] buildMdl0(String modelName)
@@ -90,16 +184,17 @@ public final class ImdImporter
         int numPoly = intAttr("output_info", "polygon_size");
         int numTri = intAttr("output_info", "triangle_size");
         int numQuad = intAttr("output_info", "quad_size");
-        String nodeName = attr("node", "name");
+        boolean magnified = posScale != 1;
 
+        List<Node> nodes = parseNodes();                    // the full <node_array>, in index order
         List<String> materials = blocks("material");        // each <material .../>
         List<String> polygons = blocks("polygon");          // each <polygon ...>...</polygon>
-        int[][] displays = parseDisplays();                 // {materialIdx, polygonIdx} per node display
 
         List<byte[]> dls = new ArrayList<>();
         for (String poly : polygons) dls.add(buildDisplayList(poly));
-        byte[] nodeSet = buildNodeSet(nodeName);
-        byte[] sbc = buildSbc(displays);
+        int[] firstUnused = new int[1];
+        byte[] nodeSet = buildNodeSet(nodes);
+        byte[] sbc = generateSbc(nodes, magnified, firstUnused);
         byte[] matSet = buildMaterialSet(materials);
         byte[] shapeSet = buildShapeSet(polygons, dls);
 
@@ -115,10 +210,10 @@ public final class ImdImporter
         u32(model, 12, ofsShp);
         u32(model, 16, modelLen);            // ofsEndOrEnvelope: past the last section (no envelope)
         int info = 0x14;
-        model[info + 3] = 1;                 // numNode
-        model[info + 4] = (byte) materials.size(); // matCount
-        model[info + 5] = (byte) polygons.size();  // shapeCount
-        model[info + 6] = (byte) (displays.length > 1 ? 1 : 0); // firstUnusedMtxStackId (NODEDESC store slot)
+        model[info + 3] = (byte) nodes.size();      // numNode
+        model[info + 4] = (byte) materials.size();  // matCount
+        model[info + 5] = (byte) polygons.size();   // shapeCount
+        model[info + 6] = (byte) firstUnused[0];    // firstUnusedMtxStackId (matrix-stack high-water)
         u32(model, info + 8, (long) posScale * 4096);       // posScale (fx32)
         u32(model, info + 0xC, 4096L / posScale);           // inverse posScale
         u16(model, info + 0x10, numVtx);
@@ -269,34 +364,203 @@ public final class ImdImporter
     }
 
     // --- node set: node dictionary + one identity node local matrix (flags 0xf807, rotation[0][0] = 1) ---
-    private byte[] buildNodeSet(String nodeName)
+    private byte[] buildNodeSet(List<Node> nodes)
     {
-        byte[] dict = serialize(G3dDictionary.build(List.of(nodeName), List.of(rec4(40)), 4));
-        byte[] nodeStruct = {0x07, (byte) 0xf8, 0x00, 0x10}; // identity T/R/S; rot00 = 1.0
-        return concat(dict, nodeStruct);
+        int n = nodes.size();
+        List<String> names = new ArrayList<>();
+        for (Node nd : nodes) names.add(nd.name);
+        // each node's local matrix is encoded to a variable-length struct (identity is 4 bytes; a translated/
+        // scaled/rotated node is longer). The structs sit contiguously right after the dict; each dict record
+        // is the byte offset (from the node-set start) to its struct. Measure the dict, then point at the structs.
+        byte[][] structs = new byte[n][];
+        for (int i = 0; i < n; i++) structs[i] = encodeNodeStruct(nodes.get(i));
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(n), 4)).length;
+        List<byte[]> recs = new ArrayList<>();
+        int cursor = dictSize;
+        for (int i = 0; i < n; i++) { recs.add(rec4(cursor)); cursor += structs[i].length; }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        for (byte[] s : structs) out.writeBytes(s);
+        return out.toByteArray();
     }
 
-    // --- SBC render stream: NODEDESC[+store if >1 shape], NODE, [BB], POSSCALE, {MAT,SHP}*, POSSCALE|end, RET ---
-    private byte[] buildSbc(int[][] displays)
+    // --- node local matrix (NNS_G3dResNodeData), the inverse of Model.parseNodeLocals, byte-identical to
+    //     g3dcvtr. Layout: flags(u16) · _00(fx16 = rotation[0][0], 1.0 when rotation omitted) · [translation
+    //     3×fx32 if present] · [rotation if present] · [scale 3×fx32 + inverse 3×fx32 if present]. flags bit0/1/2
+    //     omit translation/rotation/scale (set when that component is identity); bit3 selects pivot-compressed
+    //     rotation. Rotation is stored transposed: Mt = (Rz·Ry·Rx)ᵀ from the Euler angles (g3dcvtr's convention).
+    //     A principal-axis matrix (one row-major cell is ±1 with a zero row and column) is pivot-compressed to
+    //     two values av/bv (the 2×2 minor) with the pivot cell in flags bits 4–7 and sign flags 0x100/0x200/
+    //     0x400; otherwise the full 3×3 remainder is written as 8×fx16. ---
+    private byte[] encodeNodeStruct(Node nd)
     {
-        boolean billboard = "on".equals(attr("node", "billboard"));
-        int vis = "off".equals(attr("node", "visibility")) ? 0 : 1;
-        boolean multi = displays.length > 1;
-        ByteArrayOutputStream sb = new ByteArrayOutputStream();
-        if (multi) { sb.write(0x26); sb.write(0); sb.write(0); sb.write(0); sb.write(0); } // NODEDESC+store slot 0
-        else       { sb.write(0x06); sb.write(0); sb.write(0); sb.write(0); }              // NODEDESC(0,0,0)
-        sb.write(0x02); sb.write(0); sb.write(vis);            // NODE(node 0, visibility)
-        if (billboard) { sb.write(0x07); sb.write(0); }        // BB(node 0)
-        sb.write(0x0b);                                        // POSSCALE (begin)
-        for (int[] d : displays)                               // one MAT/SHP pair per display, in order
+        boolean omitT = nd.translate[0] == 0 && nd.translate[1] == 0 && nd.translate[2] == 0;
+        boolean omitS = nd.scale[0] == 1 && nd.scale[1] == 1 && nd.scale[2] == 1;
+        boolean omitR = nd.rotate[0] == 0 && nd.rotate[1] == 0 && nd.rotate[2] == 0;
+
+        int flags = 0xf800 | (omitT ? 0x1 : 0) | (omitR ? 0x2 : 0) | (omitS ? 0x4 : 0);
+        double m00 = 1.0;
+        double[][] mt = null;
+        int[] pivot = null;                                   // {row, col, oneNeg, cNeg, dNeg} or null for full
+        if (!omitR)
         {
-            sb.write(0x04); sb.write(d[0]);                    // MAT(materialIdx)
-            sb.write(0x05); sb.write(d[1]);                    // SHP(polygonIdx)
+            mt = rotationTransposed(nd.rotate);
+            m00 = mt[0][0];
+            pivot = findPivot(mt);
+            if (pivot != null)
+            {
+                int sel = pivot[0] * 3 + pivot[1];
+                flags |= 0x8 | (sel << 4) | (pivot[2] != 0 ? 0x100 : 0) | (pivot[3] != 0 ? 0x200 : 0) | (pivot[4] != 0 ? 0x400 : 0);
+            }
         }
-        sb.write(0x2b);                                        // POSSCALE | 0x20 (end)
-        sb.write(0x01);                                        // RET
-        while (sb.size() % 4 != 0) sb.write(0);
-        return sb.toByteArray();
+
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        writeU16(o, flags);
+        writeU16(o, fx(m00, 12) & 0xFFFF);                    // _00
+        if (!omitT) for (int i = 0; i < 3; i++) writeU32(o, fx(nd.translate[i], 12) & 0xFFFFFFFFL);
+        if (!omitR)
+        {
+            if (pivot != null)
+            {
+                int r = pivot[0], c = pivot[1];
+                int[] rows = other(r), cols = other(c);
+                writeU16(o, fx(mt[rows[0]][cols[0]], 12) & 0xFFFF); // av = minor[0][0]
+                writeU16(o, fx(mt[rows[0]][cols[1]], 12) & 0xFFFF); // bv = minor[0][1]
+            }
+            else
+            {
+                int[][] order = {{0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}, {2, 0}, {2, 1}, {2, 2}};
+                for (int[] rc : order) writeU16(o, fx(mt[rc[0]][rc[1]], 12) & 0xFFFF);
+            }
+        }
+        if (!omitS)
+        {
+            for (int i = 0; i < 3; i++) writeU32(o, fx(nd.scale[i], 12) & 0xFFFFFFFFL);
+            for (int i = 0; i < 3; i++) writeU32(o, fx(1.0 / nd.scale[i], 12) & 0xFFFFFFFFL); // unused inverse
+        }
+        return o.toByteArray();
+    }
+
+    // Mt = (Rz·Ry·Rx)ᵀ from Euler angles in degrees — the transposed local rotation g3dcvtr stores.
+    private static double[][] rotationTransposed(double[] deg)
+    {
+        double x = Math.toRadians(deg[0]), y = Math.toRadians(deg[1]), z = Math.toRadians(deg[2]);
+        double[][] rx = {{1, 0, 0}, {0, Math.cos(x), -Math.sin(x)}, {0, Math.sin(x), Math.cos(x)}};
+        double[][] ry = {{Math.cos(y), 0, Math.sin(y)}, {0, 1, 0}, {-Math.sin(y), 0, Math.cos(y)}};
+        double[][] rz = {{Math.cos(z), -Math.sin(z), 0}, {Math.sin(z), Math.cos(z), 0}, {0, 0, 1}};
+        double[][] r = matMul(matMul(rz, ry), rx);
+        double[][] t = new double[3][3];
+        for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) t[i][j] = r[j][i];
+        return t;
+    }
+
+    private static double[][] matMul(double[][] a, double[][] b)
+    {
+        double[][] r = new double[3][3];
+        for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++)
+            for (int k = 0; k < 3; k++) r[i][j] += a[i][k] * b[k][j];
+        return r;
+    }
+
+    // a principal-axis matrix has a cell that is ±1 with a zero row and column; g3dcvtr picks the first such
+    // cell in row-major order and pivot-compresses. Returns {row, col, oneNeg, cNeg, dNeg} or null (use full form).
+    private static int[] findPivot(double[][] m)
+    {
+        double eps = 1e-4;
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+            {
+                if (Math.abs(Math.abs(m[r][c]) - 1) > eps) continue;
+                boolean clean = true;
+                for (int k = 0; k < 3; k++)
+                    if ((k != c && Math.abs(m[r][k]) > eps) || (k != r && Math.abs(m[k][c]) > eps)) { clean = false; break; }
+                if (!clean) continue;
+                int[] rows = other(r), cols = other(c);
+                double av = m[rows[0]][cols[0]], bv = m[rows[0]][cols[1]];
+                double mc = m[rows[1]][cols[0]], md = m[rows[1]][cols[1]];
+                return new int[]{r, c, m[r][c] < 0 ? 1 : 0, mc * bv < 0 ? 1 : 0, md * av < 0 ? 1 : 0};
+            }
+        return null;
+    }
+
+    // the two indices other than i, in ascending order
+    private static int[] other(int i) { return i == 0 ? new int[]{1, 2} : i == 1 ? new int[]{0, 2} : new int[]{0, 1}; }
+    private static void writeU16(ByteArrayOutputStream o, int v) { o.write(v & 0xFF); o.write((v >> 8) & 0xFF); }
+    private static void writeU32(ByteArrayOutputStream o, long v) { for (int i = 0; i < 4; i++) o.write((int) (v >> (8 * i)) & 0xFF); }
+
+    // --- SBC render stream (general, multi-node): a pre-order walk of the node tree. Mirrors g3dcvtr's
+    //     matrix-stack allocator (validated byte-for-byte against retail): a node whose matrix is reused by a
+    //     child or by more than one of its own draws is NODEDESC-stored to the lowest free stack slot; a node
+    //     whose parent's matrix isn't the current one restores it. Draws emit POSSCALE {MAT[,SHP]}* POSSCALE|end,
+    //     and a material used by more than one draw is stored on first use / restored on reuse (material stack).
+    //     outFirstUnused[0] receives the matrix-stack high-water mark (the model header's firstUnusedMtxStackId). ---
+    private byte[] generateSbc(List<Node> nodes, boolean magnified, int[] outFirstUnused)
+    {
+        int N = nodes.size();
+        List<List<Integer>> children = new ArrayList<>();
+        for (int i = 0; i < N; i++) children.add(new ArrayList<>());
+        for (int i = 0; i < N; i++)
+        {
+            int p = nodes.get(i).parent;
+            if (p != i && p >= 0 && p < N) children.get(p).add(i);
+        }
+        int[] slotOf = new int[N];
+        java.util.Arrays.fill(slotOf, -1);
+        boolean[] slotUsed = new boolean[64];
+        int maxSlot = -1;
+        // material stack: a material used by more than one draw is stored on first use, restored on later uses
+        java.util.Map<Integer, Integer> matUse = new java.util.HashMap<>();
+        for (Node nd : nodes) for (int[] dr : nd.draw) matUse.merge(dr[0], 1, Integer::sum);
+        java.util.Set<Integer> matSeen = new java.util.HashSet<>();
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        int cur = -1;
+        for (int n = 0; n < N; n++)
+        {
+            Node nd = nodes.get(n);
+            int p = nd.parent;
+            int restore = (p != n && cur != p) ? slotOf[p] : -1;
+            int store = -1;
+            if (!children.get(n).isEmpty() || nd.draw.size() > 1)
+            {
+                store = lowestFree(slotUsed);
+                slotUsed[store] = true;
+                slotOf[n] = store;
+                if (store > maxSlot) maxSlot = store;
+            }
+            o.write(0x06 | (store >= 0 ? 0x20 : 0) | (restore >= 0 ? 0x40 : 0));
+            o.write(n); o.write(p); o.write(0);
+            if (store >= 0) o.write(store);
+            if (restore >= 0) o.write(restore);
+            cur = n;
+            if (nd.draws)
+            {
+                o.write(0x02); o.write(n); o.write(nd.vis);        // NODE(node, visibility)
+                if (nd.bb == 1) { o.write(0x07); o.write(n); }     // BB (screen-facing)
+                else if (nd.bb == 2) { o.write(0x08); o.write(n); } // BBY (y-axis billboard)
+                if (magnified) o.write(0x0b);                      // POSSCALE (begin)
+                for (int[] dr : nd.draw)
+                {
+                    int matFlag = matUse.getOrDefault(dr[0], 1) > 1 ? (matSeen.add(dr[0]) ? 0x20 : 0x40) : 0;
+                    o.write(0x04 | matFlag); o.write(dr[0]);        // MAT(materialIdx)[+store/restore]
+                    o.write(0x05); o.write(dr[1]);                  // SHP(polygonIdx)
+                }
+                if (magnified) o.write(0x2b);                      // POSSCALE | 0x20 (end)
+            }
+            // free every slot whose owner's last child is this node
+            for (int q = 0; q < N; q++)
+                if (!children.get(q).isEmpty() && children.get(q).get(children.get(q).size() - 1) == n && slotOf[q] >= 0)
+                    slotUsed[slotOf[q]] = false;
+        }
+        o.write(0x01);                                             // RET
+        while (o.size() % 4 != 0) o.write(0);
+        outFirstUnused[0] = maxSlot + 1;
+        return o.toByteArray();
+    }
+
+    private static int lowestFree(boolean[] used)
+    {
+        for (int i = 0; i < used.length; i++) if (!used[i]) return i;
+        return 0;
     }
 
     // --- material set: header, material dict, tex/pltt->material dicts (grouped by resource), index lists,
@@ -438,13 +702,44 @@ public final class ImdImporter
         return m.find() ? m.group(1) : null;
     }
     // the node's <display material="m" polygon="p"/> entries as {materialIdx, polygonIdx} pairs
-    private int[][] parseDisplays()
+    // one node of the <node_array>: its parent (root maps to its own index), whether it draws, its visibility
+    // and billboard state, and its {materialIdx, polygonIdx} displays in order.
+    private static final class Node
     {
-        List<int[]> out = new ArrayList<>();
-        Matcher m = Pattern.compile("<display\\b[^>]*/>").matcher(tagContent(imd, "node"));
-        while (m.find())
-            out.add(new int[]{Integer.parseInt(a(m.group(), "material")), Integer.parseInt(a(m.group(), "polygon"))});
-        return out.toArray(new int[0][]);
+        String name;
+        int parent, vis = 1, bb = 0;
+        boolean draws;
+        final List<int[]> draw = new ArrayList<>();
+        double[] scale = {1, 1, 1};
+        double[] rotate = {0, 0, 0};      // Euler angles in degrees (x, y, z)
+        double[] translate = {0, 0, 0};
+    }
+
+    // parse the whole <node_array>, in index order (g3dcvtr numbers/walks nodes by index)
+    private List<Node> parseNodes()
+    {
+        List<Node> nodes = new ArrayList<>();
+        for (String el : blocks("node"))
+        {
+            Node nd = new Node();
+            nd.name = a(el, "name");
+            int index = Integer.parseInt(a(el, "index"));
+            int par = Integer.parseInt(a(el, "parent"));
+            nd.parent = par < 0 ? index : par;                 // the root's NODEDESC parent is its own index
+            nd.vis = "off".equals(a(el, "visibility")) ? 0 : 1;
+            nd.bb = "on".equals(a(el, "billboard")) ? 1 : "y_on".equals(a(el, "billboard")) ? 2 : 0;
+            if (a(el, "scale") != null) nd.scale = doubles(a(el, "scale"));
+            if (a(el, "rotate") != null) nd.rotate = doubles(a(el, "rotate"));
+            if (a(el, "translate") != null) nd.translate = doubles(a(el, "translate"));
+            Matcher dm = Pattern.compile("<display\\b[^>]*/>").matcher(el);
+            while (dm.find())
+                nd.draw.add(new int[]{Integer.parseInt(a(dm.group(), "material")), Integer.parseInt(a(dm.group(), "polygon"))});
+            nd.draws = !nd.draw.isEmpty();
+            while (nodes.size() <= index) nodes.add(null);
+            nodes.set(index, nd);
+        }
+        nodes.removeIf(java.util.Objects::isNull);
+        return nodes;
     }
     private static List<byte[]> placeholders(int n)
     {

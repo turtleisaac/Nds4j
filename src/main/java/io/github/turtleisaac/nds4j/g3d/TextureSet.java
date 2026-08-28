@@ -79,6 +79,23 @@ public class TextureSet extends G3dFile
     }
 
     /**
+     * Authors a texture-only {@code TextureSet} (NSBTX) from NITRO intermediate ({@code .imd}) source &mdash;
+     * the native, byte-for-byte replacement for Nintendo's {@code g3dcvtr -etex}.
+     * @param imdXml the full contents of an {@code .imd} file (must carry a {@code tex_image})
+     * @see ImdImporter
+     */
+    public static TextureSet fromImd(String imdXml)
+    {
+        return ImdImporter.fromXml(imdXml).toTextureSet();
+    }
+
+    /** Authors a texture-only {@code TextureSet} (NSBTX) from an {@code .imd} file. */
+    public static TextureSet fromImd(java.io.File imdFile) throws java.io.IOException
+    {
+        return ImdImporter.fromFile(imdFile).toTextureSet();
+    }
+
+    /**
      * Builds a read-only texture decoder over a bare {@code TEX0} block &mdash; the form embedded inside
      * an NSBMD model (see {@link ModelSet#getEmbeddedTextures()}). This view decodes and exports
      * textures like a standalone NSBTX; it is not a container, so {@link #save()} is not meaningful on it

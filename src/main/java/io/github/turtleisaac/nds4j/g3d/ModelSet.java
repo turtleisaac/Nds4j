@@ -50,6 +50,25 @@ public class ModelSet extends G3dFile
         parseModels(block(mdl0Index));
     }
 
+    /**
+     * Authors a {@code ModelSet} from NITRO intermediate ({@code .imd}) source &mdash; the native, byte-for-byte
+     * replacement for Nintendo's {@code g3dcvtr}. The texture is embedded as a {@code TEX0} block when the
+     * {@code .imd} carries one (the {@code -eboth} case), otherwise the result is model-only ({@code -emdl}).
+     * @param imdXml the full contents of an {@code .imd} file
+     * @param modelName the model's name (g3dcvtr uses the source file's base name)
+     * @see ImdImporter
+     */
+    public static ModelSet fromImd(String imdXml, String modelName)
+    {
+        return ImdImporter.fromXml(imdXml).named(modelName).toModelSet();
+    }
+
+    /** Authors a {@code ModelSet} from an {@code .imd} file, taking the model name from the file's base name. */
+    public static ModelSet fromImd(java.io.File imdFile) throws java.io.IOException
+    {
+        return ImdImporter.fromFile(imdFile).toModelSet();
+    }
+
     private void parseModels(byte[] mdl0)
     {
         MemBuf buf = MemBuf.create(mdl0);
