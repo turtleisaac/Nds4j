@@ -416,6 +416,42 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
 already decompresses them). Nothing here blocks PDSMS dropping the g3dcvtr binary.
 
+### 9b-note. Editable model source for a Gen IV decomp — a `model.json` direction (NOT a priority; parked idea)
+
+Explored briefly with the maintainer; recorded so a future agent can pick it up if the pokeplatinum /
+pokeheartgold decomps ever want **in-tree editable models, porymap-style** (today they commit NARC binaries
+as a stopgap). The key facts that shape any solution:
+
+- **Information ordering:** `NSBMD ⇄ IMD` are information-equivalent (both carry the DS *encoding* — vertex
+  command formats, `pos_scale`, struct state — proven by the byte-exact translator both directions). Every
+  hardware-agnostic interchange format (**glTF, COLLADA, USD, OBJ, FBX**) sits strictly *below* them: it has
+  geometry/materials but not the encoding, so `IMD→glTF` is lossy and no `glTF→IMD` can be its inverse. So
+  **byte-exact matching of an existing model goes through IMD/NSBMD, never through an open format**; to clone
+  a retail model exactly you *decompile* `NSBMD→IMD`, not import glTF.
+- **The decomp contract only needs byte-exact for *unedited* models** (vanilla must still rebuild the ROM);
+  an *edited* model just has to re-encode to a *valid* NSBMD. That split is what makes an editable pipeline
+  feasible at all.
+- **No existing standard hits all of {byte-exact-lossless, git-diffable, DCC-editable}** — glTF fails
+  lossless, NARC fails diffable/editable, IMD is lossless+text but is Nintendo's verbose XML and *cannot be
+  opened in Blender or any DCC* (it's a build intermediate, not an editing format; COLLADA is the closest-
+  fitting standard — Phong/Lambert ≈ NITRO material, native quads — but its tooling has decayed). So the
+  right move is a **decomp-defined text source**, à la pokeemerald's `map.json`:
+  - **`model.json`** = a clean, diffable *decompilation* of the NSBMD: nodes, materials (NITRO fixed-function
+    state as readable fields), texture refs, and the geometry as the **exact display-list command stream**.
+    Untouched ⇒ byte-exact rebuild; hand/tool-editable for materials/nodes/flags.
+  - **Textures as PNG** (+ palette), like every pret asset.
+  - **glTF only as the Blender *bridge*, never storage:** the tool exports a mesh to glTF for Blender and
+    re-imports edits (re-encoding to valid); vanilla geometry keeps its preserved command stream (byte-exact).
+- **The engine for that "porymap for models" tool mostly already exists in this repo:** `ModelSet`/`Model`
+  (+ `reencodeModels()` byte-exact re-encode), `DisplayList.decodeCommands`/`encodeCommands` (byte-exact
+  geometry round-trip + edit) + `Model.Mesh.getRawDisplayList`, `ImdImporter`'s section encoders +
+  `G3dDictionary`, `SoftwareRenderer`/`ModelViewer` (render/inspect UI substrate), `GltfExporter` (Blender
+  bridge — a glTF *importer* is the one missing piece), `TextureSet` (texture decode/encode). A decomp would
+  build the `NSBMD→model.json` decompiler + `model.json→NSBMD` builder on top of these.
+
+Bottom line for a future taker: **binary stays the matching asset; a `model.json` (lossless decompilation) +
+PNG + a glTF Blender-bridge is the editable-source path; the byte-exact primitives are already here.**
+
 ### 9b. RE workflow for a new/undocumented format (how SPA and NSBMA were cracked)
 - **Magic census first.** Before assuming anything, tally the 4-char magic of *every* file in *every*
   NARC (non-ASCII → `.`), and search **both byte orders**. This is what surfaced ` APS` (§5.9). A throwaway
