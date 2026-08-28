@@ -82,6 +82,18 @@ public class ModelSet extends G3dFile
         return indexOfBlock("TEX0") >= 0;
     }
 
+    /**
+     * Gets a decoder over this model's embedded textures, or null if it has none. The returned
+     * {@link TextureSet} decodes and exports the {@code TEX0} textures the model's materials reference
+     * by name; it is a read-only view (the byte-exact round-trip stays with this {@link ModelSet}).
+     * @return a {@link TextureSet} or null
+     */
+    public TextureSet getEmbeddedTextures()
+    {
+        int tex0Index = indexOfBlock("TEX0");
+        return tex0Index < 0 ? null : TextureSet.fromTex0Block(block(tex0Index));
+    }
+
     @Override
     public String toString()
     {

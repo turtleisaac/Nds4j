@@ -166,6 +166,42 @@ public class ModelSetTest
     }
 
     @Test
+    @DisplayName("shapes bind materials that resolve to the embedded textures")
+    void materialsResolveToTextures()
+    {
+        // The SBC walk binds a material to every shape (MAT ... SHP), and each material names the texture
+        // and palette it samples via the material set's tex/pltt dictionaries. For textured models those
+        // names must resolve in the embedded TEX0. A NODEDESC/operand desync or a wrong material-set
+        // layout would drop these bindings, so assert most shapes bind a material and most of those
+        // resolve to a real embedded texture (the remainder are untextured or use a sibling NSBTX).
+        int meshes = 0, withMaterial = 0, resolved = 0;
+        for (byte[] file : nsbmdFiles)
+        {
+            ModelSet ms = new ModelSet(file);
+            TextureSet embedded = ms.getEmbeddedTextures();
+            for (Model model : ms.getModels())
+            {
+                for (Model.Mesh mesh : model.getMeshes())
+                {
+                    meshes++;
+                    Model.Material mat = mesh.getMaterial();
+                    if (mat == null)
+                        continue;
+                    withMaterial++;
+                    if (embedded != null && mat.getTextureName() != null
+                            && embedded.getTexture(mat.getTextureName()) != null)
+                        resolved++;
+                }
+            }
+        }
+        assertThat(meshes).as("the ROM should contain meshes").isGreaterThan(0);
+        assertThat(withMaterial).as("shapes bind a material (of %d meshes)", meshes)
+                .isGreaterThan((int) (0.98 * meshes));
+        assertThat(resolved).as("bound materials resolve to an embedded texture (of %d)", withMaterial)
+                .isGreaterThan((int) (0.75 * withMaterial));
+    }
+
+    @Test
     @DisplayName("meshes and OBJ export are coherent")
     void meshesAndObjExport()
     {

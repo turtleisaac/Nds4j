@@ -72,6 +72,25 @@ public class TextureSet extends G3dFile
         parseTex0(block(tex0Index));
     }
 
+    private TextureSet(byte[] tex0Block, boolean fromRawTex0)
+    {
+        super("BTX0");
+        parseTex0(tex0Block);
+    }
+
+    /**
+     * Builds a read-only texture decoder over a bare {@code TEX0} block &mdash; the form embedded inside
+     * an NSBMD model (see {@link ModelSet#getEmbeddedTextures()}). This view decodes and exports
+     * textures like a standalone NSBTX; it is not a container, so {@link #save()} is not meaningful on it
+     * (the owning {@link ModelSet} round-trips the bytes).
+     * @param tex0Block the raw {@code TEX0} block
+     * @return a {@link TextureSet}
+     */
+    static TextureSet fromTex0Block(byte[] tex0Block)
+    {
+        return new TextureSet(tex0Block, true);
+    }
+
     private void parseTex0(byte[] tex0Block)
     {
         tex0 = tex0Block;

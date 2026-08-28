@@ -58,12 +58,14 @@ public class Model
     private final float[] headerBoxMin = new float[3];
     private final float[] headerBoxMax = new float[3];
     private final List<Mesh> meshes = new ArrayList<>();
+    private final List<Material> materials = new ArrayList<>();
 
     Model(byte[] mdl0, int modelStart, String name)
     {
         this.name = name;
 
         int ofsSbc = (int) readU32(mdl0, modelStart + 4);
+        int ofsMat = (int) readU32(mdl0, modelStart + 8);
         int ofsShp = (int) readU32(mdl0, modelStart + 12);
 
         // model header (NNS_G3dModelInfo)
@@ -87,11 +89,18 @@ public class Model
             headerBoxMax[c] = (float) (lo + dim);
         }
 
+        // Materials: name -> texture/palette + texture size, so each shape's UVs can be normalised and
+        // pointed at the right texture in the embedded (or sibling) TEX0.
+        parseMaterials(mdl0, modelStart + ofsMat, matCount);
+
         // Per-node local transforms and, by walking the render commands, which node's world matrix each
-        // shape is drawn with. This is what positions a multi-node model's parts correctly.
+        // shape is drawn with (and which material is bound). This is what positions a multi-node model's
+        // parts correctly and ties each shape to its texture.
         Srt[] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
         int[] shapeNode = new int[shapeCountHeader];
-        Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeCountHeader);
+        int[] shapeMaterial = new int[shapeCountHeader];
+        java.util.Arrays.fill(shapeMaterial, -1);
+        Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeMaterial, shapeCountHeader);
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
@@ -110,6 +119,8 @@ public class Model
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
             Srt world = (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null;
             transformInPlace(mesh.positions, world, posScale);
+            mesh.material = (i < shapeMaterial.length && shapeMaterial[i] >= 0 && shapeMaterial[i] < materials.size())
+                    ? materials.get(shapeMaterial[i]) : null;
             meshes.add(mesh);
         }
     }
@@ -194,13 +205,75 @@ public class Model
     // consumed so the walk stays in sync. Operand widths follow NNS exactly: NODEDESC is nodeId, parentId,
     // opt, then +1 if the 0x20 (store) flag is set and +1 if the 0x40 (restore) flag is set; BB/BBY are
     // nodeId + the same optional store/restore bytes; NODEMIX is 2 + 3*count; CALLDL is 8; etc.
-    private Srt[] walkSbc(byte[] d, int sbc, Srt[] nodeLocal, int[] shapeNode, int shapeCount)
+    // Parses the material set (NNS_G3dResMat): a dictionary of named materials, each pointing at a
+    // material struct, plus two dictionaries mapping texture names and palette names to the materials
+    // that use them (the material struct itself doesn't name its texture). We keep, per material, its
+    // texture/palette name and the texel size (from the struct's texImageParam), which is what UV
+    // normalisation and texturing need. Layout verified against nitroreader.nsbmd.Model.readMaterialSet.
+    private void parseMaterials(byte[] d, int matSet, int matCount)
+    {
+        int ofsTexDict = readU16(d, matSet);
+        int ofsPltDict = readU16(d, matSet + 2);
+
+        MemBuf buf = MemBuf.create(d);
+        MemBuf.MemBufReader r = buf.reader();
+        r.setPosition(matSet + 4);
+        G3dDictionary matDict = new G3dDictionary(r);
+        for (int i = 0; i < matDict.size(); i++)
+        {
+            // The material struct's texImageParam carries the wrap/flip bits, but its size field is left
+            // zero here (the NNS renderer takes the texture's true size from the TEX0 texture at bind
+            // time, not the material). So only the wrap/flip flags are read; UV normalisation uses the
+            // bound texture's own dimensions.
+            int structOfs = matSet + (int) readU32(matDict.getRecord(i), 0);
+            long texImageParam = readU32(d, structOfs + 0x14);
+            boolean repeatS = (texImageParam & (1 << 16)) != 0;
+            boolean repeatT = (texImageParam & (1 << 17)) != 0;
+            boolean flipS = (texImageParam & (1 << 18)) != 0;
+            boolean flipT = (texImageParam & (1 << 19)) != 0;
+            materials.add(new Material(matDict.getName(i), repeatS, repeatT, flipS, flipT));
+        }
+
+        bindNames(d, matSet, matSet + ofsTexDict, true);
+        bindNames(d, matSet, matSet + ofsPltDict, false);
+    }
+
+    // Applies a texture-to-material (or palette-to-material) dictionary: each entry names a resource and
+    // points at a list of material indices that use it. Entry data (4 bytes): bits 0-15 = offset to the
+    // index list (from the material set), bits 16-23 = list length, bit 24 = "no binding" flag.
+    private void bindNames(byte[] d, int matSet, int dictStart, boolean texture)
+    {
+        MemBuf buf = MemBuf.create(d);
+        MemBuf.MemBufReader r = buf.reader();
+        r.setPosition(dictStart);
+        G3dDictionary dict = new G3dDictionary(r);
+        for (int i = 0; i < dict.size(); i++)
+        {
+            long entry = readU32(dict.getRecord(i), 0);
+            if ((entry & 0x01000000L) != 0)
+                continue;
+            int listOfs = (int) (entry & 0xFFFF);
+            int listLen = (int) ((entry >> 16) & 0xFF);
+            for (int k = 0; k < listLen; k++)
+            {
+                int matIdx = d[matSet + listOfs + k] & 0xFF;
+                if (matIdx < materials.size())
+                {
+                    if (texture) materials.get(matIdx).textureName = dict.getName(i);
+                    else         materials.get(matIdx).paletteName = dict.getName(i);
+                }
+            }
+        }
+    }
+
+    private Srt[] walkSbc(byte[] d, int sbc, Srt[] nodeLocal, int[] shapeNode, int[] shapeMaterial, int shapeCount)
     {
         int count = nodeLocal.length;
         int[] parent = new int[count];
         java.util.Arrays.fill(parent, -1);
         int[] stackNode = new int[64];
         int current = 0;
+        int currentMat = -1;
         int p = sbc;
         boolean stop = false;
         while (p < d.length && !stop)
@@ -213,8 +286,8 @@ public class Model
                 case 0x01: stop = true; break;                      // RET
                 case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
                 case 0x03: current = stackNode[d[p++] & 0xFF]; break; // MTX (restore)
-                case 0x04: p += 1; break; // MAT matId (flag bits are hints, not extra operands)
-                case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) shapeNode[shp] = current; break; } // SHP
+                case 0x04: currentMat = d[p++] & 0xFF; break; // MAT matId (flag bits are hints, not extra operands)
+                case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) { shapeNode[shp] = current; shapeMaterial[shp] = currentMat; } break; } // SHP
                 case 0x06: {                                        // NODEDESC nodeId, parentId, opt (+ store/restore slots)
                     int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
                     p++;                                            // opt byte (S/P bits) - not needed for placement
@@ -491,6 +564,12 @@ public class Model
         return meshes;
     }
 
+    /** @return the model's materials (texture/palette bindings), in material-index order */
+    public List<Material> getMaterials()
+    {
+        return materials;
+    }
+
     /**
      * @return the number of vertices the model header declares (equals the number the display-list
      *         interpreter emits when it decodes correctly)
@@ -628,8 +707,10 @@ public class Model
     {
         private final String name;
         private final float[] positions;   // 3 floats per vertex (model space)
-        private final float[] texcoords;    // 2 floats per vertex
+        private final float[] texcoords;    // 2 floats per vertex, in texel units (divide by the bound
+                                            // texture's size to normalise)
         private final int[] triangleIndices; // 3 indices per triangle
+        private Material material;          // the bound material (texture/palette), or null
 
         Mesh(String name, float[] positions, float[] texcoords, int[] triangleIndices)
         {
@@ -643,7 +724,7 @@ public class Model
         public String getName() { return name; }
         /** @return the vertex positions, 3 floats (x,y,z) per vertex, in model space */
         public float[] getPositions() { return positions; }
-        /** @return the texture coordinates, 2 floats (s,t) per vertex */
+        /** @return the texture coordinates, 2 floats (s,t) per vertex, in texel units */
         public float[] getTexcoords() { return texcoords; }
         /** @return the triangle indices, 3 per triangle, into the vertex arrays */
         public int[] getTriangleIndices() { return triangleIndices; }
@@ -651,5 +732,45 @@ public class Model
         public int getVertexCount() { return positions.length / 3; }
         /** @return the number of triangles */
         public int getTriangleCount() { return triangleIndices.length / 3; }
+        /** @return the material bound to this mesh, or null if it draws untextured */
+        public Material getMaterial() { return material; }
+    }
+
+    /**
+     * A material bound to one or more shapes: the names of the texture and palette it samples (looked up
+     * in the model's embedded or a sibling {@code TEX0}) plus the texture's texel size and wrap/flip
+     * flags. Colour/lighting/polygon attributes are present in the file but not exposed until they are
+     * needed. Names are {@code null} when the material draws untextured.
+     */
+    public static class Material
+    {
+        private final String name;
+        private final boolean repeatS, repeatT, flipS, flipT;
+        private String textureName;
+        private String paletteName;
+
+        Material(String name, boolean repeatS, boolean repeatT, boolean flipS, boolean flipT)
+        {
+            this.name = name;
+            this.repeatS = repeatS;
+            this.repeatT = repeatT;
+            this.flipS = flipS;
+            this.flipT = flipT;
+        }
+
+        /** @return this material's name */
+        public String getName() { return name; }
+        /** @return the name of the texture this material samples, or null */
+        public String getTextureName() { return textureName; }
+        /** @return the name of the palette this material samples, or null */
+        public String getPaletteName() { return paletteName; }
+        /** @return whether the texture repeats (tiles) along S; else it clamps */
+        public boolean isRepeatS() { return repeatS; }
+        /** @return whether the texture repeats (tiles) along T; else it clamps */
+        public boolean isRepeatT() { return repeatT; }
+        /** @return whether the texture mirrors on every other S tile */
+        public boolean isFlipS() { return flipS; }
+        /** @return whether the texture mirrors on every other T tile */
+        public boolean isFlipT() { return flipT; }
     }
 }
