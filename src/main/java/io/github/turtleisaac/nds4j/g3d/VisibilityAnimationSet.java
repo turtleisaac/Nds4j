@@ -21,6 +21,7 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -54,6 +55,27 @@ public class VisibilityAnimationSet extends G3dFile
         parseVis0(block(vis0));
     }
 
+    /**
+     * Assembles an NSBVA file from authored visibility animations &mdash; the writer counterpart to reading.
+     * @param animations the animations, in order
+     * @param version the NTR container version half-word (1 for a fresh file)
+     * @return the NSBVA file bytes
+     */
+    public static VisibilityAnimationSet author(List<Animation> animations, int version)
+    {
+        return new VisibilityAnimationSet(encode(animations, version));
+    }
+
+    /**
+     * Re-emits this set's bytes from its parsed structure (the byte-exact writer path, verified to reproduce
+     * every retail NSBVA). Distinct from the block-verbatim {@link G3dFile#save()}.
+     * @return the NSBVA file bytes
+     */
+    public byte[] encode()
+    {
+        return encode(animations, version);
+    }
+
     private void parseVis0(byte[] d)
     {
         MemBuf buf = MemBuf.create(d);
@@ -63,6 +85,56 @@ public class VisibilityAnimationSet extends G3dFile
         for (int i = 0; i < dict.size(); i++)
             animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i)));
     }
+
+    // Builds the whole NSBVA: a VIS0 block = magic + size + animation dictionary + each animation's data,
+    // wrapped in the NTR container. Each animation is a 12-byte header (tag, numFrames, numNodes, its own byte
+    // size, pad) followed by the frame-major, node-minor visibility bit stream padded to a 32-bit-word count.
+    private static byte[] encode(List<Animation> animations, int version)
+    {
+        List<String> names = new ArrayList<>();
+        for (Animation a : animations) names.add(a.name);
+
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size()), 4)).length;
+        byte[][] blobs = new byte[animations.size()][];
+        for (int i = 0; i < animations.size(); i++)
+        {
+            Animation a = animations.get(i);
+            int nf = a.frameCount, nn = a.visible.length;
+            int size = 12 + ((nf * nn + 31) / 32) * 4;       // header + bit stream, rounded to whole u32 words
+            byte[] blob = new byte[size];
+            blob[0] = 0x56; blob[1] = 0x00; blob[2] = 0x41; blob[3] = 0x56; // NNS visibility-anim tag ("V\0AV")
+            u16(blob, 4, nf); u16(blob, 6, nn); u16(blob, 8, size); u16(blob, 10, 0);
+            int bit = 0;
+            for (int f = 0; f < nf; f++)
+                for (int n = 0; n < nn; n++)
+                {
+                    if (a.visible[n][f]) blob[12 + (bit >> 3)] |= (1 << (bit & 7));
+                    bit++;
+                }
+            blobs[i] = blob;
+        }
+
+        List<byte[]> recs = new ArrayList<>();
+        int cursor = 8 + dictSize;                            // animation data follows magic+size+dict
+        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+
+        ByteArrayOutputStream vis0 = new ByteArrayOutputStream();
+        vis0.writeBytes("VIS0".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        vis0.writeBytes(rec4(cursor));                        // VIS0 block size
+        vis0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        for (byte[] blob : blobs) vis0.writeBytes(blob);
+        return G3dFile.assembleContainer("BVA0", version, vis0.toByteArray());
+    }
+
+    private static List<byte[]> placeholders(int n)
+    {
+        List<byte[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(rec4(0));
+        return l;
+    }
+    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
+    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
+    private static void u16(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
 
     /**
      * Gets the animations in this file.
@@ -89,6 +161,18 @@ public class VisibilityAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final boolean[][] visible; // [node][frame]
+
+        /**
+         * Authors a visibility animation.
+         * @param name the animation's name
+         * @param visible a {@code [node][frame]} on/off table (all rows must be the same length)
+         */
+        public Animation(String name, boolean[][] visible)
+        {
+            this.name = name;
+            this.visible = visible;
+            this.frameCount = visible.length == 0 ? 0 : visible[0].length;
+        }
 
         Animation(byte[] d, int animStart, String name)
         {

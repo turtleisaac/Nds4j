@@ -21,7 +21,10 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -57,6 +60,31 @@ public class TextureSrtAnimationSet extends G3dFile
         parseSrt0(block(srt0));
     }
 
+    /**
+     * Re-emits this set's bytes from its parsed structure (the byte-exact writer path, verified to reproduce
+     * every retail NSBTA). Distinct from the block-verbatim {@link G3dFile#save()}. Authoring a fresh NSBTA
+     * from semantic channels is {@link AnimationBuilder}'s job; this reproduces a decoded one exactly.
+     */
+    public byte[] encode()
+    {
+        List<String> names = new ArrayList<>();
+        for (Animation a : animations) names.add(a.name);
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
+        byte[][] blobs = new byte[animations.size()][];
+        for (int i = 0; i < animations.size(); i++) blobs[i] = animations.get(i).encodeBlob();
+
+        List<byte[]> recs = new ArrayList<>();
+        int cursor = 8 + dictSize;
+        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+
+        ByteArrayOutputStream srt0 = new ByteArrayOutputStream();
+        srt0.writeBytes("SRT0".getBytes(StandardCharsets.US_ASCII));
+        srt0.writeBytes(rec4(cursor));
+        srt0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        for (byte[] blob : blobs) srt0.writeBytes(blob);
+        return G3dFile.assembleContainer("BTA0", version, srt0.toByteArray());
+    }
+
     private void parseSrt0(byte[] d)
     {
         MemBuf buf = MemBuf.create(d);
@@ -66,6 +94,16 @@ public class TextureSrtAnimationSet extends G3dFile
         for (int i = 0; i < dict.size(); i++)
             animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i)));
     }
+
+    private static List<byte[]> placeholders(int n, int recSize)
+    {
+        List<byte[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(new byte[recSize]);
+        return l;
+    }
+    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
+    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
+    private static boolean isConst(long info) { return (info & ELEM_CONST) != 0; }
 
     /**
      * Gets the animations in this file.
@@ -93,12 +131,14 @@ public class TextureSrtAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final List<MaterialSrt> materials = new ArrayList<>();
+        private final byte[] header = new byte[8];        // tag, numFrames, and two flag bytes — retained verbatim
 
         Animation(byte[] d, int animStart, String name)
         {
             this.name = name;
             // header: char[4] tag, u16 numFrames, u8, u8; then a material dictionary (40-byte records:
             // 10 u32 params = an (info, offset/value) pair per channel).
+            System.arraycopy(d, animStart, header, 0, 8);
             frameCount = readU16(d, animStart + 4);
             MemBuf buf = MemBuf.create(d);
             MemBuf.MemBufReader reader = buf.reader();
@@ -115,8 +155,67 @@ public class TextureSrtAnimationSet extends G3dFile
                 Channel rot = channelRot(d, animStart, param[4], param[5], frameCount);
                 Channel transS = channelST(d, animStart, param[6], param[7], frameCount);
                 Channel transT = channelST(d, animStart, param[8], param[9], frameCount);
-                materials.add(new MaterialSrt(dict.getName(i), scaleS, scaleT, rot, transS, transT));
+                MaterialSrt mat = new MaterialSrt(dict.getName(i), scaleS, scaleT, rot, transS, transT);
+                // retain the raw params and each variable channel's raw keyframe bytes, for byte-exact re-encode
+                mat.rawParam = param;
+                mat.rawArray = new byte[5][];
+                for (int c = 0; c < 5; c++)
+                {
+                    long info = param[c * 2], off = param[c * 2 + 1];
+                    if (isConst(info)) continue;
+                    int elem = (c == 2) ? 4 : ((info & ELEM_FX16) != 0 ? 2 : 4);
+                    int len = valueCount(frameCount, frameStep(info)) * elem;
+                    mat.rawArray[c] = Arrays.copyOfRange(d, animStart + (int) off, animStart + (int) off + len);
+                }
+                materials.add(mat);
             }
+        }
+
+        // rebuild this animation's data block byte-exactly: header, material dict (records with recomputed
+        // variable-channel offsets), then per material a pool of the leading const values followed, from the
+        // first variable channel onward, by every channel's data (variable → its keyframe array padded to 4;
+        // const → its 4-byte value, fx16 values masked to 16 bits).
+        byte[] encodeBlob()
+        {
+            List<String> matNames = new ArrayList<>();
+            for (MaterialSrt m : materials) matNames.add(m.name);
+            int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 40), 40)).length;
+            int base = 8 + dictSize;
+
+            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            long[][] np = new long[materials.size()][];
+            for (int m = 0; m < materials.size(); m++)
+            {
+                long[] param = materials.get(m).rawParam;
+                np[m] = param.clone();
+                int firstVar = 5;
+                for (int c = 0; c < 5; c++) if (!isConst(param[c * 2])) { firstVar = c; break; }
+                for (int c = 0; c < firstVar; c++) data.writeBytes(rec4((param[c * 2] & ELEM_FX16) != 0 ? (param[c * 2 + 1] & 0xFFFF) : param[c * 2 + 1]));
+                for (int c = firstVar; c < 5; c++)
+                {
+                    long info = param[c * 2], off = param[c * 2 + 1];
+                    if (isConst(info)) { data.writeBytes(rec4((info & ELEM_FX16) != 0 ? (off & 0xFFFF) : off)); }
+                    else
+                    {
+                        np[m][c * 2 + 1] = base + data.size();
+                        data.writeBytes(materials.get(m).rawArray[c]);
+                        while (data.size() % 4 != 0) data.write(0);
+                    }
+                }
+            }
+
+            byte[] anim = new byte[base + data.size()];
+            System.arraycopy(header, 0, anim, 0, 8);
+            List<byte[]> recs = new ArrayList<>();
+            for (int m = 0; m < materials.size(); m++)
+            {
+                byte[] rec = new byte[40];
+                for (int k = 0; k < 10; k++) for (int b = 0; b < 4; b++) rec[k * 4 + b] = (byte) (np[m][k] >> (8 * b));
+                recs.add(rec);
+            }
+            System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 40)), 0, anim, 8, dictSize);
+            System.arraycopy(data.toByteArray(), 0, anim, base, data.size());
+            return anim;
         }
 
         /** @return this animation's name */
@@ -174,6 +273,8 @@ public class TextureSrtAnimationSet extends G3dFile
     {
         private final String name;
         private final Channel scaleS, scaleT, rot, transS, transT;
+        long[] rawParam;          // the 10 raw u32 record params, retained for byte-exact re-encode
+        byte[][] rawArray;        // per channel, the raw keyframe bytes (null for const channels)
 
         MaterialSrt(String name, Channel scaleS, Channel scaleT, Channel rot, Channel transS, Channel transT)
         {
