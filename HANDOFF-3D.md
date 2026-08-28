@@ -404,13 +404,31 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   [BB if billboard] · POSSCALE · MAT · SHP · POSSCALE|end · RET`, padded /4; the 44-byte material struct,
   layout per Apicula's `read_material` + the retail bytes; the shape struct's vertex-attribute mask
   normal(1)|color(2)|texcoord(4)) and composes them with the byte-exact primitives (`DisplayList`,
-  `G3dDictionary`, `assembleContainer`). **Verified byte-for-byte against `g3dcvtr -emdl` on `rock`/`book`/
-  `pole`** (billboard/non-billboard, lit/vertex-coloured); fixtures + expected bytes are checked in
-  (`src/test/resources/imd/`, CI-safe — no wine). This is the native g3dcvtr replacement PDSMS needs.
-  **Coverage so far:** single-node / single-material / single-shape textured models; multi-node/material/
-  shape extends the same section encoders (each section is already a list-driven builder elsewhere). The DL
-  is padded to /8; a `pos_s` vertex becomes `VTX_10` when 1.3.6-exact else `VTX_16`. The genuinely hard
-  optimiser is *not needed* because the `.imd` already contains its output.
+  `G3dDictionary`, `assembleContainer`). This is the native g3dcvtr replacement PDSMS needs; the genuinely
+  hard optimiser is *not needed* because the `.imd` already contains its output. All fixtures + expected
+  bytes are checked in (`src/test/resources/imd/`, CI-safe — no wine).
+  - **Byte-exact coverage (single node):** single- and **multi-material / multi-shape** textured models —
+    billboard/non-billboard, hardware-lit/vertex-coloured — model-only (`toNsbmd`) *and* with the texture
+    embedded (`toNsbmdWithTextures`, the `-eboth` TEX0). Material state is **derived** from the `.imd`
+    (`polygon_attr` = lights | mode<<4 | face-cull | alpha<<16; `teximage_param` wrap/flip from `tex_tiling`);
+    `polygon_attr_mask`=`0x3f1ff8ff` and material `misc`=`0x1fce` are constant (verified across variants). The
+    shape set is N structs + N DLs; the material set groups materials by shared texture/palette (dict entries
+    ordered by name), with the SBC emitting one `MAT`/`SHP` pair per node display and the `NODEDESC` **store**
+    flag + `firstUnusedMtxStackId=1` when >1 shape. Fixtures: `rock`/`book`/`pole` (single), `two`/`twotex`
+    (multi-material/shape), `v_flip`/`v_decal` (material state), `*_both` (embedded TEX0). The `.imd` bitmap
+    is 4-hex-digit big-endian words stored little-endian (`"1100"`→`00 11`); palette is `.imd` hex → LE BGR555.
+  - **Multi-*node* — RE'd, not yet implemented (the remaining frontier).** g3dcvtr's `modeltree` rejects
+    naive hand-crafted node hierarchies (`Internal Error`); a **joint root (`kind="null"`) + mesh child** is
+    accepted (see `/tmp` probes `jn`=2-node, `jn3`=3-node during this work). Identity node structs are the
+    same `07 f8 00 10`. The multi-node **SBC is a tree walk with matrix-stack store/restore**, e.g. `jn`:
+    `NODEDESC(root, store slot0) · NODE(mesh) · POSSCALE·MAT·SHP·POSSCALE|end · NODEDESC(mesh,parent=root) ·
+    RET`; siblings use `NODEDESC|0x40` (**restore** slot) — `jn3`: `… NODEDESC(mA,root) · NODEDESC+restore(mB,
+    root) · RET`. **Blockers for a future taker:** (a) crafting valid multi-*mesh* `.imd` inputs is hard
+    without real Maya samples — g3dcvtr silently draws only some nodes when the `node`/`display`/`matrix_array`
+    binding is off; (b) the general case needs g3dcvtr's node-tree→SBC compiler (stack-slot allocation +
+    store/restore ordering) and the non-identity node-transform encoding (T/R/S incl. pivot-compressed
+    rotations — the inverse of `Model.parseNodeLocals`). The single-node section encoders already generalize
+    list-wise; only the node set + SBC tree-walk are new.
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
