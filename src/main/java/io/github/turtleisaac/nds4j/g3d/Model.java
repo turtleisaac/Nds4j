@@ -31,16 +31,19 @@ import java.util.List;
  * form and multiplied by the model's position scale, so they are already in model space.
  * <p>
  * This is the meaningful, exportable representation of the geometry (see {@link #toObj()}); the raw
- * bytes still round-trip byte-for-byte through {@link ModelSet}. Materials, textures and the skeleton
- * are layered on in later work.
+ * bytes still round-trip byte-for-byte through {@link ModelSet}. Materials and textures are layered on
+ * in later work.
  * <p>
- * <b>Known limitation (single-node vs multi-node):</b> the display list binds a bone/node matrix
- * before each shape (via {@code MTX_RESTORE}), which this decoder does not yet apply &mdash; every
- * shape is left in the model's root space. For a single-node model ({@link #getNodeCount()} == 1,
- * the identity case) the decoded geometry matches the model's header bounding box; for multi-node
- * models the parts are mislocated until node transforms are applied. {@link #isSingleNode()} reports
- * which case a model is, and {@link #getDecodedBoundingBox()} / {@link #getHeaderBoundingBox()} let a
- * caller verify placement.
+ * <b>Skeleton / placement:</b> each shape is drawn under a node (bone) transform. The decoder parses
+ * every node's local matrix (translation, rotation &mdash; full or pivot-compressed &mdash; and scale)
+ * and walks the model's SBC render-command stream to learn which node each shape binds to and each
+ * node's parent, then composes world matrices down the hierarchy and applies them to the geometry. As
+ * a self-check, a model's decoded bounding box should match the box its header declares:
+ * {@link #getDecodedBoundingBox()} / {@link #getHeaderBoundingBox()} expose both, and
+ * {@link #isSingleNode()} reports whether a model even has a multi-node skeleton. This lands ~96% of
+ * all retail models exactly; the remainder use segment-scale-compensate skeletons or billboard /
+ * skinning render commands whose final pose a static (bind-pose) decode can't reproduce &mdash; those
+ * are driven by a separate animation file (NSBCA and friends) layered on top.
  */
 public class Model
 {
@@ -169,8 +172,10 @@ public class Model
 
     // Walks the SBC render-command stream to record each node's parent (for the world-matrix hierarchy)
     // and which node is current when each shape is drawn, then resolves node world matrices. Commands:
-    // opcode = byte & 0x1F, flags in the high bits; every command's operand length is consumed so the
-    // walk stays in sync (BB/BBY are 3 bytes, NODEMIX is variable, CALLDL is 8, etc.).
+    // opcode = byte & 0x1F, store/restore flags in the high bits; every command's operand length is
+    // consumed so the walk stays in sync. Operand widths follow NNS exactly: NODEDESC is nodeId, parentId,
+    // opt, then +1 if the 0x20 (store) flag is set and +1 if the 0x40 (restore) flag is set; BB/BBY are
+    // nodeId + the same optional store/restore bytes; NODEMIX is 2 + 3*count; CALLDL is 8; etc.
     private double[][] walkSbc(byte[] d, int sbc, double[][] nodeLocal, int[] shapeNode, int shapeCount)
     {
         int count = nodeLocal.length;
@@ -190,16 +195,23 @@ public class Model
                 case 0x01: stop = true; break;                      // RET
                 case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
                 case 0x03: current = stackNode[d[p++] & 0xFF]; break; // MTX (restore)
-                case 0x04: p += (flags & 0x20) != 0 ? 2 : 1; break; // MAT matId (+ optional)
+                case 0x04: p += 1; break; // MAT matId (flag bits are hints, not extra operands)
                 case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) shapeNode[shp] = current; break; } // SHP
-                case 0x06: {                                        // NODEDESC nodeId, parentId (+ optional stack store/restore)
+                case 0x06: {                                        // NODEDESC nodeId, parentId, opt (+ store/restore slots)
                     int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
+                    p++;                                            // opt byte (S/P bits) - not needed for placement
                     if (nid < count) { parent[nid] = par < count ? par : -1; current = nid; }
-                    if ((flags & 0x40) != 0) { int dst = d[p++] & 0xFF; if (dst < stackNode.length) stackNode[dst] = nid; }
-                    if ((flags & 0x20) != 0) p++;
+                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; } // store to stack
+                    if ((flags & 0x40) != 0) p++;                   // restore-source slot (SrcIdx)
                     break;
                 }
-                case 0x07: case 0x08: p += 3; break;                // BB / BBY (billboard)
+                case 0x07:                                          // BB  (billboard)   nodeId (+ store/restore slots)
+                case 0x08: {                                        // BBY (billboard-Y) nodeId (+ store/restore slots)
+                    int nid = d[p++] & 0xFF; current = nid;
+                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; }
+                    if ((flags & 0x40) != 0) p++;
+                    break;
+                }
                 case 0x09: { int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
                 case 0x0A: p += 8; break;                           // CALLDL
                 case 0x0B: break;                                   // POSSCALE

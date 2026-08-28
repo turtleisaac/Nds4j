@@ -127,10 +127,11 @@ public class ModelSetTest
     {
         // Positional oracle (the vertex-count oracle can't see wrong placement): with node transforms
         // applied, a model's decoded AABB should equal the box the header declares. This guards the
-        // fixed-point scale, posScale and the node-matrix maths. ~89% of all models (97% of single-node)
-        // satisfy it exactly; the rest use pivot-compressed rotation or billboard/skinning render
-        // commands not yet modelled (a documented refinement - see Model's class doc).
-        int placedCorrectly = 0;
+        // fixed-point scale, posScale and the whole node/SBC matrix pipeline. A count-only total is
+        // dominated by the ~4700 single-node models and can hide a multi-node regression, so assert
+        // separate floors for single-node and multi-node models: a desync in the SBC walk (e.g. a wrong
+        // NODEDESC operand width) collapses the multi-node rate specifically.
+        int singleTotal = 0, singleOk = 0, multiTotal = 0, multiOk = 0;
         for (byte[] file : nsbmdFiles)
         {
             for (Model model : new ModelSet(file).getModels())
@@ -146,13 +147,19 @@ public class ModelSetTest
                 boolean match = true;
                 for (int c = 0; c < 3 && match; c++)
                     match = Math.abs(decoded[0][c] - header[0][c]) < tol && Math.abs(decoded[1][c] - header[1][c]) < tol;
-                if (match)
-                    placedCorrectly++;
+                if (model.isSingleNode()) { singleTotal++; if (match) singleOk++; }
+                else                      { multiTotal++;  if (match) multiOk++; }
             }
         }
-        // ~900 of Platinum's ~1030 models must land exactly in their header box with node transforms
-        // applied. A decode/scale/transform regression would collapse this count.
-        assertThat(placedCorrectly).as("models whose decoded AABB matches their header box").isGreaterThan(750);
+        // Single-node models are the identity case and must be essentially perfect (retail Platinum ~98%).
+        assertThat(singleOk).as("single-node models placed correctly (of %d)", singleTotal)
+                .isGreaterThan((int) (0.95 * singleTotal));
+        // Multi-node models exercise the node hierarchy + SBC walk (retail Platinum ~69%; the misses are
+        // segment-scale / billboard / skinning cases). A NODEDESC/operand-size desync - the classic bug -
+        // collapses this to near zero, so a 60% floor catches a regression without being brittle.
+        assertThat(multiTotal).as("the ROM should contain multi-node models").isGreaterThan(100);
+        assertThat(multiOk).as("multi-node models placed correctly (of %d)", multiTotal)
+                .isGreaterThan((int) (0.60 * multiTotal));
     }
 
     @Test
