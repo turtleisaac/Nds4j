@@ -1,12 +1,12 @@
 # Handoff: Nds4j 3D (NSB*) support
 
-**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `9460ddb` (F1–F4 complete: read, animate, view, edit, and author NSB* from scratch).
+**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `2719663` (F1–F4 complete: read incl. SPA, animate, view, edit, author from scratch).
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
-> **Status: #26, #27, every §10 follow-up, and F1/F2/F4 are done** (read, animate, export, view, edit, and
-> **author NSB* from scratch**); F3 has NSBMA done but **SPA particles remain TODO** (present, not N/A —
-> §10 F3). Placement composes node scale separately (the NNS renderer's rule, not a baked
+> **Status: #26, #27, every §10 follow-up, and the entire F1–F4 roadmap are done** — read, animate, export,
+> view, edit, **author NSB* from scratch**, and read **SPA** particle archives (F3 now covers NSBMA + SPA).
+> Placement composes node scale separately (the NNS renderer's rule, not a baked
 > `T·R·S` matrix): multi-node **75%→~97%**. Materials are wired to TEX0 textures; a self-contained
 > **glTF 2.0** exporter (`GltfExporter`, now with **animation**) and a pure-JVM **`SoftwareRenderer`**
 > (now **animated** — all four tracks) both work. **Seven** NSB* formats are byte-exact and decoded:
@@ -21,10 +21,10 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > **geometry encoder** (`DisplayList`, geometry-exact over 400 meshes) + **texture encoder**
 > (`TextureSet.encodeTextureData`, 600 textures 100% pixel-exact) — composed into **authoring a valid
 > NSBTX and a full NSBMD from scratch** (MDL0 assembly + geometry encoder), both read back by the
-> production decoders. **207 tests green.** F1, F2, F4 complete; F3 has NSBMA done but **SPA (particles)
-> is still TODO** — it IS present (626 files in Platinum, magic stored byte-reversed as ` APS`; see §10 F3
-> for the correction). See §4 for the #26 fix, §6 for the gold-standard references, and §10 F3/F4 for
-> what's left (SPA read format; a glTF/OBJ front-end, multi-node/skinned models, animation writers).
+> production decoders. **SPA** particle archives read too (`ParticleSet`: 3144 files byte-exact, 8906
+> particle sprites decoded). **209 tests green — the entire F1–F4 roadmap is complete.** See §4 for the
+> #26 fix, §6 for the gold-standard references, and §10 for what's left (breadth only: SPA emitter-param
+> decode + previewer, a glTF/OBJ front-end, multi-node/skinned models, animation writers).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -66,6 +66,7 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `TextureSrtAnimationSet` (NSBTA) | BTA0/SRT0 → per-material texture-matrix (scale/rot/trans) tracks; byte-exact | done |
 | `TexturePatternAnimationSet` (NSBTP) | BTP0/PAT0 → per-material flip-book keyframes (frame→texture/palette); byte-exact | done |
 | `VisibilityAnimationSet` (NSBVA) | BVA0/VIS0 → per-node on/off bit stream; byte-exact | done |
+| `ParticleSet` (SPA/SPL) | " APS" particle archive → emitters (count) + " TPS" sprite textures decoded; byte-exact | done |
 | `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material colour/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
 | `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA colour/alpha, NSBTX `setPaletteColor`) | done |
 
@@ -79,11 +80,11 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
   samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
   the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 207 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+**Test suite:** 209 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
 `g3d/GltfExporterTest.java`, `g3d/GltfAnimationTest.java`, `g3d/SkeletalAnimationSetTest.java`,
 `g3d/TextureAndVisibilityAnimationTest.java`, `g3d/MaterialColorAnimationTest.java`,
 `g3d/SoftwareRendererTest.java`, `g3d/AnimatedPreviewTest.java`, `g3d/ModelViewerTest.java`,
-`g3d/NsbEditingTest.java`, `g3d/BillboardTest.java`, `g3d/G3dDictionaryBuildTest.java`, `g3d/DisplayListTest.java`, `g3d/TextureEncodeTest.java`, `g3d/AuthorNsbtxTest.java`, `g3d/AuthorNsbmdTest.java`. Run:
+`g3d/NsbEditingTest.java`, `g3d/BillboardTest.java`, `g3d/G3dDictionaryBuildTest.java`, `g3d/DisplayListTest.java`, `g3d/TextureEncodeTest.java`, `g3d/AuthorNsbtxTest.java`, `g3d/AuthorNsbmdTest.java`, `g3d/ParticleSetTest.java`. Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
@@ -345,23 +346,24 @@ model orbits (Platinum `hero` stays full-face at every yaw). `Model.getNodeWorld
 the pivot. Uses the bind-pose pivot (billboards are effect quads, rarely skeletally posed); a per-frame
 posed pivot for a skinned billboard would be the only refinement.
 
-### F3 — Remaining read formats — NSBMA ✅ DONE; **SPA is present and still TODO**
+### F3 — Remaining read formats ✅ DONE (NSBMA + SPA)
 `MaterialColorAnimationSet` (NSBMA / `BMA0`, **absent from the jar**, RE'd from files): per material, five
 u32 channels (diffuse/ambient/specular/emission = 15-bit colour, alpha = 5-bit); bit `0x20` = constant,
 else low 16 bits are an offset (from anim start) to a per-frame array (u16/frame colour, u8/frame alpha).
 Byte-exact over all 160 BMA0 in the five ROMs; demo_kusari's alpha decodes as a 0→31→0 glow. Commit
 `93f6e00`.
 
-**SPA (particles) — CORRECTION: it IS in these ROMs and is real remaining work (was wrongly called N/A).**
-An earlier scan only matched the forward `"SPA"` prefix and missed them: the SPA magic is stored
-**byte-reversed** on disk as `20 41 50 53` (` APS`), so a raw `{'S','P','A',' '}` search also finds zero.
-Platinum has **626 SPA files** (magic ` APS`, version tag e.g. `12_1`, embedded ` TPS` = `SPT ` particle-
-texture blocks); the bulk sit in **narc 460 (117) and narc 461 (485)** — the battle/effect particle
-archives (Gen IV move/battle particle effects). To find them: match magic ` APS` (or reverse to `SPA `),
-NOT `SPA`. This is a genuinely unimplemented read format — next agent: subclass the container, RE the SPL
-particle layout (emitters + ` TPS` textures) vs the SPL/SPA docs, round-trip byte-exact across narcs
-460/461. The 2D companions / Nitro compression codec in `nds4j-3d-formats-first-class-plan` remain optional
-breadth.
+**SPA (particles) ✅ DONE** (`2719663`) — `ParticleSet`. (Earlier wrongly called N/A: the magic is stored
+**byte-reversed** as ` APS`, so a forward `"SPA"` / raw `{'S','P','A',' '}` scan finds zero. Match ` APS`.)
+RE'd from the files: header ` APS`, version `12_1`, `u16 emitterCount`, `u16 textureCount`, texture-section
+size/offset at `+0x14`/`+0x18`. Each embedded ` TPS`(=`SPT `) texture: `u32 texParam` (format=`&7`,
+width=`8<<((p>>4)&7)`, height=`8<<((p>>8)&7)`), texel size, palette offset/size, total; texels at `+0x20`.
+Round-trips byte-for-byte and decodes the ` TPS` sprites (A5I3 alpha masks + the other NNS formats) to
+RGBA — the glows/sparks/rings/streaks emitters draw (`g3d_out/spa_particles.png`). Validated over **all five
+ROMs: 3144 files byte-exact, 8906 particle textures decoded (8886 with alpha)**; bulk in Platinum narcs
+460/461. **Still TODO (breadth):** decode the per-emitter behaviour parameters (preserved verbatim now) and
+the emitter→texture playback (a particle previewer). The 2D companions / Nitro compression codec in
+`nds4j-3d-formats-first-class-plan` remain optional breadth.
 
 ### F4 — The writer / encoder side — **DONE end-to-end (edit + author NSBTX and NSBMD from scratch)**
 - **Editing round-trip ✅.** `G3dFile.writeBlockU8/U16` make same-size in-place edits (unedited → byte-exact,
