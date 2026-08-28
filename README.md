@@ -57,8 +57,11 @@ stack can **author** files from scratch and **preview** them, all in pure Java (
   the resource dictionaries (`g3d.G3dDictionary` emits nodes in the same pre-order `g3dcvtr` does &mdash;
   verified against all 5388 retail dictionaries), and the geometry display lists (`g3d.DisplayList`'s
   `decodeCommands`/`encodeCommands` losslessly round-trip the raw GPU command stream &mdash; verified
-  byte-for-byte over all 19433 retail display lists). Together with the container writer
-  (`G3dFile.assembleContainer`) that is ~half of an `MDL0`'s bytes reproduced exactly from a decoded model.
+  byte-for-byte over all 19433 retail display lists). `g3d.ModelSet.reencodeModels()` composes both with the
+  container writer to reconstruct a whole `MDL0` from its decoded structure &mdash; every dictionary and
+  display list rebuilt from semantics, fixed structs kept verbatim &mdash; reproducing the file
+  **byte-for-byte over all 5482 retail models** (and reproducing `g3dcvtr`'s own output exactly). This is the
+  byte-exact re-encode path that survives edits.
 * **Export** &mdash; `g3d.GltfExporter` (self-contained glTF 2.0, static or animated) and `Model.toObj()`.
 * **Preview** &mdash; `g3d.SoftwareRenderer` (headless rasteriser), `g3d.ModelViewer`/`ModelViewerFrame` (Swing
   orbit/scrub/play), `g3d.NitroAnimation` (composes all four animation tracks), `g3d.AnimatedGif`, and
