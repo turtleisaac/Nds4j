@@ -99,6 +99,45 @@ public abstract class G3dFile extends GenericNtrFile
     }
 
     /**
+     * Assembles a complete NSB* container from freshly-built blocks &mdash; the writer-side counterpart to
+     * {@link #readContainer} and, with {@link G3dDictionary#build}, the pair a source&rarr;NSB* converter
+     * needs. Writes the NTR header, the block offset table and the blocks in order, exactly as a retail
+     * file lays them out (little-endian, {@code 0xFEFF} BOM, {@code 0x10}-byte header). Re-encoding an
+     * unmodified file's own blocks with its own {@code version} reproduces it byte-for-byte.
+     * @param magic the file magic (e.g. {@code "BMD0"})
+     * @param version the NTR version half-word (from the source file, or 1 for a fresh authored file)
+     * @param blocks the blocks in order, each starting with its own magic
+     * @return the assembled file bytes
+     */
+    public static byte[] assembleContainer(String magic, int version, byte[]... blocks)
+    {
+        int numBlocks = blocks.length;
+        long dataStart = NTR_HEADER_SIZE + numBlocks * 4L;
+        long[] offsets = new long[numBlocks];
+        long off = dataStart;
+        for (int i = 0; i < numBlocks; i++) { offsets[i] = off; off += blocks[i].length; }
+        long fileSize = off;
+
+        MemBuf buf = MemBuf.create();
+        MemBuf.MemBufWriter writer = buf.writer();
+        writer.writeString(magic);
+        writer.writeShort((short) 0xFEFF);
+        writer.writeShort((short) version);
+        writer.writeUInt32(fileSize);
+        writer.writeShort((short) NTR_HEADER_SIZE);
+        writer.writeShort((short) numBlocks);
+        for (long o : offsets)
+            writer.writeUInt32(o);
+        for (int i = 0; i < numBlocks; i++)
+        {
+            writer.setPosition((int) offsets[i]);
+            writer.write(blocks[i]);
+        }
+        writer.setPosition((int) fileSize);
+        return buf.reader().getBuffer();
+    }
+
+    /**
      * Gets the verbatim bytes of block <code>i</code>, starting at the block's magic. Offsets parsed
      * out of the block are relative to this array's first byte.
      * @param i the block index
