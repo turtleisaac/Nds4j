@@ -15,8 +15,9 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > See §4 for the #26 fix (hypothesis was wrong), §10 for the genuinely-open nice-to-haves (wire the
 > texture/visibility animations into the renderer/exporter; a live viewer; SPA particles).
 
-Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory note
-`nds4j-3d-formats-first-class-plan`. This doc is the *working* handoff; `TECH_DEBT.md` is the durable
+Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
+`nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
+scurest/nsbmd_docs + Apicula — see §6). This doc is the *working* handoff; `TECH_DEBT.md` is the durable
 policy.
 
 ---
@@ -215,12 +216,33 @@ gap. Fix: `Model.Srt` (t/s/r kept apart), `compose()` = `renderer.TransfMatrix.a
 
 ---
 
-## 6. The reference jar (decoding oracle, NOT a dependency)
+## 6. Decoding references (oracles, NOT dependencies)
 
-`Nds4j/NitroSystemTool.jar` (gitignored; package `nitroreader`, from decaf-nds/original_nds4j_repo).
-It reads all NSB* formats and is kept **only** to check our output against. **Never wrap or depend on
-it** — everything must be reverse-engineered natively and round-trip byte-exact (`TECH_DEBT.md` and the
-memory note both state this).
+**Gold standard — start here (memory: `nsb-gold-standard-references`):**
+- **[scurest/nsbmd_docs](https://github.com/scurest/nsbmd_docs/blob/master/nsbmd_docs.txt)** — the best
+  prose spec for NSBMD (node SRT, pivot/basis rotation, display list, bounding box). Confirmed our
+  rotation decode exactly; note it marks the header **`BoundingBox … TODO: verify`** (so it is *not* a
+  hard "bounds all bind-pose geometry" invariant — the reason ~2.5% of multi-node models decode correctly
+  yet fall outside their authored box; see §10/§3).
+- **[scurest/apicula](https://github.com/scurest/apicula)** — a mature *independent* Rust decoder
+  (`src/nitro/*.rs`: `model.rs`, `render_cmds.rs`). Different author/language, so agreement with it breaks
+  the shared-bug risk. `WebFetch` the raw source to cross-check.
+- **Also independent:** Gericom/EveryFileExplorer (C#), kiwi.ds docs. Weaker/derivative: Tinke (doesn't
+  open all NSBMD variants), DSPRE incl. its Avalonia branch (delegates model work to an Apicula/g3dcvtr
+  backend — good for Gen4 wiring, not a fully independent decoder).
+
+**Caveat (gold standard ≠ infallible):** Apicula bakes `T*R*S` with **no segment-scale-compensate**
+(`model.rs`), i.e. our OLD compose — it matches the g3dcvtr box at only 75% multi-node vs our separate
+scale's 96%. On hierarchical scale/SSC *ours* is better-validated. So **triangulate** (gold standard +
+g3dcvtr's own header box + the decoder-independent vertex-count oracle); don't defer to any single source.
+Same lesson applies to the jar below, which has been caught wrong (NSBTA reads negative fx16 constants as
+unsigned; our signed reading is correct).
+
+**Convenient second opinion — the reference jar:** `Nds4j/NitroSystemTool.jar` (gitignored; package
+`nitroreader`, from decaf-nds/original_nds4j_repo) reads all NSB* formats and is byte-level and
+`javap`-able, which makes it fast to check operand widths and struct offsets. Use it, but **as a second
+opinion, not the arbiter**, and **never wrap or depend on it** — everything is RE'd natively and
+round-trips byte-exact (`TECH_DEBT.md` and the memory notes state this).
 
 No decompiler is available; use `javap`. This is how the SBC table in §2 was verified:
 ```
@@ -235,9 +257,10 @@ Classes used for the done tasks (kept as a map for the remaining formats):
 - NSBCA (#27.2): `nsbca.{JointAnmSet,JointAnm,TagData,NodeAnimation}`, `nsbca.animtag.*` (const/variable
   trans/scale/rot + `readRot3Matrix`/`readRot5Matrix`), `renderer.ObjectGL.generateAnimation`
   (interpolation = linear).
-- Remaining formats (§10): `nitroreader.nsbta.*` (NSBTA texture SRT anim), `nsbtp.*` (NSBTP pattern
-  anim), `nsbva.*` (NSBVA visibility anim). `g3dcvtr` (see memory `g3dcvtr-re-resource`) is the fair-use
-  RE target when the jar is thin, especially for the **writer/encoder** side.
+- Remaining formats (§10): cross-check against nsbmd_docs + Apicula first, then `nitroreader.nsbta.*`
+  (NSBTA), `nsbtp.*` (NSBTP), `nsbva.*` (NSBVA) as the byte-level second opinion. `g3dcvtr` (memory
+  `g3dcvtr-re-resource`) is the fair-use RE target when the references are thin, especially the
+  **writer/encoder** side.
 
 ---
 
