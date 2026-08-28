@@ -1,6 +1,6 @@
 # Handoff: Nds4j 3D (NSB*) support
 
-**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `9c057b2`.
+**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `81fd5b8` (F1–F4 roadmap + encoder foundation).
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
@@ -15,9 +15,11 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > `ModelViewer` is a headless-capable Swing/Java2D viewer (orbit, scrub, play, inspect, texture browser).
 > The **writer foundation** (`G3dFile.writeBlockU8/U16`) supports byte-valid in-place edits — NSBMA
 > colour/alpha keyframes and NSBTX palette recolour (incl. embedded TEX0, so `ModelSet.save()` re-emits
-> a valid repainted model). Camera-facing **BB/BBY billboards** render (a sprite tracks the camera).
-> **199 tests green.** See §4 for the #26 fix, §6 for the gold-standard references, and §10 for what's
-> done vs the **one remaining frontier: full source→NSB* conversion** (the g3dcvtr replacement).
+> a valid repainted model). Camera-facing **BB/BBY billboards** render. The **encoder foundation** is in:
+> `G3dDictionary.build`/`lookup` (valid NNS Patricia dictionary from scratch — 5388 retail dicts, 100%
+> functional) + `G3dFile.assembleContainer` (byte-exact). **202 tests green.** See §4 for the #26 fix,
+> §6 for the gold-standard references, and §10 F4 for what's done vs the geometry/texture encoders that
+> remain to finish full source→NSB* conversion.
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -72,11 +74,11 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
   samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
   the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 199 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+**Test suite:** 202 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
 `g3d/GltfExporterTest.java`, `g3d/GltfAnimationTest.java`, `g3d/SkeletalAnimationSetTest.java`,
 `g3d/TextureAndVisibilityAnimationTest.java`, `g3d/MaterialColorAnimationTest.java`,
 `g3d/SoftwareRendererTest.java`, `g3d/AnimatedPreviewTest.java`, `g3d/ModelViewerTest.java`,
-`g3d/NsbEditingTest.java`, `g3d/BillboardTest.java`. Run:
+`g3d/NsbEditingTest.java`, `g3d/BillboardTest.java`, `g3d/G3dDictionaryBuildTest.java`. Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
@@ -352,26 +354,26 @@ compression codec in `nds4j-3d-formats-first-class-plan` remain optional breadth
   edited → byte-valid; offset table untouched). Concrete: NSBMA `ColorChannel.setRaw/setRgb` +
   `ScalarChannel.set`; NSBTX `TextureSet.setPaletteColor` (incl. embedded TEX0 → `ModelSet.save()` re-emits
   a valid repainted model). Verified minimal/reversible + a visible manene recolour. Commit `0b8d6ad`.
-- **Full conversion (the g3dcvtr replacement) — the major frontier (started: structure mapped).** source
-  (glTF/IMD-like) → NSBMD/NSBTX/NSBCA/…: display-list encoding (quantise verts, choose primitive strips,
-  emit the geometry command stream), build NNS dictionaries incl. the **Patricia tree**, texture/palette
-  encoding, and the container offset table. The open-source win flagged in memory `g3dcvtr-re-resource`:
-  **PDSMS depends on the g3dcvtr binary**, and a native encoder drops it. RE the *writer* against `g3dcvtr`
-  (fair-use) + the gold-standard docs. **Oracle:** decode→encode→decode stable, output loads in-game /
-  re-reads identically; match g3dcvtr's layout where a ROM expects it. Size-changing edits (add keyframes,
-  longer names) need the offset-table + dictionary rebuild this provides — the in-place editor above
-  deliberately covers only same-size edits until then.
-  - **Leg-up — the `G3dDictionary` on-disk format is now fully mapped** (the one structure every NSB*
-    writer rebuilds; `G3dDictionary` currently preserves it verbatim as `rawTree`). After `u8 revision`,
-    `u8 count`: `u16 sizeDict` (total dict bytes = `2 + (10+count*4) + 4 + count*elemSize + count*16`),
-    then a 4-byte tree header (`u16 = 0x0008`, `u16 = 12 + 4*count`), then **(count+1) 4-byte Patricia
-    nodes** `{u8 refBit, u8 idxLeft, u8 idxRight, u8 idxEntry}`, then `u16 elemSize`, `u16 ofsData`, the
-    `count×elemSize` records, and the `count×16` names. Node[0] is the root sentinel (`refBit=0x7f`).
-    `refBit` is an MSB-first bit index into the name (`byte = refBit/8`, `bit = refBit&7`); the tree
-    branches on the bits where names differ (verified: lambert21/22/23 branch on byte 8 bits 0/1/5 →
-    refBits 0x40/0x41/0x45). What remains is to reproduce **NNS's exact insert order / refBit choice**
-    byte-for-byte (implement the standard NNS radix insertion, then validate `build(names,records)` against
-    every retail dict via byte compare — a fully headless oracle, no in-game step needed for this piece).
+- **Full conversion (the g3dcvtr replacement) — FOUNDATION DONE, geometry/texture encoders remain.**
+  The two reusable keystones every source→NSB* converter needs are now tested library code (`81fd5b8`):
+  - **`G3dDictionary.build(names, records, elemSize)`** constructs the NNS Patricia tree from scratch
+    (leaf `refBit` = highest set bit of the name; internal `refBit` = highest bit where the new name
+    diverges from the matched leaf; standard patricia splice) and assembles the full on-disk layout
+    (header `sizeDict = 16+count*(20+elemSize)`, const `0x0008`, `12+4*count`, `(count+1)` 4-byte nodes
+    `{refBit, idxLeft, idxRight, idxEntry}`, `elemSize`, `ofsData = 4+count*elemSize`, records, names).
+    `G3dDictionary.lookup(name)` mirrors the DS traversal. **Validated on 5388 retail dictionaries: 100%
+    functionally correct, 100% re-parse-identical, 46% byte-exact** (node numbering aligns). A valid tree
+    regardless of numbering — which is what authoring needs. Bit index is LSB within the byte
+    (`(name[refBit>>3] >> (refBit&7)) & 1`), missing bytes read 0.
+  - **`G3dFile.assembleContainer(magic, version, blocks)`** writes the NTR header + offset table + blocks;
+    rebuilds real BMA0/BTA0/BTP0 byte-for-byte.
+  - **What remains for an end-to-end pipeline (format-specific, builds on the above):** display-list /
+    geometry encoding (quantise verts, choose strips, emit the command stream), texture/palette encoding,
+    and — for byte-*exact* dictionaries — reproducing NNS's exact node **numbering** (the 54% where ours
+    differs is equivalent-but-renumbered; the headless oracle is byte-compare vs retail). RE the writer
+    against `g3dcvtr` (fair-use, memory `g3dcvtr-re-resource`) — **PDSMS depends on the g3dcvtr binary**,
+    and a native encoder drops it. Size-changing edits (add keyframes, longer names) now have their
+    dictionary/container rebuild available; the in-place editor above stays same-size for simplicity.
 
 **Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE from the
 **gold standard** (nsbmd_docs + Apicula, §6) and use the jar as a byte-level second opinion (NSBMA had no
