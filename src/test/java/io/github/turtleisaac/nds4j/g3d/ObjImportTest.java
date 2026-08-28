@@ -23,6 +23,8 @@ import org.assertj.core.data.Offset;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.awt.image.BufferedImage;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -98,6 +100,58 @@ public class ObjImportTest
         }
 
         assertThat(ms.save()).as("authored NSBMD round-trips its own bytes").isEqualTo(nsbmd);
+    }
+
+    @Test
+    @DisplayName("a textured OBJ authors an NSBMD with a bound, embedded, pixel-exact texture")
+    void importAuthorsTexturedNsbmd()
+    {
+        // A single textured quad (two triangles) mapping the whole texture.
+        String obj = String.join("\n",
+                "v -1 -1 0", "v 1 -1 0", "v 1 1 0", "v -1 1 0",
+                "vt 0 0", "vt 1 0", "vt 1 1", "vt 0 1",
+                "f 1/1 2/2 3/3 4/4");
+        ObjImporter imp = ObjImporter.parse(obj);
+        assertThat(imp.hasTexcoords()).isTrue();
+
+        int tw = 16, th = 16;
+        BufferedImage tex = new BufferedImage(tw, th, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < th; y++)
+            for (int x = 0; x < tw; x++)
+            {
+                // 5-bit-aligned channels so direct BGR555 is lossless (pixel-exact readback)
+                int r = (x * 8) & 0xF8, g = (y * 8) & 0xF8, b = (((x + y) * 4) & 0xF8);
+                tex.setRGB(x, y, 0xFF000000 | (r << 16) | (g << 8) | b);
+            }
+
+        float[] uv = imp.texcoordsInTexels(tw, th);
+        byte[] nsbmd = ModelBuilder.buildTextured("quad", imp.getPositions(), uv, imp.getTriangles(), tex);
+
+        ModelSet ms = new ModelSet(nsbmd);
+        Model m = ms.getModels().get(0);
+        assertThat(ms.hasEmbeddedTextures()).isTrue();
+
+        // the material binds the embedded texture by name, and the mesh binds the material
+        assertThat(m.getMaterials()).hasSize(1);
+        assertThat(m.getMaterials().get(0).getTextureName()).isEqualTo("tex0");
+        assertThat(m.getMeshes().get(0).getMaterial()).isNotNull();
+        assertThat(m.getMeshes().get(0).getMaterial().getName()).isEqualTo("mat0");
+
+        // the embedded texture decodes to the exact authored image
+        TextureSet embedded = ms.getEmbeddedTextures();
+        assertThat(embedded.getTextures()).hasSize(1);
+        TextureSet.Texture t = embedded.getTextures().get(0);
+        assertThat(t.getName()).isEqualTo("tex0");
+        assertThat(t.getWidth()).isEqualTo(tw);
+        assertThat(t.getHeight()).isEqualTo(th);
+        BufferedImage decoded = embedded.getImage(t);
+        for (int y = 0; y < th; y++)
+            for (int x = 0; x < tw; x++)
+                assertThat(decoded.getRGB(x, y) & 0xFFFFFF)
+                        .as("embedded pixel (%d,%d) survives author->read", x, y)
+                        .isEqualTo(tex.getRGB(x, y) & 0xFFFFFF);
+
+        assertThat(ms.save()).as("authored textured NSBMD round-trips its own bytes").isEqualTo(nsbmd);
     }
 
     @Test
