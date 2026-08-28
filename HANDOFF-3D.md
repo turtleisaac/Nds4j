@@ -233,6 +233,15 @@ gap. Fix: `Model.Srt` (t/s/r kept apart), `compose()` = `renderer.TransfMatrix.a
    Before implementing a hypothesised mechanism, disassemble the reference path that consumes the data
    (`renderer.TransfMatrix` / `gpucommands.VTX` here) and copy what it *does*, not what a comment says.
 
+9. **The SPA "N/A" blunder: a one-directional magic scan wrongly declared a whole format absent.** SPA
+   (Gen IV move/battle particles) was confidently reported as "no files exist in any ROM" — twice, once
+   even after a *raw* whole-image byte search for `{'S','P','A',' '}`. Both were wrong because **the SPA
+   magic is stored byte-reversed on disk as ` APS`** (`20 41 50 53`). There are 626 in Platinum alone
+   (narcs 460/461). **Lesson:** when checking for a 4CC, search **both byte orders** (NNS/SPL magics are
+   frequently little-endian on disk — NSB* happen to read forward, SPL does not); and never conclude
+   "format absent" from a single-orientation scan — dump the actual on-disk magic histogram first (a
+   4-char census over every file, non-ASCII shown as `.`, is how ` APS` finally surfaced — see §9).
+
 ---
 
 ## 6. Decoding references (oracles, NOT dependencies)
@@ -315,11 +324,69 @@ NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview ra
 
 ---
 
-## 10. Roadmap: F1–F4 status (F1–F3 + the writer foundation are DONE)
+## 9. Session quirks, RE workflow, and the prioritized remaining work
+
+### 9a. What's left, in priority order (all breadth — nothing blocks the above)
+1. **SPA emitter decode + particle previewer.** `ParticleSet` reads the header and decodes the ` TPS`
+   sprite textures, but the **per-emitter behaviour parameters** (spawn rate, velocity, gravity,
+   colour/size-over-life curves) are preserved verbatim, not parsed. RE the emitter struct (starts right
+   after the 0x20-byte header, `emitterCount` of them before the texture section at `+0x18`) and add a
+   `SoftwareRenderer`/viewer path that actually *plays* a move effect. This is the biggest visible gap.
+2. **A glTF/OBJ import front-end.** The encoders (`DisplayList.encode`, `TextureSet.encodeTextureData`,
+   `G3dDictionary.build`, `G3dFile.assembleContainer`) already take plain vert/tri/uv/pixel arrays and
+   author byte-valid NSBTX/NSBMD (§10 F4). A parser from glTF/OBJ → those arrays is the missing piece for
+   a real converter — then wire richer **multi-node / skinned / multi-material / multi-shape** models
+   (the `AuthorNsbmd*` capstones are single-node/single-shape).
+3. **Animation writers** (NSBCA/NSBTA/NSBTP/NSBVA/NSBMA): same recipe — serialize the decoded tracks +
+   `G3dDictionary.build` the dicts + `assembleContainer`. Round-trip an edited animation.
+4. **`MTX_SCALE`** (display-list op `0x1B`, currently skipped — §4) for the handful of `g_demo_*` effects.
+5. **True billboard for a *posed* skinned billboard** (§10 F2 uses the bind-pose pivot; fine for effect
+   quads). **2D companions / Nitro compression codec** (memory `nds4j-3d-formats-first-class-plan`).
+6. **g3dcvtr layout matching** for byte-*exact* authored files where a specific ROM slot needs it (our
+   authored files are byte-*valid*, not byte-identical to g3dcvtr's packing).
+
+### 9b. RE workflow for a new/undocumented format (how SPA and NSBMA were cracked)
+- **Magic census first.** Before assuming anything, tally the 4-char magic of *every* file in *every*
+  NARC (non-ASCII → `.`), and search **both byte orders**. This is what surfaced ` APS` (§5.9). A throwaway
+  `Main` on `Nds4j/target/classes` + the maven dep classpath (`mvn -f Nds4j/pom.xml
+  dependency:build-classpath -Dmdep.outputFile=/tmp/cp.txt`) is the pattern (see §7).
+- **Crack bitfields by correlating a field against a size/count you already trust.** The SPT `texParam`
+  didn't decode as a standard `texImageParam`; dumping `param` vs `texelSize` across ~16 blocks showed
+  `format=p&7`, `w=8<<((p>>4)&7)`, `h=8<<((p>>8)&7)` (each candidate width×height×bpp had to equal the
+  texel size). Same trick fixed NSBMA's colour-vs-alpha strides (adjacent materials' offset spacing =
+  `frames×stride`).
+- **Byte-exact round-trip is nearly free and is the real correctness bar** (§0): keep the raw bytes,
+  return them from `save()`. Decode is a read-only *view* on top; a partial decode still ships a correct,
+  round-tripping reader (that's exactly `ParticleSet`'s emitter handling).
+
+### 9c. Encoder / rendering gotchas (bit me this session)
+- **DIRECT/BGR555 encode must use `>>3`, not `*31/255`.** The decoder is `bits<<3`; only `>>3` is its
+  exact inverse. `*31/255` rounds high values wrong (248→30→240) and silently costs byte-exactness.
+- **NNS dictionary node *numbering* is unrecoverable, but validity isn't.** `G3dDictionary.build` emits a
+  functionally-correct canonical tree (100% lookups) that is byte-exact only 46% of the time — the
+  critbit *multiset* always matches retail; only array order differs (lost pre-sort authoring order).
+  Byte-valid is enough to author; byte-exact re-encode of an existing file = verbatim preservation (§10 F4).
+- **Animated GIF disposal must be `"none"`** in the `javax.imageio` metadata tree — `"restoreToBackground"`
+  is an *invalid* value and throws `IIOInvalidTreeException` (`AnimatedGif`).
+- **Swing offscreen/headless:** `ModelViewer.renderView` paints straight to a `BufferedImage` (no
+  `JFrame` — that throws `HeadlessException`); the `ModelViewerFrame` shell is only built with a display.
+  This is why the viewer can snapshot itself in tests/CI.
+- **DS display-list encoding trick:** emit **one command per 4-byte word, NOP-padded** (`[op,0,0,0]` then
+  params). NOP consumes no operands, so the decoder stays in sync — far simpler than packing 4 real
+  opcodes/word, and geometry-exact (`DisplayList`).
+- Rendered checkpoints for every milestone are in **`g3d_out/`** (walk/scroll/flip-book/recolour/billboard/
+  particle sheets + GIFs, animated `.gltf`, authored `.nsbtx`/`.nsbmd`). `g3d_out/` is outside the repo,
+  not committed.
+
+---
+
+## 10. Roadmap: F1–F4 status — **all DONE**; remaining work is §9's breadth list
 
 The §4 numbered tasks and every earlier §10 follow-up are done (all read formats byte-exact; glTF export;
-`SoftwareRenderer`; billboard oracle handling; MTX_SCALE resolved — §1). The forward roadmap below is now
-**mostly delivered**; only the full-conversion frontier and true billboard rendering remain.
+`SoftwareRenderer`; billboard oracle handling; MTX_SCALE resolved — §1). The full F1–F4 forward roadmap
+below is **delivered**: animate, export, view (incl. billboards), the seventh+SPA read formats, in-place
+editing, and authoring both NSBTX and NSBMD from scratch. What's genuinely left is **breadth, not
+blockers** — see the prioritized list in **§9**.
 
 ### F1 — Animate the preview and the export ✅ DONE
 - **`SoftwareRenderer` (animated).** `NitroAnimation` (new) composes the four tracks into a per-frame
@@ -370,8 +437,8 @@ the emitter→texture playback (a particle previewer). The 2D companions / Nitro
   edited → byte-valid; offset table untouched). Concrete: NSBMA `ColorChannel.setRaw/setRgb` +
   `ScalarChannel.set`; NSBTX `TextureSet.setPaletteColor` (incl. embedded TEX0 → `ModelSet.save()` re-emits
   a valid repainted model). Verified minimal/reversible + a visible manene recolour. Commit `0b8d6ad`.
-- **Full conversion (the g3dcvtr replacement) — FOUNDATION DONE, geometry/texture encoders remain.**
-  The two reusable keystones every source→NSB* converter needs are now tested library code (`81fd5b8`):
+- **Full conversion (the g3dcvtr replacement) — DONE end-to-end for NSBTX and NSBMD.** Every keystone
+  below is tested library code; they compose into authoring both formats from scratch (`AuthorNsbtx/NsbmdTest`):
   - **`G3dDictionary.build(names, records, elemSize)`** constructs the NNS Patricia tree from scratch
     (leaf `refBit` = highest set bit of the name; internal `refBit` = highest bit where the new name
     diverges from the matched leaf; standard patricia splice) and assembles the full on-disk layout
