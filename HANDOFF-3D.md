@@ -4,8 +4,8 @@
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
-> **Status: #26, #27, every §10 follow-up, AND the F1–F4 forward roadmap (through the writer
-> foundation) are done.** Placement composes node scale separately (the NNS renderer's rule, not a baked
+> **Status: #26, #27, every §10 follow-up, AND the entire F1–F4 forward roadmap are done** — read,
+> animate, export, view, edit, and **author NSB* from scratch**. Placement composes node scale separately (the NNS renderer's rule, not a baked
 > `T·R·S` matrix): multi-node **75%→~97%**. Materials are wired to TEX0 textures; a self-contained
 > **glTF 2.0** exporter (`GltfExporter`, now with **animation**) and a pure-JVM **`SoftwareRenderer`**
 > (now **animated** — all four tracks) both work. **Seven** NSB* formats are byte-exact and decoded:
@@ -19,7 +19,7 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > Patricia dictionary builder (`G3dDictionary.build`, 5388 dicts 100% functional) + container assembler +
 > **geometry encoder** (`DisplayList`, geometry-exact over 400 meshes) + **texture encoder**
 > (`TextureSet.encodeTextureData`, 600 textures 100% pixel-exact) — composed into **authoring a valid
-> NSBTX **and** a full **NSBMD from scratch** (MDL0 assembly + geometry encoder), both read back by the
+> NSBTX and a full NSBMD from scratch** (MDL0 assembly + geometry encoder), both read back by the
 > production decoders. **207 tests green — the entire F1–F4 roadmap is complete.** See §4 for the #26 fix,
 > §6 for the gold-standard references, and §10 F4 for what's left (breadth only: a glTF/OBJ front-end,
 > multi-node/skinned models, animation writers).
