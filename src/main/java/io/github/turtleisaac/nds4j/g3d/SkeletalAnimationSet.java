@@ -39,6 +39,14 @@ import java.util.List;
  * (constant tracks inline; variable tracks as keyframe arrays sampled every 1/2/4 frames with linear
  * interpolation, rotations as pivot- or 5-value-compressed 3&times;3 matrices in shared pools). Layout
  * reverse-engineered from the reference {@code nitroreader.nsbca.*} decoder.
+ * <p>
+ * <b>Writer status:</b> the sibling animation sets (NSBVA/NSBTP/NSBTA/NSBMA) have byte-exact {@code encode()}
+ * re-encoders; NSBCA does not yet. Its payload is the hardest of the five &mdash; two shared, de-duplicated
+ * rotation-matrix pools (pivot 6-byte and 5-value 10-byte entries, indexed by {@code u16}) plus per-node
+ * variable-length blocks &mdash; so a byte-exact re-encoder must rebuild both pools (dedup + index assignment,
+ * choosing pivot vs 5-value per matrix) and relay the node blocks with repointed offsets. The container and
+ * {@code JNT0} block already round-trip byte-for-byte via {@link G3dFile#save()}; the layout for a future
+ * re-encoder is documented on {@link Animation} and the pool readers below (see also handoff §9c).
  */
 public class SkeletalAnimationSet extends G3dFile
 {

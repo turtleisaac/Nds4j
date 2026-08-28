@@ -30,7 +30,9 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > multi-material and multi-shape; SBC matrix-stack allocator and node local matrices validated byte-for-byte,
 > exposed as an enriched class-based API into the flagship `ModelSet`/`TextureSet`), an **animation writer**
 > (`AnimationBuilder`, NSBTA), **MTX_SCALE** resolved as a non-gap, a **posed billboard** pivot, and a general
-> **Nitro LZ10/LZ11 codec** (`NitroLz`). See §4 for the
+> **Nitro LZ10/LZ11 codec** (`NitroLz`). The **animation half of g3dcvtr** is now four-fifths ported too:
+> byte-exact **NSBVA/NSBTP/NSBTA/NSBMA** writers (`encode()`), each round-trip-validated over the entire retail
+> corpus (NSBCA skeletal pending — see §9c). See §4 for the
 > #26 fix, §6 for the gold-standard references, §9a for the delivered breadth list, and §10 for the roadmap.
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
@@ -79,6 +81,7 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `ImdImporter` | native **`.imd`→NSB\*** translator, **byte-identical to g3dcvtr** (`-emdl`/`-eboth`/`-etex`); multi-node + full node transforms + multi-material/shape; enriched class API → `ModelSet`/`TextureSet` | done |
 | `ModelBuilder` | author NSBMD from arrays: untextured / textured (embedded TEX0) / **multi-shape multi-material**; auto posScale + header box | done |
 | `AnimationBuilder` | author **NSBTA** (texture-SRT) from scratch (constant/keyframe channels) — the animation-writer recipe | done |
+| Animation **writers** (`encode()`) | byte-exact **NSBVA/NSBTP/NSBTA/NSBMA** re-encoders (the animation half of g3dcvtr), round-trip-validated over the whole retail corpus; **NSBCA** writer pending (see §9c) | 4/5 |
 | `NitroLz` (framework) | general **Nitro LZ10/LZ11** codec: decompress + compress, round-trip-exact; feeds the 3D pipeline (compressed NSBMD) | done |
 | `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material colour/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
 | `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA colour/alpha, NSBTX `setPaletteColor`) | done |
@@ -463,14 +466,39 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
       `NODEDESC` past the draw) that no retail model uses; `generateSbc` emits the standard retail-style stream
       there instead (valid and renderable, but not byte-equal to that one g3dcvtr edge path).
 
-**Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
-*writers* (the `AnimationBuilder` recipe generalizes; these are also g3dcvtr's `.ica`/`.itp`/`.iva`/`.ima`
-intermediate → NSB\* animation converters, i.e. the animation half of g3dcvtr — the *model* half `.imd`→NSBMD/
-NSBTX is done); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz` already decompresses them). Two g3dcvtr
-*variant flags* on the model path are also unported (both non-default, so retail output is unaffected and
-`ImdImporter` matches it): **`-s`** "store all matrices on the stack" (a non-optimal SBC that forces every node
-onto the matrix stack) and **`-texsrt`** "always output the texture-matrix data field" (emit a material texture
-SRT slot even when identity). Nothing here blocks PDSMS dropping the g3dcvtr binary for model conversion.
+### 9c. Animation writers — the animation half of g3dcvtr (4 of 5 byte-exact)
+
+g3dcvtr's other half converts NITRO animation intermediates (`.iva`/`.itp`/`.ita`/`.ima`/`.ica`) to the NSB\*
+animation binaries. No intermediate samples exist and g3dcvtr only runs intermediate→binary, so — exactly as
+the model SBC was validated against retail SBCs rather than the original `.imd`s — the writers are validated by
+**decode → re-encode round-trip over the whole retail corpus** (retail animations *are* g3dcvtr output). Each
+`*AnimationSet` gains an `encode()` that rebuilds the file from its parsed structure (distinct from the
+block-verbatim `G3dFile.save()`), and `AnimationWriterTest` re-encodes every retail file of that type (ROM-gated).
+
+| Format | Class | Coverage | Key layout facts (RE'd this pass) |
+|---|---|---|---|
+| **NSBVA** visibility | `VisibilityAnimationSet.encode()`/`author()` | **15/15** | tag `V\0AV`; the +8 "unused" u16 is the animation size `12 + ceil(frames·nodes/32)·4`; frame-major node-minor bit stream |
+| **NSBTP** pattern | `TexturePatternAnimationSet.encode()`/`author()` | **506/506** | tag `M\0PT`; material record ratio = `numKeyframes·4096/numFrames`; header→matdict→keyframes→tex/plt name tables; name-table order retained |
+| **NSBTA** texture-SRT | `TextureSrtAnimationSet.encode()` | **548/548** | tag `M\0AT`; per material a pool of the leading const values, then from the first variable channel on **every** channel is stored (variable→array padded to 4; const→value, fx16 masked to 16 bits) |
+| **NSBMA** material colour | `MaterialColorAnimationSet.encode()` | **160/160** | all colour arrays (u16/frame) first, region padded to 4, then all alpha arrays (u8/frame); array length = header frame count; source-offset sharing preserved, arrays in ascending-offset order |
+| **NSBCA** skeletal | `SkeletalAnimationSet` (decode only) | writer **pending** | the hard one — see below |
+
+**NSBCA (skeletal) — the remaining writer.** Its payload is materially harder than the other four: two
+**shared, de-duplicated rotation-matrix pools** (pivot 6-byte entries and 5-value 10-byte entries) that every
+node's rotation track indexes by `u16` (bit 15 selects the pool), plus per-node variable-length blocks whose
+`info` word gates identity/base/const/variable per T/R/S section. A byte-exact re-encoder must rebuild both
+pools (collect the distinct matrices, choose pivot-6 vs 5value-10 per matrix — the pivot encoder already exists
+from the model node-transform work — de-dup, assign indices) and relay the node blocks + keyframe arrays with
+repointed offsets. The **container + JNT0 already round-trip byte-exact via `G3dFile.save()`**, and the full
+on-disk layout is documented in `SkeletalAnimationSet` (header · node-offset table · node blocks · rot3 pool ·
+rot5 pool · keyframe arrays). Recomputing that payload from the decoded tracks is the one remaining animation
+writer; it's a discrete, sizeable task, de-risked by the pool/format structure being fully mapped.
+
+**Other optional remainder:** a glTF (vs OBJ) front-end; 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
+already decompresses them). Two g3dcvtr model-path *variant flags* are also unported (both non-default, so
+retail output is unaffected and `ImdImporter` matches it): **`-s`** "store all matrices on the stack" and
+**`-texsrt`** "always output the texture-matrix data field". Nothing here blocks PDSMS dropping g3dcvtr for
+model conversion or for the four supported animation types.
 
 ### 9b-note. Editable model source for a Gen IV decomp — a `model.json` direction (NOT a priority; parked idea)
 
