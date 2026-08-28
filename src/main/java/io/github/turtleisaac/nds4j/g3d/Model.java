@@ -63,6 +63,9 @@ public class Model
     // its parent (for hierarchy composition), and the raw (pre-placement) vertices per mesh.
     private Srt[] nodeLocals;
     private int[] nodeParent;
+    // True if the SBC uses billboard (BB/BBY) or skinning (NODEMIX) commands: the final pose is
+    // camera- or blend-dependent, so a static bind-pose decode legitimately can't reproduce it.
+    private boolean dynamicPose;
 
     Model(byte[] mdl0, int modelStart, String name)
     {
@@ -304,12 +307,13 @@ public class Model
                 }
                 case 0x07:                                          // BB  (billboard)   nodeId (+ store/restore slots)
                 case 0x08: {                                        // BBY (billboard-Y) nodeId (+ store/restore slots)
+                    dynamicPose = true;                             // camera-facing; a static decode can't place it
                     int nid = d[p++] & 0xFF; current = nid;
                     if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; }
                     if ((flags & 0x40) != 0) p++;
                     break;
                 }
-                case 0x09: { int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
+                case 0x09: { dynamicPose = true; int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
                 case 0x0A: p += 8; break;                           // CALLDL
                 case 0x0B: break;                                   // POSSCALE
                 case 0x0C: p += 2; break;                           // ENVMAP
@@ -676,6 +680,17 @@ public class Model
     public boolean isSingleNode()
     {
         return nodeCount == 1;
+    }
+
+    /**
+     * @return true if this model draws with billboard (camera-facing) or skinning (blended) nodes, whose
+     *         final on-screen pose depends on the camera or a vertex blend. A static bind-pose decode
+     *         cannot reproduce that pose, so such a model's decoded bounding box need not match the
+     *         header box (it is excluded from the placement self-check).
+     */
+    public boolean hasDynamicPose()
+    {
+        return dynamicPose;
     }
 
     /**

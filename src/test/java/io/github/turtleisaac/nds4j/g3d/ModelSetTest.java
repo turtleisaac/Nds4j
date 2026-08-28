@@ -138,6 +138,10 @@ public class ModelSetTest
             {
                 if (model.getVertexCount() == 0)
                     continue;
+                // Billboard/skinning models are posed by the camera or a vertex blend at draw time; a
+                // static bind-pose decode cannot reproduce that, so they are outside this self-check.
+                if (model.hasDynamicPose())
+                    continue;
                 float[][] decoded = model.getDecodedBoundingBox();
                 float[][] header = model.getHeaderBoundingBox();
                 float extent = 0;
@@ -154,15 +158,15 @@ public class ModelSetTest
         // Single-node models are the identity case and must be essentially perfect (retail Platinum ~98%).
         assertThat(singleOk).as("single-node models placed correctly (of %d)", singleTotal)
                 .isGreaterThan((int) (0.95 * singleTotal));
-        // Multi-node models exercise the node hierarchy + SBC walk (retail Platinum ~97%; the residual
-        // misses are billboard / skinning cases whose final pose a static bind-pose decode can't
-        // reproduce). Composing each node's scale separately from its rotation - as the NNS renderer does,
-        // rather than baking scale into a matrix that shears scaled children - is what lifted this from
-        // ~69%. A NODEDESC/operand-size desync - the classic bug - collapses this to near zero, so a 90%
-        // floor catches both a compose regression and a walk desync without being brittle.
+        // Multi-node static-pose models exercise the node hierarchy + SBC walk (retail Platinum ~96%,
+        // billboard/skinning excluded above). Composing each node's scale separately from its rotation -
+        // as the NNS renderer does, rather than baking scale into a matrix that shears scaled children -
+        // is what lifted this from ~69%. A NODEDESC/operand-size desync - the classic bug - collapses this
+        // to near zero, so a 92% floor catches both a compose regression and a walk desync without being
+        // brittle.
         assertThat(multiTotal).as("the ROM should contain multi-node models").isGreaterThan(100);
         assertThat(multiOk).as("multi-node models placed correctly (of %d)", multiTotal)
-                .isGreaterThan((int) (0.90 * multiTotal));
+                .isGreaterThan((int) (0.92 * multiTotal));
     }
 
     @Test
