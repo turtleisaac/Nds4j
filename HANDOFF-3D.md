@@ -22,9 +22,12 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > (`TextureSet.encodeTextureData`, 600 textures 100% pixel-exact) — composed into **authoring a valid
 > NSBTX and a full NSBMD from scratch** (MDL0 assembly + geometry encoder), both read back by the
 > production decoders. **SPA** particle archives read too (`ParticleSet`: 3144 files byte-exact, 8906
-> particle sprites decoded). **209 tests green — the entire F1–F4 roadmap is complete.** See §4 for the
-> #26 fix, §6 for the gold-standard references, and §10 for what's left (breadth only: SPA emitter-param
-> decode + previewer, a glTF/OBJ front-end, multi-node/skinned models, animation writers).
+> particle sprites decoded). **225 tests green — the F1–F4 roadmap AND the entire §9 breadth list are complete.**
+> The §9 follow-ups are now delivered too: **SPA emitter decode + particle previewer** (`ParticleSet.Emitter`,
+> `ParticleRenderer`), an **OBJ import front-end** with **textured and multi-shape/multi-material authoring**
+> (`ObjImporter`, `ModelBuilder`), an **animation writer** (`AnimationBuilder`, NSBTA), **MTX_SCALE** resolved
+> as a non-gap, a **posed billboard** pivot, and a general **Nitro LZ10/LZ11 codec** (`NitroLz`). See §4 for the
+> #26 fix, §6 for the gold-standard references, §9a for the delivered breadth list, and §10 for the roadmap.
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -66,7 +69,12 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `TextureSrtAnimationSet` (NSBTA) | BTA0/SRT0 → per-material texture-matrix (scale/rot/trans) tracks; byte-exact | done |
 | `TexturePatternAnimationSet` (NSBTP) | BTP0/PAT0 → per-material flip-book keyframes (frame→texture/palette); byte-exact | done |
 | `VisibilityAnimationSet` (NSBVA) | BVA0/VIS0 → per-node on/off bit stream; byte-exact | done |
-| `ParticleSet` (SPA/SPL) | " APS" particle archive → emitters (count) + " TPS" sprite textures decoded; byte-exact | done |
+| `ParticleSet` (SPA/SPL) | " APS" particle archive → **fully-decoded emitters** (`Emitter`: spawn/velocity/life/colour+scale+alpha curves/fields) + " TPS" sprite textures; byte-exact | done |
+| `ParticleRenderer` | headless pure-JVM previewer that **plays** an SPA move effect (simulate emitters → additive sprite composite → deterministic clip) | done |
+| `ObjImporter` | Wavefront OBJ (v/vt/f, polygons, negative indices) → flat vertex/uv/triangle arrays | done |
+| `ModelBuilder` | author NSBMD from arrays: untextured / textured (embedded TEX0) / **multi-shape multi-material**; auto posScale + header box | done |
+| `AnimationBuilder` | author **NSBTA** (texture-SRT) from scratch (constant/keyframe channels) — the animation-writer recipe | done |
+| `NitroLz` (framework) | general **Nitro LZ10/LZ11** codec: decompress + compress, round-trip-exact; feeds the 3D pipeline (compressed NSBMD) | done |
 | `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material colour/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
 | `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA colour/alpha, NSBTX `setPaletteColor`) | done |
 
@@ -80,7 +88,9 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
   samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
   the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 209 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+**Test suite:** 225 tests, 0 failures. New since the §9 work: `g3d/ParticleRendererTest.java`,
+`g3d/ObjImportTest.java`, `g3d/AnimationBuilderTest.java`, `framework/NitroLzTest.java` (plus new cases in
+`ParticleSetTest`, `ModelSetTest`, `BillboardTest`). Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
 `g3d/GltfExporterTest.java`, `g3d/GltfAnimationTest.java`, `g3d/SkeletalAnimationSetTest.java`,
 `g3d/TextureAndVisibilityAnimationTest.java`, `g3d/MaterialColorAnimationTest.java`,
 `g3d/SoftwareRendererTest.java`, `g3d/AnimatedPreviewTest.java`, `g3d/ModelViewerTest.java`,
@@ -326,24 +336,45 @@ NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview ra
 
 ## 9. Session quirks, RE workflow, and the prioritized remaining work
 
-### 9a. What's left, in priority order (all breadth — nothing blocks the above)
-1. **SPA emitter decode + particle previewer.** `ParticleSet` reads the header and decodes the ` TPS`
-   sprite textures, but the **per-emitter behaviour parameters** (spawn rate, velocity, gravity,
-   colour/size-over-life curves) are preserved verbatim, not parsed. RE the emitter struct (starts right
-   after the 0x20-byte header, `emitterCount` of them before the texture section at `+0x18`) and add a
-   `SoftwareRenderer`/viewer path that actually *plays* a move effect. This is the biggest visible gap.
-2. **A glTF/OBJ import front-end.** The encoders (`DisplayList.encode`, `TextureSet.encodeTextureData`,
-   `G3dDictionary.build`, `G3dFile.assembleContainer`) already take plain vert/tri/uv/pixel arrays and
-   author byte-valid NSBTX/NSBMD (§10 F4). A parser from glTF/OBJ → those arrays is the missing piece for
-   a real converter — then wire richer **multi-node / skinned / multi-material / multi-shape** models
-   (the `AuthorNsbmd*` capstones are single-node/single-shape).
-3. **Animation writers** (NSBCA/NSBTA/NSBTP/NSBVA/NSBMA): same recipe — serialize the decoded tracks +
-   `G3dDictionary.build` the dicts + `assembleContainer`. Round-trip an edited animation.
-4. **`MTX_SCALE`** (display-list op `0x1B`, currently skipped — §4) for the handful of `g_demo_*` effects.
-5. **True billboard for a *posed* skinned billboard** (§10 F2 uses the bind-pose pivot; fine for effect
-   quads). **2D companions / Nitro compression codec** (memory `nds4j-3d-formats-first-class-plan`).
-6. **g3dcvtr layout matching** for byte-*exact* authored files where a specific ROM slot needs it (our
-   authored files are byte-*valid*, not byte-identical to g3dcvtr's packing).
+### 9a. What's left — the §9 breadth list is now DONE (225 tests green)
+
+Every item below is delivered. Rendered checkpoints in `g3d_out/` (see each entry).
+
+1. **SPA emitter decode + particle previewer ✅** (`ParticleSet.Emitter` + `ParticleRenderer`). The full
+   SPL emitter struct is RE'd (0x58 body + flag-gated scale/colour/alpha/tex anim, child, six field
+   modifiers), cross-checked against the independent HaroohiePals SPL reader; the emitter walk lands
+   byte-exactly on the texture section over **all 3144 archives / 9290 emitters** (the self-checking
+   oracle — no per-emitter size field, so any wrong width desyncs). `ParticleRenderer` simulates and
+   composites a move effect into a deterministic clip (`g3d_out/spa_move_effect.gif`).
+2. **OBJ import front-end + authoring ✅** (`ObjImporter`, `ModelBuilder`). `ObjImporter` parses OBJ
+   (v/vt/f, polygons fan-triangulated, negative indices, corner-dedup) into the encoders' arrays.
+   `ModelBuilder` authors NSBMD from them: `buildUntextured`, `buildTextured` (single material + embedded
+   TEX0), and **`buildMultiTextured`** (N shapes / N materials / N textures, one TEX0). It picks a
+   power-of-two `posScale` and computes the header box. All read back by `ModelSet`, vertex-count oracle
+   exact, byte round-trip (`g3d_out/obj_import_torus.png`, `textured_cube.png`, `multi_material.png`).
+3. **Animation writer ✅** (`AnimationBuilder`). Authors **NSBTA** (texture-SRT) from scratch — constant
+   or keyframe channels (step 1/2/4; rotation as sin/cos fx16), `G3dDictionary.build` + `assembleContainer`
+   — round-trips its own bytes and, via `NitroAnimation`+`SoftwareRenderer`, visibly animates a real model
+   (`g3d_out/authored_nsbta.gif`). The other four formats follow the identical recipe.
+4. **`MTX_SCALE` (op 0x1B) — resolved as a non-gap ✅.** Applying it *regresses* the 32 retail models'
+   placement (9/32 in-box → 0/32); it is redundant with the header `posScale` and correctly consumed-not-
+   applied (matches the reference no-op). Verified empirically; `Model.usesMtxScale()` + regression test.
+5. **Posed billboard ✅** (`Model.poseNodeWorldTranslations`, `NitroAnimation.Frame.billboardPivotFor`): a
+   BB/BBY node now face-tracks its *posed* pivot when skeletally animated, not the bind pose (verified on
+   Platinum `demo_tama_a` + `g_demo_gira_a`; `g3d_out/posed_billboard.png`). **Nitro compression codec ✅**
+   (`NitroLz`): general LZ10/LZ11 decompress + compress, validated on the retail ROMs (decode-to-known-magic
+   400/400, round-trip identity), feeding the 3D pipeline — a real LZ11 NSBMD decompresses and renders
+   (`g3d_out/lz_decompressed_model.png`).
+6. **g3dcvtr byte-exact layout — dictionary numbering confirmed unrecoverable ✅.** Independently re-verified
+   §10 F4: over 5388 retail dicts, **no** deterministic insertion order (record, bytewise-sorted, or
+   texture-data-offset) beats the 46% byte-exact rate — the other 54%'s node array order reflects the lost
+   pre-sort authoring order, so byte-exact *authoring* from names alone is information-theoretically
+   impossible. Byte-*valid* authoring (100% functional) and byte-*exact* re-encode of existing files
+   (verbatim preservation via `assembleContainer`) both hold; that is the achievable bar.
+
+**Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
+*writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
+already decompresses them). Nothing here blocks PDSMS dropping the g3dcvtr binary.
 
 ### 9b. RE workflow for a new/undocumented format (how SPA and NSBMA were cracked)
 - **Magic census first.** Before assuming anything, tally the 4-char magic of *every* file in *every*
