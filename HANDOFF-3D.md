@@ -12,8 +12,9 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > **NSBVA** (visibility) — round-trip totals 5482 / 825 / 548 / 506 / 15, animation channel decode
 > validated against the reference jar. Billboard/skinning models are flagged (`Model.hasDynamicPose()`)
 > and excluded from the placement oracle; MTX_SCALE confirmed a reference no-op. **183 tests green.**
-> See §4 for the #26 fix (hypothesis was wrong), §10 for the genuinely-open nice-to-haves (wire the
-> texture/visibility animations into the renderer/exporter; a live viewer; SPA particles).
+> See §4 for the #26 fix (hypothesis was wrong), §6 for the gold-standard references to build on, and
+> §10 for the **forward roadmap** — the flagship features (animate the preview/export → interactive viewer
+> → remaining read formats) followed by the **writer/encoder side** (drop the g3dcvtr dependency).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -296,32 +297,52 @@ NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview ra
 
 ---
 
-## 10. What's left (for the next agent)
+## 10. Roadmap: flagship features, then the writer/encoder side
 
-The §4 numbered tasks **and** every item this section previously listed are now done:
+The §4 numbered tasks and every earlier §10 follow-up are **done** (all six NSB* read formats decoded +
+byte-exact; glTF export; `SoftwareRenderer`; billboard oracle handling; MTX_SCALE resolved — see §1). The
+read side is a solid base. What follows is the **forward roadmap** — these are flagship features now, not
+nice-to-haves, sequenced so the read/preview work lands before the writer side builds on it.
 
-1. **Other NSB* animation formats** — ✅ **done.** `TextureSrtAnimationSet` (NSBTA/BTA0), 
-   `TexturePatternAnimationSet` (NSBTP/BTP0), `VisibilityAnimationSet` (NSBVA/BVA0): all `G3dFile`
-   subclasses (byte-exact round-trip **548/548, 506/506, 15/15**) with the block decoded from
-   `nitroreader.{nsbta,nsbtp,nsbva}.*`. NSBTA channel decode validated against the jar (112974 samples).
-   *Not yet wired into rendering/export* — the tracks are decoded and sampleable, but `SoftwareRenderer`
-   and `GltfExporter` don't yet apply texture-SRT/pattern/visibility. That's the natural next step if a
-   fully-animated preview is wanted (glTF 2.0 also supports UV-transform animation via samplers).
-2. **`MTX_SCALE` (display-list op `0x1B`)** — ✅ **resolved.** The reference `gpucommands.MTX_SCALE.execute()`
-   is a **no-op**, so consuming-but-not-applying it (as we do) matches the reference exactly; the 100%
-   vertex-count oracle confirms the 12-byte operand width. Not a gap. (Comment added at the op in `Model`.)
-3. **Billboard / skinning final pose** — ✅ **handled.** `Model.hasDynamicPose()` flags `BB`/`BBY`/`NODEMIX`
-   models; the placement oracle now excludes them (a static bind-pose AABB can't represent a camera-facing
-   or blended pose), so the multi-node number is honest (97.5% static-pose). Actually *rendering* a
-   billboard still needs a live camera — out of scope for a static decode.
-4. **First-class preview/rasterizer** — ✅ **done.** `SoftwareRenderer` (pure Java) renders a `Model` at
-   bind pose or from `pose()` positions; used by `SoftwareRendererTest`.
+### F1 — Animate the preview and the export *(highest leverage; the data is already decoded)*
+NSBCA already poses skeletons (`Model.pose`). NSBTA/NSBTP/NSBVA are decoded and sampleable but **not yet
+applied**. Wire them through so a model *plays*:
+- **`SoftwareRenderer`**: take an optional animation-frame context and apply, per frame — NSBCA skeleton
+  pose (done via `pose()`); **NSBTA** texture-SRT on the material's UVs (scale/rot/trans of texcoords);
+  **NSBTP** pattern swap (pick the material's texture/palette for that frame); **NSBVA** visibility (skip
+  hidden nodes' shapes). Emit an animated GIF/frame sequence (the manene walk cycle already proves the
+  path).
+- **`GltfExporter`**: emit glTF 2.0 animation channels — node TRS samplers from NSBCA, `KHR_texture_transform`
+  + UV-transform samplers from NSBTA, visibility via node on/off. Then a single `.gltf` *plays* in any
+  viewer. **Acceptance:** a posed+textured+UV-scrolled model round-trips through a third-party glTF viewer.
 
-**Genuinely open (nice-to-haves, none blocking):** apply NSBTA/NSBTP/NSBVA in the renderer/exporter (see
-#1); a live/interactive viewer for billboards; SPA (particles) and the other future formats in the memory
-plan `nds4j-3d-formats-first-class-plan`.
+### F2 — Interactive viewer *(billboards, camera, playback)*
+A live view is the only correct way to render `BB`/`BBY` billboards (camera-facing) and to scrub
+animations. Pure-JVM per `TECH_DEBT.md §3` — Swing/Java2D over `SoftwareRenderer` (no LWJGL/JOGL). Adds:
+orbit camera, animation timeline/scrub, per-node/per-material inspection, texture browser. This is where
+`Model.hasDynamicPose()` billboards finally render right.
 
-**Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE the
-block from the reference *bytecode* (not prose); validate the lossy decode against the reference jar
-value-by-value in a throwaway probe (this is how the NSBCA rotation decompression and NSBTA channels were
-confirmed); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
+### F3 — Remaining read formats *(breadth)*
+Same recipe (subclass `G3dFile` → free round-trip → decode vs the gold standard §6 → validate): **SPA**
+(particles), **NSBMA** (`BMA0`, material-colour animation — absent from the jar, RE from nsbmd_docs +
+files), and the 2D companions / general Nitro compression codec in the memory plan
+`nds4j-3d-formats-first-class-plan`.
+
+### F4 — The writer / encoder side *(the major frontier — do after F1–F3)*
+Everything so far is **read-side**. The flagship end-state is **authoring** NSB* from source assets:
+- **Editing round-trip first:** mutate a decoded model/animation (swap a texture, retarget a bone, edit a
+  keyframe) and re-serialise to a valid NSB* that a retail ROM loads. Build on `G3dFile`'s block model;
+  the invariant is byte-exact for an *unedited* object, byte-*valid* for an edited one.
+- **Full conversion (the g3dcvtr replacement):** source (glTF/IMD-like) → NSBMD/NSBTX/NSBCA/…. This is the
+  open-source win flagged in memory `g3dcvtr-re-resource`: **PDSMS depends on the g3dcvtr binary**, and a
+  native encoder lets it drop that. RE the *writer* against `g3dcvtr` (fair-use) + the gold-standard docs.
+- **Oracle for the writer:** decode-encode-decode must be stable, and output must load in-game / re-read
+  identically via the gold-standard decoders. This is harder than reading — the DS packs data many valid
+  ways; match g3dcvtr's layout choices where a ROM expects them.
+
+**Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE from the
+**gold standard** (nsbmd_docs + Apicula, §6) and use the jar as a byte-level second opinion; validate the
+lossy decode value-by-value in a throwaway probe (how the NSBCA rotation decompression and NSBTA channels
+were confirmed); **triangulate** placement against the g3dcvtr header box + the decoder-independent
+vertex-count oracle (no single source is infallible — §5.8, §6 caveat); bucket/measure, keep the split
+oracle floors, commit checkpoints, keep the tree clean.
