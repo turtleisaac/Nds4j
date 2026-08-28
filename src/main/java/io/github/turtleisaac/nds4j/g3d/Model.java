@@ -69,6 +69,9 @@ public class Model
     // Per-node billboard flag (BB/BBY), for inspection/rendering. A billboard node's geometry faces the
     // camera at runtime; a static decode leaves it at its authored orientation.
     private boolean[] billboardNode;
+    // Bind-pose world translation/scale per node (the billboard pivot and its accumulated scale).
+    private double[][] bindWorldTranslation;
+    private double[][] bindWorldScale;
 
     Model(byte[] mdl0, int modelStart, String name)
     {
@@ -111,6 +114,17 @@ public class Model
         int[] shapeMaterial = new int[shapeCountHeader];
         java.util.Arrays.fill(shapeMaterial, -1);
         Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocals, shapeNode, shapeMaterial, shapeCountHeader);
+
+        // Retain each node's bind-pose world translation/scale so a billboard node can be re-oriented to
+        // face the camera at render time (its authored rotation is discarded for BB/BBY).
+        bindWorldTranslation = new double[nodeWorld.length][];
+        bindWorldScale = new double[nodeWorld.length][];
+        for (int n = 0; n < nodeWorld.length; n++)
+        {
+            Srt w = nodeWorld[n] != null ? nodeWorld[n] : Srt.identity();
+            bindWorldTranslation[n] = w.t.clone();
+            bindWorldScale[n] = w.s.clone();
+        }
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
@@ -790,6 +804,27 @@ public class Model
     public boolean isBillboardNode(int node)
     {
         return billboardNode != null && node >= 0 && node < billboardNode.length && billboardNode[node];
+    }
+
+    /**
+     * @param node a node index
+     * @return the node's bind-pose world translation (x,y,z) &mdash; the pivot a billboard's camera-facing
+     *         geometry is placed at &mdash; or {@code {0,0,0}} if unknown
+     */
+    public double[] getNodeWorldTranslation(int node)
+    {
+        return (bindWorldTranslation != null && node >= 0 && node < bindWorldTranslation.length)
+                ? bindWorldTranslation[node].clone() : new double[]{0, 0, 0};
+    }
+
+    /**
+     * @param node a node index
+     * @return the node's bind-pose world (accumulated) scale (x,y,z), or {@code {1,1,1}} if unknown
+     */
+    public double[] getNodeWorldScale(int node)
+    {
+        return (bindWorldScale != null && node >= 0 && node < bindWorldScale.length)
+                ? bindWorldScale[node].clone() : new double[]{1, 1, 1};
     }
 
     /**

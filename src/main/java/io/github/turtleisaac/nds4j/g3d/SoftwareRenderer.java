@@ -180,17 +180,39 @@ public final class SoftwareRenderer
             int tw = tex != null ? tex.getWidth() : 0, th = tex != null ? tex.getHeight() : 0;
             float[] uvMat = frame != null ? frame.uvMatrixFor(m) : null;
 
+            // Billboard (BB/BBY): draw the shape's local geometry facing the screen at its node's pivot,
+            // discarding the authored orientation (that is what the NNS renderer does at runtime; a static
+            // decode can't). We place the raw node-local vertices in screen space around the camera-
+            // projected pivot, so the sprite always faces the viewer as the model is orbited.
+            boolean billboard = model.isBillboardNode(mesh.getNodeIndex());
+            double[] bill = billboard ? billboardPivot(model, mesh.getNodeIndex(), cam, cy, sy, cp, sp, width, height) : null;
+            float[] rawLocal = billboard ? mesh.getRawPositions() : null;
+            double[] wscale = billboard ? model.getNodeWorldScale(mesh.getNodeIndex()) : null;
+            double posScale = billboard ? model.getPositionScale() : 1;
+
             for (int t = 0; t + 2 < idx.length; t += 3)
             {
                 for (int k = 0; k < 3; k++)
                 {
                     int v = idx[t + k];
-                    double x = pos[v * 3] - cam.centre[0], y = pos[v * 3 + 1] - cam.centre[1], z = pos[v * 3 + 2] - cam.centre[2];
-                    double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
-                    double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
-                    c[k][0] = width / 2.0 + x1 * cam.scale;
-                    c[k][1] = height / 2.0 - y2 * cam.scale;
-                    c[k][2] = z2;
+                    if (billboard)
+                    {
+                        double lx = rawLocal[v * 3] * wscale[0] * posScale;
+                        double ly = rawLocal[v * 3 + 1] * wscale[1] * posScale;
+                        double lz = rawLocal[v * 3 + 2] * wscale[2] * posScale;
+                        c[k][0] = bill[0] + lx * cam.scale;
+                        c[k][1] = bill[1] - ly * cam.scale;
+                        c[k][2] = bill[2] - lz * cam.scale;
+                    }
+                    else
+                    {
+                        double x = pos[v * 3] - cam.centre[0], y = pos[v * 3 + 1] - cam.centre[1], z = pos[v * 3 + 2] - cam.centre[2];
+                        double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
+                        double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
+                        c[k][0] = width / 2.0 + x1 * cam.scale;
+                        c[k][1] = height / 2.0 - y2 * cam.scale;
+                        c[k][2] = z2;
+                    }
                     // UVs are carried in normalised [0,1] space so the texture matrix (a scroll/scale/rot
                     // from NSBTA) can be applied uniformly; the sampler scales back up by the texture size.
                     double s = tw > 0 ? uv[v * 2] / tw : uv[v * 2];
@@ -204,7 +226,7 @@ public final class SoftwareRenderer
                     uvw[k][0] = s;
                     uvw[k][1] = tt;
                 }
-                double shade = shadeFor(c, light);
+                double shade = billboard ? 1.0 : shadeFor(c, light); // billboards are unlit sprites
                 rasterize(img, zbuf, width, height, c, uvw, tex, tw, th, shade);
             }
         }
@@ -239,6 +261,18 @@ public final class SoftwareRenderer
         if (extent <= 0)
             extent = 1;
         return new Camera(centre, Math.min(width, height) * 0.8 / extent);
+    }
+
+    // Projects a billboard node's bind-pose world pivot to screen space {screenX, screenY, depth}; the
+    // sprite's local geometry is then laid out around this point without the camera's orientation.
+    private static double[] billboardPivot(Model model, int node, Camera cam,
+                                           double cy, double sy, double cp, double sp, int width, int height)
+    {
+        double[] p = model.getNodeWorldTranslation(node);
+        double x = p[0] - cam.centre[0], y = p[1] - cam.centre[1], z = p[2] - cam.centre[2];
+        double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
+        double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
+        return new double[]{width / 2.0 + x1 * cam.scale, height / 2.0 - y2 * cam.scale, z2};
     }
 
     private static BufferedImage textureFor(Model.Mesh mesh, TextureSet textures, NitroAnimation.Frame frame,
