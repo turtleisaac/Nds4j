@@ -185,7 +185,15 @@ public final class SoftwareRenderer
             // decode can't). We place the raw node-local vertices in screen space around the camera-
             // projected pivot, so the sprite always faces the viewer as the model is orbited.
             boolean billboard = model.isBillboardNode(mesh.getNodeIndex());
-            double[] bill = billboard ? billboardPivot(model, mesh.getNodeIndex(), cam, cy, sy, cp, sp, width, height) : null;
+            // Prefer the frame's posed pivot (a skeletally-animated billboard tracks its posed node), else
+            // the model's bind-pose pivot.
+            double[] pivotWorld = null;
+            if (billboard)
+            {
+                pivotWorld = (frame != null) ? frame.billboardPivotFor(m) : null;
+                if (pivotWorld == null) pivotWorld = model.getNodeWorldTranslation(mesh.getNodeIndex());
+            }
+            double[] bill = billboard ? projectPivot(pivotWorld, cam, cy, sy, cp, sp, width, height) : null;
             float[] rawLocal = billboard ? mesh.getRawPositions() : null;
             double[] wscale = billboard ? model.getNodeWorldScale(mesh.getNodeIndex()) : null;
             double posScale = billboard ? model.getPositionScale() : 1;
@@ -265,10 +273,9 @@ public final class SoftwareRenderer
 
     // Projects a billboard node's bind-pose world pivot to screen space {screenX, screenY, depth}; the
     // sprite's local geometry is then laid out around this point without the camera's orientation.
-    private static double[] billboardPivot(Model model, int node, Camera cam,
-                                           double cy, double sy, double cp, double sp, int width, int height)
+    private static double[] projectPivot(double[] p, Camera cam,
+                                         double cy, double sy, double cp, double sp, int width, int height)
     {
-        double[] p = model.getNodeWorldTranslation(node);
         double x = p[0] - cam.centre[0], y = p[1] - cam.centre[1], z = p[2] - cam.centre[2];
         double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
         double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;

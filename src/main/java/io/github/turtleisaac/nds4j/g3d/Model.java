@@ -619,6 +619,23 @@ public class Model
      */
     public List<float[]> pose(SkeletalAnimationSet.Animation animation, int frame)
     {
+        Srt[] world = poseWorld(animation, frame);
+        List<float[]> posed = new ArrayList<>(meshes.size());
+        for (Mesh mesh : meshes)
+        {
+            float[] out = mesh.rawPositions.clone();
+            Srt w = (mesh.nodeIndex >= 0 && mesh.nodeIndex < world.length) ? world[mesh.nodeIndex] : null;
+            transformInPlace(out, w, posScale);
+            posed.add(out);
+        }
+        return posed;
+    }
+
+    // Composes each node's posed world transform for an animation frame (the shared core of pose() and the
+    // posed billboard pivot): apply the animation's per-node SRT over the bind-pose local, then resolve the
+    // hierarchy.
+    private Srt[] poseWorld(SkeletalAnimationSet.Animation animation, int frame)
+    {
         int count = nodeLocals.length;
         List<SkeletalAnimationSet.NodeAnim> animNodes = animation.getNodes();
         Srt[] local = new Srt[count];
@@ -634,16 +651,28 @@ public class Model
         Srt[] world = new Srt[count];
         for (int n = 0; n < count; n++)
             world[n] = resolveWorld(n, nodeParent, local, world);
+        return world;
+    }
 
-        List<float[]> posed = new ArrayList<>(meshes.size());
-        for (Mesh mesh : meshes)
+    /**
+     * Composes each node's <em>posed</em> world translation for a skeletal-animation frame. This is the
+     * billboard pivot a {@code BB}/{@code BBY} node should face-track around when the model is also being
+     * skeletally posed &mdash; unlike {@link #getNodeWorldTranslation} (the bind-pose pivot), it follows the
+     * animation. Parallel to the model's nodes.
+     * @param animation the skeletal animation
+     * @param frame the frame index
+     * @return each node's posed world translation (x,y,z)
+     */
+    public double[][] poseNodeWorldTranslations(SkeletalAnimationSet.Animation animation, int frame)
+    {
+        Srt[] world = poseWorld(animation, frame);
+        double[][] out = new double[world.length][];
+        for (int n = 0; n < world.length; n++)
         {
-            float[] out = mesh.rawPositions.clone();
-            Srt w = (mesh.nodeIndex >= 0 && mesh.nodeIndex < count) ? world[mesh.nodeIndex] : null;
-            transformInPlace(out, w, posScale);
-            posed.add(out);
+            Srt w = world[n] != null ? world[n] : Srt.identity();
+            out[n] = w.t.clone();
         }
-        return posed;
+        return out;
     }
 
     /**

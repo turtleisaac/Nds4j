@@ -94,6 +94,69 @@ public class BillboardTest
     }
 
     @Test
+    @DisplayName("a skeletally-posed billboard tracks its posed node pivot, not the bind pose")
+    void posedBillboardFollowsAnimation()
+    {
+        NintendoDsRom rom = TestRoms.require("Platinum.nds");
+        Narc narc;
+        try { narc = new Narc(rom.getFile(139)); }
+        catch (RuntimeException e) { Assumptions.assumeTrue(false, "narc 139 not readable"); return; }
+
+        // Find a billboard model and a skeletal animation that moves its billboard node (narc 139 pairs
+        // demo_tama_a with g_demo_gira_a). Both live in the same NARC as most model+animation pairs do.
+        Model billboard = null;
+        int billMesh = -1;
+        for (int j = 0; j < narc.getNumFiles() && billboard == null; j++)
+        {
+            if (!magic(narc.getFile(j)).equals("BMD0")) continue;
+            ModelSet ms;
+            try { ms = new ModelSet(narc.getFile(j)); }
+            catch (RuntimeException e) { continue; }
+            for (Model m : ms.getModels())
+                for (int mi = 0; mi < m.getMeshes().size(); mi++)
+                    if (m.isBillboardNode(m.getMeshes().get(mi).getNodeIndex())) { billboard = m; billMesh = mi; break; }
+        }
+        Assumptions.assumeTrue(billboard != null, "no billboard model in narc 139");
+
+        SkeletalAnimationSet.Animation mover = null;
+        int node = billboard.getMeshes().get(billMesh).getNodeIndex();
+        double[] bind = billboard.getNodeWorldTranslation(node);
+        double bestMove = 0;
+        int bestFrame = 0;
+        for (int j = 0; j < narc.getNumFiles(); j++)
+        {
+            if (!magic(narc.getFile(j)).equals("BCA0")) continue;
+            for (SkeletalAnimationSet.Animation an : new SkeletalAnimationSet(narc.getFile(j)).getAnimations())
+                for (int f = 0; f < an.getFrameCount(); f++)
+                {
+                    double[][] pw = billboard.poseNodeWorldTranslations(an, f);
+                    if (node >= pw.length) continue;
+                    double d = Math.hypot(Math.hypot(pw[node][0] - bind[0], pw[node][1] - bind[1]), pw[node][2] - bind[2]);
+                    if (d > bestMove) { bestMove = d; mover = an; bestFrame = f; }
+                }
+        }
+        Assumptions.assumeTrue(mover != null && bestMove > 0.05, "no animation moves the billboard node");
+
+        // The posed pivot the Frame carries for the billboard mesh is the posed node translation, and it
+        // differs from the bind-pose pivot the static renderer would use.
+        NitroAnimation na = new NitroAnimation(mover, null, null, null);
+        NitroAnimation.Frame frame = na.sample(billboard, bestFrame);
+        double[] posed = frame.billboardPivotFor(billMesh);
+        assertThat(posed).as("a skeletal frame carries a posed billboard pivot").isNotNull();
+        double moved = Math.hypot(Math.hypot(posed[0] - bind[0], posed[1] - bind[1]), posed[2] - bind[2]);
+        assertThat(moved).as("the posed pivot follows the animation, away from the bind pose").isGreaterThan(0.05);
+
+        // A frame with no skeletal track carries no posed pivot (the renderer falls back to the bind pose).
+        byte[] nsbta = AnimationBuilder.buildTextureSrt("t", 4, java.util.List.of(
+                new AnimationBuilder.MaterialAnim("m", AnimationBuilder.Channel.constant(1f),
+                        AnimationBuilder.Channel.constant(1f), AnimationBuilder.Channel.constant(0f),
+                        AnimationBuilder.Channel.constant(0f), AnimationBuilder.Channel.constant(0f))));
+        NitroAnimation.Frame noSkeletal = NitroAnimation.ofTextureSrt(
+                new TextureSrtAnimationSet(nsbta).getAnimations().get(0)).sample(billboard, 0);
+        assertThat(noSkeletal.billboardPivotFor(billMesh)).as("no skeletal -> no posed pivot").isNull();
+    }
+
+    @Test
     @DisplayName("an ordinary model, by contrast, changes a lot as it turns")
     void ordinaryModelChangesWithOrbit()
     {

@@ -121,6 +121,10 @@ public final class NitroAnimation
         float[][] uvMatrix = new float[n][];
         String[][] texOverride = new String[n][];
         boolean[] visible = new boolean[n];
+        // When skeletally posed, each mesh's node has a posed world translation; a billboard node should
+        // face-track around that (its posed pivot), not the static bind pose.
+        double[][] posedNodeT = (skeletal != null) ? model.poseNodeWorldTranslations(skeletal, frame) : null;
+        double[][] billboardPivot = new double[n][];
 
         for (int i = 0; i < n; i++)
         {
@@ -131,8 +135,10 @@ public final class NitroAnimation
             uvMatrix[i] = (textureSrt != null && matName != null) ? srtMatrix(matName, frame) : null;
             texOverride[i] = (pattern != null && matName != null) ? patternOverride(matName, frame) : null;
             visible[i] = (visibility != null) ? nodeVisible(mesh.getNodeIndex(), frame) : true;
+            int node = mesh.getNodeIndex();
+            billboardPivot[i] = (posedNodeT != null && node >= 0 && node < posedNodeT.length) ? posedNodeT[node] : null;
         }
-        return new Frame(positions, uvMatrix, texOverride, visible);
+        return new Frame(positions, uvMatrix, texOverride, visible, billboardPivot);
     }
 
     private static List<float[]> bindPositions(List<Model.Mesh> meshes)
@@ -196,13 +202,16 @@ public final class NitroAnimation
         private final float[][] uvMatrix;
         private final String[][] textureOverride;
         private final boolean[] visible;
+        private final double[][] billboardPivot;
 
-        Frame(List<float[]> positions, float[][] uvMatrix, String[][] textureOverride, boolean[] visible)
+        Frame(List<float[]> positions, float[][] uvMatrix, String[][] textureOverride, boolean[] visible,
+              double[][] billboardPivot)
         {
             this.positions = positions;
             this.uvMatrix = uvMatrix;
             this.textureOverride = textureOverride;
             this.visible = visible;
+            this.billboardPivot = billboardPivot;
         }
 
         /** @return per-mesh vertex positions (x,y,z triples), parallel to {@code model.getMeshes()} */
@@ -213,5 +222,12 @@ public final class NitroAnimation
         public String[] textureOverrideFor(int i) { return textureOverride[i]; }
         /** @param i a mesh index @return whether the mesh is drawn this frame */
         public boolean isVisible(int i) { return visible[i]; }
+        /**
+         * @param i a mesh index
+         * @return the posed world translation of mesh {@code i}'s node &mdash; the pivot a billboard node
+         *         should face-track around this frame &mdash; or {@code null} if this frame has no skeletal
+         *         pose (use the model's bind-pose pivot then).
+         */
+        public double[] billboardPivotFor(int i) { return billboardPivot[i]; }
     }
 }
