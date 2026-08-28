@@ -4,8 +4,9 @@
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
-> **Status: #26, #27, every §10 follow-up, AND the entire F1–F4 forward roadmap are done** — read,
-> animate, export, view, edit, and **author NSB* from scratch**. Placement composes node scale separately (the NNS renderer's rule, not a baked
+> **Status: #26, #27, every §10 follow-up, and F1/F2/F4 are done** (read, animate, export, view, edit, and
+> **author NSB* from scratch**); F3 has NSBMA done but **SPA particles remain TODO** (present, not N/A —
+> §10 F3). Placement composes node scale separately (the NNS renderer's rule, not a baked
 > `T·R·S` matrix): multi-node **75%→~97%**. Materials are wired to TEX0 textures; a self-contained
 > **glTF 2.0** exporter (`GltfExporter`, now with **animation**) and a pure-JVM **`SoftwareRenderer`**
 > (now **animated** — all four tracks) both work. **Seven** NSB* formats are byte-exact and decoded:
@@ -20,9 +21,10 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > **geometry encoder** (`DisplayList`, geometry-exact over 400 meshes) + **texture encoder**
 > (`TextureSet.encodeTextureData`, 600 textures 100% pixel-exact) — composed into **authoring a valid
 > NSBTX and a full NSBMD from scratch** (MDL0 assembly + geometry encoder), both read back by the
-> production decoders. **207 tests green — the entire F1–F4 roadmap is complete.** See §4 for the #26 fix,
-> §6 for the gold-standard references, and §10 F4 for what's left (breadth only: a glTF/OBJ front-end,
-> multi-node/skinned models, animation writers).
+> production decoders. **207 tests green.** F1, F2, F4 complete; F3 has NSBMA done but **SPA (particles)
+> is still TODO** — it IS present (626 files in Platinum, magic stored byte-reversed as ` APS`; see §10 F3
+> for the correction). See §4 for the #26 fix, §6 for the gold-standard references, and §10 F3/F4 for
+> what's left (SPA read format; a glTF/OBJ front-end, multi-node/skinned models, animation writers).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -343,14 +345,23 @@ model orbits (Platinum `hero` stays full-face at every yaw). `Model.getNodeWorld
 the pivot. Uses the bind-pose pivot (billboards are effect quads, rarely skeletally posed); a per-frame
 posed pivot for a skinned billboard would be the only refinement.
 
-### F3 — Remaining read formats ✅ DONE (NSBMA); SPA N/A for these ROMs
+### F3 — Remaining read formats — NSBMA ✅ DONE; **SPA is present and still TODO**
 `MaterialColorAnimationSet` (NSBMA / `BMA0`, **absent from the jar**, RE'd from files): per material, five
 u32 channels (diffuse/ambient/specular/emission = 15-bit colour, alpha = 5-bit); bit `0x20` = constant,
 else low 16 bits are an offset (from anim start) to a per-frame array (u16/frame colour, u8/frame alpha).
 Byte-exact over all 160 BMA0 in the five ROMs; demo_kusari's alpha decodes as a 0→31→0 glow. Commit
-`93f6e00`. **SPA** (particles): no files exist in any of the five Gen IV Pokémon ROMs (all scanned), so
-there is nothing to round-trip; revisit only if a ROM that ships SPA appears. The 2D companions / Nitro
-compression codec in `nds4j-3d-formats-first-class-plan` remain optional breadth.
+`93f6e00`.
+
+**SPA (particles) — CORRECTION: it IS in these ROMs and is real remaining work (was wrongly called N/A).**
+An earlier scan only matched the forward `"SPA"` prefix and missed them: the SPA magic is stored
+**byte-reversed** on disk as `20 41 50 53` (` APS`), so a raw `{'S','P','A',' '}` search also finds zero.
+Platinum has **626 SPA files** (magic ` APS`, version tag e.g. `12_1`, embedded ` TPS` = `SPT ` particle-
+texture blocks); the bulk sit in **narc 460 (117) and narc 461 (485)** — the battle/effect particle
+archives (Gen IV move/battle particle effects). To find them: match magic ` APS` (or reverse to `SPA `),
+NOT `SPA`. This is a genuinely unimplemented read format — next agent: subclass the container, RE the SPL
+particle layout (emitters + ` TPS` textures) vs the SPL/SPA docs, round-trip byte-exact across narcs
+460/461. The 2D companions / Nitro compression codec in `nds4j-3d-formats-first-class-plan` remain optional
+breadth.
 
 ### F4 — The writer / encoder side — **DONE end-to-end (edit + author NSBTX and NSBMD from scratch)**
 - **Editing round-trip ✅.** `G3dFile.writeBlockU8/U16` make same-size in-place edits (unedited → byte-exact,
