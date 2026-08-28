@@ -21,8 +21,12 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.TreeMap;
 
 /**
  * An object representation of an NSBMA file (a Nitro 3D <b>material-colour animation</b> set, magic
@@ -74,6 +78,30 @@ public class MaterialColorAnimationSet extends G3dFile
         parseMat0(block(mat0), writer);
     }
 
+    /**
+     * Re-emits this set's bytes from its parsed structure (the byte-exact writer path, verified to reproduce
+     * every retail NSBMA). Distinct from the block-verbatim {@link G3dFile#save()}.
+     */
+    public byte[] encode()
+    {
+        List<String> names = new ArrayList<>();
+        for (Animation a : animations) names.add(a.name);
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
+        byte[][] blobs = new byte[animations.size()][];
+        for (int i = 0; i < animations.size(); i++) blobs[i] = animations.get(i).encodeBlob();
+
+        List<byte[]> recs = new ArrayList<>();
+        int cursor = 8 + dictSize;
+        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+
+        ByteArrayOutputStream mat0 = new ByteArrayOutputStream();
+        mat0.writeBytes("MAT0".getBytes(StandardCharsets.US_ASCII));
+        mat0.writeBytes(rec4(cursor));
+        mat0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        for (byte[] blob : blobs) mat0.writeBytes(blob);
+        return G3dFile.assembleContainer("BMA0", version, mat0.toByteArray());
+    }
+
     private void parseMat0(byte[] d, BlockWriter writer)
     {
         MemBuf buf = MemBuf.create(d);
@@ -83,6 +111,15 @@ public class MaterialColorAnimationSet extends G3dFile
         for (int i = 0; i < dict.size(); i++)
             animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i), writer));
     }
+
+    private static List<byte[]> placeholders(int n, int recSize)
+    {
+        List<byte[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(new byte[recSize]);
+        return l;
+    }
+    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
+    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
 
     /**
      * Gets the animations in this file.
@@ -107,12 +144,14 @@ public class MaterialColorAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final List<MaterialColor> materials = new ArrayList<>();
+        private final byte[] header = new byte[8];        // tag, numFrames and flags — retained verbatim
 
         Animation(byte[] d, int animStart, String name, BlockWriter writer)
         {
             this.name = name;
             // header: char[4] tag, u16 numFrames, u16; then a material dictionary (20-byte records =
             // 5 u32 channels: diffuse, ambient, specular, emission, alpha).
+            System.arraycopy(d, animStart, header, 0, 8);
             frameCount = readU16(d, animStart + 4);
             MemBuf buf = MemBuf.create(d);
             MemBuf.MemBufReader reader = buf.reader();
@@ -131,8 +170,66 @@ public class MaterialColorAnimationSet extends G3dFile
                 ColorChannel specular = colorChannel(d, animStart, readU32(r, 8), rec + 8, writer);
                 ColorChannel emission = colorChannel(d, animStart, readU32(r, 12), rec + 12, writer);
                 ScalarChannel alpha = alphaChannel(d, animStart, readU32(r, 16), rec + 16, writer);
-                materials.add(new MaterialColor(dict.getName(i), diffuse, ambient, specular, emission, alpha));
+                MaterialColor mat = new MaterialColor(dict.getName(i), diffuse, ambient, specular, emission, alpha);
+                // retain the raw channel u32s and each variable channel's raw per-frame bytes, for re-encode
+                mat.rawCh = new long[]{readU32(r, 0), readU32(r, 4), readU32(r, 8), readU32(r, 12), readU32(r, 16)};
+                mat.rawArr = new byte[5][];
+                for (int k = 0; k < 5; k++)
+                {
+                    long ch = mat.rawCh[k];
+                    if ((((ch >> 24) & 0xFF) & CONST) != 0) continue;      // constant → value is inline
+                    int off = (int) (ch & 0xFFFF), len = frameCount * (k < 4 ? 2 : 1);
+                    mat.rawArr[k] = Arrays.copyOfRange(d, animStart + off, animStart + off + len);
+                }
+                materials.add(mat);
             }
+        }
+
+        // rebuild this animation's data block byte-exactly: header, material dict (records with recomputed
+        // variable-channel offsets), then the per-frame arrays — all colour arrays first (u16/frame), the
+        // region padded to 4 bytes, then all alpha arrays (u8/frame). Channels sharing a source array keep
+        // sharing it; the arrays are emitted in ascending original-offset order.
+        byte[] encodeBlob()
+        {
+            List<String> matNames = new ArrayList<>();
+            for (MaterialColor m : materials) matNames.add(m.name);
+            int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 20), 20)).length;
+            int base = 8 + dictSize;
+
+            // gather unique source offsets for colour and alpha channels, mapping each to its raw bytes
+            TreeMap<Integer, byte[]> colorArrays = new TreeMap<>(), alphaArrays = new TreeMap<>();
+            for (MaterialColor m : materials)
+                for (int k = 0; k < 5; k++)
+                {
+                    if (m.rawArr[k] == null) continue;
+                    int off = (int) (m.rawCh[k] & 0xFFFF);
+                    (k < 4 ? colorArrays : alphaArrays).put(off, m.rawArr[k]);
+                }
+
+            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            java.util.Map<Integer, Integer> newOff = new java.util.HashMap<>();
+            for (java.util.Map.Entry<Integer, byte[]> e : colorArrays.entrySet()) { newOff.put(e.getKey(), base + data.size()); data.writeBytes(e.getValue()); }
+            while (data.size() % 4 != 0) data.write(0);
+            for (java.util.Map.Entry<Integer, byte[]> e : alphaArrays.entrySet()) { newOff.put(e.getKey(), base + data.size()); data.writeBytes(e.getValue()); }
+            while (data.size() % 4 != 0) data.write(0);
+
+            byte[] anim = new byte[base + data.size()];
+            System.arraycopy(header, 0, anim, 0, 8);
+            List<byte[]> recs = new ArrayList<>();
+            for (MaterialColor m : materials)
+            {
+                byte[] rec = new byte[20];
+                for (int k = 0; k < 5; k++)
+                {
+                    long ch = m.rawCh[k];
+                    if (m.rawArr[k] != null) ch = (ch & ~0xFFFFL) | (newOff.get((int) (ch & 0xFFFF)) & 0xFFFF); // repoint offset
+                    for (int b = 0; b < 4; b++) rec[k * 4 + b] = (byte) (ch >> (8 * b));
+                }
+                recs.add(rec);
+            }
+            System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 20)), 0, anim, 8, dictSize);
+            System.arraycopy(data.toByteArray(), 0, anim, base, data.size());
+            return anim;
         }
 
         /** @return this animation's name */
@@ -187,6 +284,8 @@ public class MaterialColorAnimationSet extends G3dFile
         private final String name;
         private final ColorChannel diffuse, ambient, specular, emission;
         private final ScalarChannel alpha;
+        long[] rawCh;             // the 5 raw channel u32s, retained for byte-exact re-encode
+        byte[][] rawArr;          // per channel, the raw per-frame bytes (null for const channels)
 
         MaterialColor(String name, ColorChannel diffuse, ColorChannel ambient, ColorChannel specular,
                       ColorChannel emission, ScalarChannel alpha)

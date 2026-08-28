@@ -95,6 +95,15 @@ public class AnimationWriterTest
     }
 
     @Test
+    @DisplayName("every retail NSBMA (material colour) re-encodes byte-for-byte")
+    void materialColorRoundTrip()
+    {
+        NintendoDsRom rom = TestRoms.require("Platinum.nds");
+        int n = roundTrip(rom, "BMA0", bf -> new MaterialColorAnimationSet(bf).encode());
+        Assumptions.assumeTrue(n > 0, "no NSBMA files found");
+    }
+
+    @Test
     @DisplayName("an authored visibility animation round-trips through decode")
     void authorVisibility()
     {
