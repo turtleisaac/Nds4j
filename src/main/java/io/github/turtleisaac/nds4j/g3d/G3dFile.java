@@ -110,6 +110,34 @@ public abstract class G3dFile extends GenericNtrFile
     }
 
     /**
+     * Writes a byte into block {@code i} at {@code offset}, in place. This is the primitive the writer
+     * side is built on: because {@link #save()} emits each block verbatim, a same-size edit made through
+     * here is reflected exactly, so an <em>unedited</em> file still round-trips byte-for-byte while an
+     * <em>edited</em> one saves to a valid file the game loads. Offsets are relative to the block's first
+     * byte. (Edits that change a block's size need the offset table rebuilt and are not done here.)
+     * @param i the block index
+     * @param offset the byte offset within the block
+     * @param value the byte value (low 8 bits used)
+     */
+    protected void writeBlockU8(int i, int offset, int value)
+    {
+        blocks[i][offset] = (byte) value;
+    }
+
+    /**
+     * Writes a little-endian 16-bit value into block {@code i} at {@code offset}, in place. See
+     * {@link #writeBlockU8}.
+     * @param i the block index
+     * @param offset the byte offset within the block
+     * @param value the 16-bit value (low 16 bits used)
+     */
+    protected void writeBlockU16(int i, int offset, int value)
+    {
+        blocks[i][offset] = (byte) value;
+        blocks[i][offset + 1] = (byte) (value >> 8);
+    }
+
+    /**
      * Finds the index of the first block whose four-byte magic equals <code>magic</code>, or -1.
      * @param magic a four-character block magic (e.g. {@code "TEX0"})
      * @return an <code>int</code>

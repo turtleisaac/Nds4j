@@ -415,6 +415,39 @@ public class TextureSet extends G3dFile
         return bgr555(value);
     }
 
+    /**
+     * Reads a palette entry as {@code 0xRRGGBB}. @param palette a palette from this set @param index the
+     * colour index @return the colour as 24-bit RGB
+     */
+    public int getPaletteColor(Palette palette, int index)
+    {
+        return colorValue(palette, index) & 0xFFFFFF;
+    }
+
+    /**
+     * Recolours a palette entry in place &mdash; the writer-side edit that "repaints" a texture. The
+     * {@code 0xRRGGBB} colour is quantised to the DS's 15-bit {@code BGR555} and written straight into the
+     * live {@code TEX0} block, so it shows immediately in a re-decoded {@link #getImage} and is emitted by
+     * the owning container's {@code save()} (this {@link TextureSet} for a standalone NSBTX, or the
+     * {@link ModelSet} whose embedded {@code TEX0} this views). The edit is same-size, so an unedited file
+     * still round-trips byte-for-byte.
+     * @param palette a palette from this set
+     * @param index the colour index to change
+     * @param rgb the new colour as {@code 0xRRGGBB}
+     */
+    public void setPaletteColor(Palette palette, int index, int rgb)
+    {
+        int abs = plttDataOfs + palette.dataOffset + index * 2;
+        if (abs < 0 || abs + 1 >= tex0.length)
+            return;
+        int r = ((rgb >> 16) & 0xFF) * 31 / 255;
+        int g = ((rgb >> 8) & 0xFF) * 31 / 255;
+        int b = (rgb & 0xFF) * 31 / 255;
+        int v = r | (g << 5) | (b << 10);
+        tex0[abs] = (byte) v;
+        tex0[abs + 1] = (byte) (v >> 8);
+    }
+
     private int paletteColor(Palette palette, int index, boolean transparent)
     {
         if (transparent || palette == null)
