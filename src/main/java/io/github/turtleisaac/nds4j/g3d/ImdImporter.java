@@ -222,6 +222,14 @@ public final class ImdImporter
         return gt < 0 || close < 0 ? "" : s.substring(gt + 1, close);
     }
     private static int hexDigit(char c) { return Character.digit(c, 16); }
+    private static int polygonMode(String m) { return "decal".equals(m) ? 1 : "toon".equals(m) ? 2 : "shadow".equals(m) ? 3 : 0; }
+    // teximage_param wrap bits for one axis: repeat sets the repeat bit; flip sets repeat+flip; clamp = 0
+    private static long wrapBits(String mode, int repeatBit, int flipBit)
+    {
+        if ("flip".equals(mode)) return (1L << repeatBit) | (1L << flipBit);
+        if ("repeat".equals(mode)) return 1L << repeatBit;
+        return 0;
+    }
 
     // --- geometry: translate one polygon's primitive commands into GPU commands, pad the DL to /8 ---
     private byte[] buildDisplayList(String polygon)
@@ -359,9 +367,13 @@ public final class ImdImporter
         int alpha = Integer.parseInt(a(m, "alpha"));
         int lights = 0;
         for (int i = 0; i < 4; i++) if ("on".equals(a(m, "light" + i))) lights |= 1 << i;
-        u32(ms, 0x0C, ((long) alpha << 16) | 0x80 | lights);
-        u32(ms, 0x10, 0x3f1ff8ffL);
-        u32(ms, 0x14, (1L << 16) | (1L << 17));
+        int mode = polygonMode(a(m, "polygon_mode"));       // modulate=0, decal=1, toon=2, shadow=3
+        String face = a(m, "face");
+        int cull = "back".equals(face) ? 0x40 : "both".equals(face) ? 0xC0 : 0x80; // render front (default)
+        u32(ms, 0x0C, ((long) alpha << 16) | cull | ((long) mode << 4) | lights); // polygon_attr
+        u32(ms, 0x10, 0x3f1ff8ffL);                         // polygon_attr_mask (constant)
+        String[] tiling = a(m, "tex_tiling").split("\\s+");
+        u32(ms, 0x14, wrapBits(tiling[0], 16, 18) | wrapBits(tiling[1], 17, 19)); // teximage_param wrap/flip
         u32(ms, 0x18, 0xffffffffL);
         u16(ms, 0x1C, 0);
         u16(ms, 0x1E, 0x1fce);

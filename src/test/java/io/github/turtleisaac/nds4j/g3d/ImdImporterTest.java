@@ -110,4 +110,8 @@ public class ImdImporterTest
     @Test
     @DisplayName("a two-material, two-shape model with two distinct textures matches g3dcvtr byte-for-byte")
     void multiShapeDistinctTextures() { assertByteExact("twotex"); }
+
+    @Test
+    @DisplayName("material state (flip tiling, decal mode) is derived correctly — byte-for-byte vs g3dcvtr")
+    void materialStateDerivation() { assertByteExact("v_flip"); assertByteExact("v_decal"); }
 }
