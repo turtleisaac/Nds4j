@@ -60,7 +60,27 @@ public final class ImdImporter
         return new ImdImporter(imdXml).build(modelName);
     }
 
+    /**
+     * Translates {@code .imd} source into an NSBMD with its texture embedded as a {@code TEX0} block (the
+     * {@code g3dcvtr -eboth} equivalent) &mdash; the MDL0 block is identical to {@link #toNsbmd}, with the
+     * texture/palette from the {@code .imd}'s {@code tex_image}/{@code tex_palette} appended.
+     * @param imdXml the full contents of an {@code .imd} file
+     * @param modelName the model's name
+     * @return the NSBMD file bytes (MDL0 + TEX0), byte-identical to g3dcvtr for the supported model class
+     */
+    public static byte[] toNsbmdWithTextures(String imdXml, String modelName)
+    {
+        ImdImporter imp = new ImdImporter(imdXml);
+        byte[] mdl0 = imp.buildMdl0(modelName);
+        return G3dFile.assembleContainer("BMD0", 2, mdl0, imp.buildTex0());
+    }
+
     private byte[] build(String modelName)
+    {
+        return G3dFile.assembleContainer("BMD0", 2, buildMdl0(modelName));
+    }
+
+    private byte[] buildMdl0(String modelName)
     {
         int posScale = 1 << (int) Double.parseDouble(attr("model_info", "pos_scale"));
         double[] boxXyz = doubles(attr("box_test", "xyz"));
@@ -121,8 +141,83 @@ public final class ImdImporter
         u32(mdl0, 4, mdl0Len);
         System.arraycopy(modelDict, 0, mdl0, 8, modelDict.length);
         System.arraycopy(model, 0, mdl0, modelStart, model.length);
-        return G3dFile.assembleContainer("BMD0", 2, mdl0);
+        return mdl0;
     }
+
+    // --- TEX0 block from the .imd tex_image (palette16 bitmap) + tex_palette, in g3dcvtr's exact layout ---
+    private byte[] buildTex0()
+    {
+        String texName = attr("tex_image", "name");
+        String pltName = attr("tex_palette", "name");
+        int w = intAttr("tex_image", "width"), h = intAttr("tex_image", "height");
+        boolean color0Transparent = "transparency".equals(attr("tex_image", "color0_mode"));
+
+        // texels: the bitmap is 4-hex-digit big-endian 16-bit words; store each word little-endian (the
+        // low byte holds the first two 4bpp pixels, low nibble first)
+        String bmpHex = tagContent(imd, "bitmap").replaceAll("[^0-9a-fA-F]", "");
+        byte[] texel = new byte[w * h / 2];
+        for (int i = 0; i < texel.length; i += 2)
+        {
+            int word = Integer.parseInt(bmpHex.substring(i * 2, i * 2 + 4), 16);
+            texel[i] = (byte) word;
+            texel[i + 1] = (byte) (word >> 8);
+        }
+        // palette: each 4-hex-digit token is a BGR555 colour, stored little-endian
+        String[] palTok = tagContent(imd, "tex_palette").trim().split("\\s+");
+        byte[] palette = new byte[palTok.length * 2];
+        for (int i = 0; i < palTok.length; i++)
+        {
+            int c = (int) Long.parseLong(palTok[i], 16);
+            palette[i * 2] = (byte) c;
+            palette[i * 2 + 1] = (byte) (c >> 8);
+        }
+
+        int widthSel = Integer.numberOfTrailingZeros(w / 8);
+        int heightSel = Integer.numberOfTrailingZeros(h / 8);
+        long texImageParam = ((long) 3 << 26) | ((long) widthSel << 20) | ((long) heightSel << 23)
+                | (color0Transparent ? 1L << 29 : 0);
+        byte[] texRec = new byte[8];
+        u32(texRec, 0, texImageParam);
+        u32(texRec, 4, 0x80008010L);          // extraParam (observed; texel-key/flags)
+        byte[] texDict = serialize(G3dDictionary.build(List.of(texName), List.of(texRec), 8));
+        byte[] plttDict = serialize(G3dDictionary.build(List.of(pltName), List.of(rec4(0)), 4));
+
+        int header = 0x3c;
+        int ofsDict = header;
+        int ofsPltDict = ofsDict + texDict.length;
+        int ofsTexData = ofsPltDict + plttDict.length;
+        int ofsPltData = ofsTexData + texel.length;
+        int blockSize = ofsPltData + palette.length;
+        byte[] b = new byte[blockSize];
+        System.arraycopy("TEX0".getBytes(StandardCharsets.US_ASCII), 0, b, 0, 4);
+        u32(b, 4, blockSize);
+        u16(b, 12, texel.length >> 3);        // sizeTex (8-byte units)
+        u16(b, 14, ofsDict);
+        u32(b, 20, ofsTexData);
+        u16(b, 30, ofsDict);                  // Tex4x4Info dict (points at the tex dict; no 4x4 data)
+        u32(b, 36, ofsPltData);               // ofsTex4x4Data / PlttIdx point past the texel data
+        u32(b, 40, ofsPltData);
+        u16(b, 48, palette.length >> 3);      // sizePltt (8-byte units)
+        u16(b, 52, ofsPltDict);
+        u32(b, 56, ofsPltData);               // plttDataOfs
+        System.arraycopy(texDict, 0, b, ofsDict, texDict.length);
+        System.arraycopy(plttDict, 0, b, ofsPltDict, plttDict.length);
+        System.arraycopy(texel, 0, b, ofsTexData, texel.length);
+        System.arraycopy(palette, 0, b, ofsPltData, palette.length);
+        return b;
+    }
+
+    // the text between an element's opening ">" and its "</tag>" (skipping the opening tag's attributes).
+    // Matches the tag name at a word boundary so "tex_palette" doesn't hit "tex_palette_array".
+    private static String tagContent(String s, String tag)
+    {
+        Matcher m = Pattern.compile("<" + tag + "[\\s>]").matcher(s);
+        if (!m.find()) return "";
+        int gt = s.indexOf('>', m.start());
+        int close = s.indexOf("</" + tag + ">", gt);
+        return gt < 0 || close < 0 ? "" : s.substring(gt + 1, close);
+    }
+    private static int hexDigit(char c) { return Character.digit(c, 16); }
 
     // --- geometry: translate the polygon's primitive commands into GPU commands, pad the DL to /8 ---
     private byte[] buildDisplayList()

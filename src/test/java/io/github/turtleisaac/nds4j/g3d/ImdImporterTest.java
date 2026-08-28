@@ -64,6 +64,27 @@ public class ImdImporterTest
         assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
     }
 
+    // -eboth: the model with its texture embedded as a TEX0 block, vs g3dcvtr -eboth.
+    private void assertByteExactWithTextures(String base)
+    {
+        String imd = new String(resource(base + ".imd"), StandardCharsets.ISO_8859_1);
+        byte[] expected = resource(base + "_both.nsbmd");
+        byte[] actual = ImdImporter.toNsbmdWithTextures(imd, base);
+        assertThat(actual)
+                .as("%s.imd translates (with textures) byte-for-byte to g3dcvtr's NSBMD", base)
+                .isEqualTo(expected);
+
+        // the embedded texture decodes to the authored palette16 image
+        ModelSet ms = new ModelSet(actual);
+        assertThat(ms.hasEmbeddedTextures()).isTrue();
+        TextureSet tex = ms.getEmbeddedTextures();
+        assertThat(tex.getTextures()).hasSize(1);
+        TextureSet.Texture t = tex.getTextures().get(0);
+        assertThat(t.getWidth()).isEqualTo(16);
+        assertThat(t.getHeight()).isEqualTo(16);
+        assertThat(ms.getModels().get(0).getMeshes().get(0).getMaterial().getTextureName()).isEqualTo(t.getName());
+    }
+
     @Test
     @DisplayName("a billboard, hardware-lit textured model matches g3dcvtr byte-for-byte")
     void rockMatchesG3dcvtr() { assertByteExact("rock"); }
@@ -71,4 +92,8 @@ public class ImdImporterTest
     @Test
     @DisplayName("a non-billboard, vertex-coloured textured model matches g3dcvtr byte-for-byte")
     void bookMatchesG3dcvtr() { assertByteExact("book"); }
+
+    @Test
+    @DisplayName("with the texture embedded (-eboth), the whole MDL0+TEX0 matches g3dcvtr byte-for-byte")
+    void embeddedTexturesMatchG3dcvtr() { assertByteExactWithTextures("rock"); assertByteExactWithTextures("book"); }
 }
