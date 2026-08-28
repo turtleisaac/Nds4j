@@ -429,6 +429,27 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
     store/restore ordering) and the non-identity node-transform encoding (T/R/S incl. pivot-compressed
     rotations — the inverse of `Model.parseNodeLocals`). The single-node section encoders already generalize
     list-wise; only the node set + SBC tree-walk are new.
+  - **Ghidra decompilation of g3dcvtr — multi-node is a matrix-stack-allocation compiler (now readable).**
+    Ran `analyzeHeadless` on `g3dcvtr.exe` (asserts embed `.\src\imd\modeltree.cpp` file/line, so functions
+    are locatable). The SBC generator is one big function (in this build `FUN_0041e030`) that walks the node
+    array and, per node, emits `NODEDESC`/`NODE`/`MAT`/`SHP`/`POSSCALE`/`RET` while managing a **matrix
+    stack**. Behavioural facts to port from (RE'd behaviour — do NOT copy Nintendo's code):
+    - emission primitives: an opcode maker (`6`=NODEDESC, `0x26`=NODEDESC|store, `0x46`=NODEDESC|restore) +
+      a byte writer; a NODEDESC writes `opcode, nodeId, parentId, optByte`, then a stack-slot byte when
+      store/restore is set. The store slot comes from a node field; the restore path reads a sibling's saved slot.
+    - the `modeltree.cpp:281`/`406` asserts are a **stack-lookup** (`FUN_00422910`) that must find the node's
+      parent on the stack — they fire (`Internal Error`) when the hand-crafted `node`/`display`/`matrix_array`
+      binding doesn't put the parent where the walk expects it. That is why naive multi-mesh `.imd`s were
+      rejected or drew only some nodes.
+    - a node is *drawn* (gets `NODE`+`MAT`+`SHP`) only when its first field == 1 (a mesh with a display bound to
+      its matrix); joint (`kind="null"`) nodes only get a `NODEDESC`. The joint-root+one-mesh `jn` case works;
+      multi-*mesh* needs the stack allocation reproduced so each mesh restores the right parent matrix.
+    **Port plan:** (1) reproduce the node-array walk + store/restore stack-slot allocation (push a node's matrix
+    when a later sibling/child needs it, restore before the sibling draw); (2) emit NODEDESC/NODE/MAT/SHP/
+    POSSCALE accordingly; (3) add the non-identity node-transform encoder (invert `Model.parseNodeLocals`);
+    (4) validate against g3dcvtr on hierarchies you *can* generate (start from `jn`, grow the tree). The
+    decompilation stays out-of-repo (it's Nintendo's) — the algorithm is the reference, none of the code is
+    committed. A discrete, sizeable task, now de-risked by having the algorithm in hand.
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
