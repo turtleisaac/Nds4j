@@ -4,17 +4,20 @@
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
-> **Status: the numbered tasks (#26, #27) AND every §10 follow-up are done.** Placement composes node
-> scale separately (the NNS renderer's rule, not a baked `T·R·S` matrix): multi-node **75%→~97%**.
-> Materials are wired to TEX0 textures; a self-contained **glTF 2.0** exporter (`GltfExporter`) and a
-> pure-JVM **`SoftwareRenderer`** preview both work. All six NSB* formats are byte-exact and decoded:
-> NSBMD, NSBTX, **NSBCA** (skeletal) with `Model.pose()`, **NSBTA** (texture-SRT), **NSBTP** (pattern),
-> **NSBVA** (visibility) — round-trip totals 5482 / 825 / 548 / 506 / 15, animation channel decode
-> validated against the reference jar. Billboard/skinning models are flagged (`Model.hasDynamicPose()`)
-> and excluded from the placement oracle; MTX_SCALE confirmed a reference no-op. **183 tests green.**
-> See §4 for the #26 fix (hypothesis was wrong), §6 for the gold-standard references to build on, and
-> §10 for the **forward roadmap** — the flagship features (animate the preview/export → interactive viewer
-> → remaining read formats) followed by the **writer/encoder side** (drop the g3dcvtr dependency).
+> **Status: #26, #27, every §10 follow-up, AND the F1–F4 forward roadmap (through the writer
+> foundation) are done.** Placement composes node scale separately (the NNS renderer's rule, not a baked
+> `T·R·S` matrix): multi-node **75%→~97%**. Materials are wired to TEX0 textures; a self-contained
+> **glTF 2.0** exporter (`GltfExporter`, now with **animation**) and a pure-JVM **`SoftwareRenderer`**
+> (now **animated** — all four tracks) both work. **Seven** NSB* formats are byte-exact and decoded:
+> NSBMD, NSBTX, **NSBCA** (skeletal, `Model.pose()`), **NSBTA** (texture-SRT), **NSBTP** (pattern),
+> **NSBVA** (visibility), and **NSBMA** (material-colour, RE'd from files — not in the jar).
+> `NitroAnimation` composes the four playable tracks per frame; `AnimatedGif` writes looping previews;
+> `ModelViewer` is a headless-capable Swing/Java2D viewer (orbit, scrub, play, inspect, texture browser).
+> The **writer foundation** (`G3dFile.writeBlockU8/U16`) supports byte-valid in-place edits — NSBMA
+> colour/alpha keyframes and NSBTX palette recolour (incl. embedded TEX0, so `ModelSet.save()` re-emits
+> a valid repainted model). **197 tests green.** See §4 for the #26 fix, §6 for the gold-standard
+> references, and §10 for what's done vs the **one remaining frontier: full source→NSB* conversion**
+> (the g3dcvtr replacement) and true camera-facing **billboard rendering**.
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory notes
 `nds4j-3d-formats-first-class-plan` and **`nsb-gold-standard-references`** (start RE from
@@ -46,13 +49,18 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `G3dDictionary` | NNS resource dict (patricia + named records) | done |
 | `TextureSet` (NSBTX) | TEX0 decode, 7 formats → `BufferedImage`, PNG export | done |
 | `ModelSet` (NSBMD) | MDL0 model dict → `List<Model>`, byte-exact container; `getEmbeddedTextures()` | done |
-| `Model` | geometry + **node placement** + **materials→textures/UVs** + `pose(anim, frame)` | done to ~99% |
-| `GltfExporter` | `Model` (+ `TextureSet`) → self-contained **glTF 2.0** (geometry + PNG textures inlined) | done |
-| `SoftwareRenderer` | headless pure-JVM preview: `Model` (bind pose or `pose()` frame) + `TextureSet` → `BufferedImage` | done |
+| `Model` | geometry + **node placement** + **materials→textures/UVs** + `pose(anim, frame)` + `localTransforms`/`getRawPositions`/`isBillboardNode` | done to ~99% |
+| `GltfExporter` | `Model` (+ `TextureSet`) → self-contained **glTF 2.0**; flat static **and** hierarchical **animated** (NSBCA node channels + NSBTA `KHR_texture_transform`) | done |
+| `SoftwareRenderer` | headless pure-JVM preview: bind pose, `pose()` frame, **or a `NitroAnimation.Frame`** (all four tracks); `renderFrames` for a clip | done |
+| `NitroAnimation` | composes NSBCA/NSBTA/NSBTP/NSBVA into a per-frame `Frame` parallel to `getMeshes()` | done |
+| `AnimatedGif` | frames → looping animated GIF, pure `javax.imageio` | done |
+| `ModelViewer` / `ModelViewerFrame` | headless-capable Swing/Java2D viewer: viewport+HUD, orbit, scrub, play, inspect, texture browser | done |
 | `SkeletalAnimationSet` (NSBCA) | BCA0/JNT0 → `List<Animation>` of per-node SRT tracks; byte-exact container | done |
 | `TextureSrtAnimationSet` (NSBTA) | BTA0/SRT0 → per-material texture-matrix (scale/rot/trans) tracks; byte-exact | done |
 | `TexturePatternAnimationSet` (NSBTP) | BTP0/PAT0 → per-material flip-book keyframes (frame→texture/palette); byte-exact | done |
 | `VisibilityAnimationSet` (NSBVA) | BVA0/VIS0 → per-node on/off bit stream; byte-exact | done |
+| `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material colour/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
+| `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA colour/alpha, NSBTX `setPaletteColor`) | done |
 
 **Numbers (all five ROMs, current `9c057b2`):**
 - Container byte-exact: NSBMD **5482/5482**, NSBCA **825/825**, NSBTA **548/548**, NSBTP **506/506**,
@@ -64,9 +72,11 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
   samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
   the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 183 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
-`g3d/GltfExporterTest.java`, `g3d/SkeletalAnimationSetTest.java`, `g3d/TextureAndVisibilityAnimationTest.java`,
-`g3d/SoftwareRendererTest.java`. Run:
+**Test suite:** 197 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+`g3d/GltfExporterTest.java`, `g3d/GltfAnimationTest.java`, `g3d/SkeletalAnimationSetTest.java`,
+`g3d/TextureAndVisibilityAnimationTest.java`, `g3d/MaterialColorAnimationTest.java`,
+`g3d/SoftwareRendererTest.java`, `g3d/AnimatedPreviewTest.java`, `g3d/ModelViewerTest.java`,
+`g3d/NsbEditingTest.java`. Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
@@ -297,52 +307,63 @@ NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview ra
 
 ---
 
-## 10. Roadmap: flagship features, then the writer/encoder side
+## 10. Roadmap: F1–F4 status (F1–F3 + the writer foundation are DONE)
 
-The §4 numbered tasks and every earlier §10 follow-up are **done** (all six NSB* read formats decoded +
-byte-exact; glTF export; `SoftwareRenderer`; billboard oracle handling; MTX_SCALE resolved — see §1). The
-read side is a solid base. What follows is the **forward roadmap** — these are flagship features now, not
-nice-to-haves, sequenced so the read/preview work lands before the writer side builds on it.
+The §4 numbered tasks and every earlier §10 follow-up are done (all read formats byte-exact; glTF export;
+`SoftwareRenderer`; billboard oracle handling; MTX_SCALE resolved — §1). The forward roadmap below is now
+**mostly delivered**; only the full-conversion frontier and true billboard rendering remain.
 
-### F1 — Animate the preview and the export *(highest leverage; the data is already decoded)*
-NSBCA already poses skeletons (`Model.pose`). NSBTA/NSBTP/NSBVA are decoded and sampleable but **not yet
-applied**. Wire them through so a model *plays*:
-- **`SoftwareRenderer`**: take an optional animation-frame context and apply, per frame — NSBCA skeleton
-  pose (done via `pose()`); **NSBTA** texture-SRT on the material's UVs (scale/rot/trans of texcoords);
-  **NSBTP** pattern swap (pick the material's texture/palette for that frame); **NSBVA** visibility (skip
-  hidden nodes' shapes). Emit an animated GIF/frame sequence (the manene walk cycle already proves the
-  path).
-- **`GltfExporter`**: emit glTF 2.0 animation channels — node TRS samplers from NSBCA, `KHR_texture_transform`
-  + UV-transform samplers from NSBTA, visibility via node on/off. Then a single `.gltf` *plays* in any
-  viewer. **Acceptance:** a posed+textured+UV-scrolled model round-trips through a third-party glTF viewer.
+### F1 — Animate the preview and the export ✅ DONE
+- **`SoftwareRenderer` (animated).** `NitroAnimation` (new) composes the four tracks into a per-frame
+  `Frame` parallel to `getMeshes()`: NSBCA pose (`Model.pose`), **NSBTA** as a normalised-UV matrix on
+  texcoords, **NSBTP** as a per-mesh texture/palette override, **NSBVA** as a per-mesh draw flag. New
+  `render(Model, Frame, …)` + `renderFrames(…)` (one fitted camera per clip); `AnimatedGif` writes a
+  looping GIF with pure `javax.imageio`. Verified: manene walk, demo_ana_d water scroll, gingaboss 16-frame
+  flip-book, kurotama (all three of NSBVA+NSBCA+NSBTA together). Commit `2999b67`.
+- **`GltfExporter` (animated).** `toGltf(model, textures, animations, textureSrt)` emits a **node tree**
+  (bind-pose TRS, geometry placed per node as `raw*posScale` in local space) and one glTF animation per
+  NSBCA (node T/R/S channels; row-vector→column-vector quaternion via `matrixToQuat`, sign-continuous;
+  constant channels omitted). Optional NSBTA seeds `KHR_texture_transform`. Commit `c45de92`.
+  **Verified geometrically** (composing the emitted tree as a viewer would reconstructs the decode and
+  `Model.pose()` to <1e-3). *Known limits:* glTF core can't portably animate NSBTP/NSBVA, and non-uniform
+  SSC node scale shears under standard TRS composition (SoftwareRenderer stays the NNS-exact renderer).
 
-### F2 — Interactive viewer *(billboards, camera, playback)*
-A live view is the only correct way to render `BB`/`BBY` billboards (camera-facing) and to scrub
-animations. Pure-JVM per `TECH_DEBT.md §3` — Swing/Java2D over `SoftwareRenderer` (no LWJGL/JOGL). Adds:
-orbit camera, animation timeline/scrub, per-node/per-material inspection, texture browser. This is where
-`Model.hasDynamicPose()` billboards finally render right.
+### F2 — Interactive viewer ✅ DONE (billboards are the one gap)
+`ModelViewer.renderView` composites the 3D viewport + an inspection HUD (counts, animation+scrub, material
+list, node list with billboard flags, texture browser) with or without a display; `ModelViewerFrame` is
+the Swing shell (mouse-orbit, frame scrubber, 30fps play/pause). Pure Swing/Java2D per §3. Commit `8cabc60`.
+**Still open:** true camera-facing `BB`/`BBY` billboard *rendering*. `Model.isBillboardNode(n)` now flags
+them (inspector labels them); the renderer still draws billboards at their authored orientation. Doing it
+right means re-orienting a billboard node's geometry toward the camera per frame in `SoftwareRenderer`.
 
-### F3 — Remaining read formats *(breadth)*
-Same recipe (subclass `G3dFile` → free round-trip → decode vs the gold standard §6 → validate): **SPA**
-(particles), **NSBMA** (`BMA0`, material-colour animation — absent from the jar, RE from nsbmd_docs +
-files), and the 2D companions / general Nitro compression codec in the memory plan
-`nds4j-3d-formats-first-class-plan`.
+### F3 — Remaining read formats ✅ DONE (NSBMA); SPA N/A for these ROMs
+`MaterialColorAnimationSet` (NSBMA / `BMA0`, **absent from the jar**, RE'd from files): per material, five
+u32 channels (diffuse/ambient/specular/emission = 15-bit colour, alpha = 5-bit); bit `0x20` = constant,
+else low 16 bits are an offset (from anim start) to a per-frame array (u16/frame colour, u8/frame alpha).
+Byte-exact over all 160 BMA0 in the five ROMs; demo_kusari's alpha decodes as a 0→31→0 glow. Commit
+`93f6e00`. **SPA** (particles): no files exist in any of the five Gen IV Pokémon ROMs (all scanned), so
+there is nothing to round-trip; revisit only if a ROM that ships SPA appears. The 2D companions / Nitro
+compression codec in `nds4j-3d-formats-first-class-plan` remain optional breadth.
 
-### F4 — The writer / encoder side *(the major frontier — do after F1–F3)*
-Everything so far is **read-side**. The flagship end-state is **authoring** NSB* from source assets:
-- **Editing round-trip first:** mutate a decoded model/animation (swap a texture, retarget a bone, edit a
-  keyframe) and re-serialise to a valid NSB* that a retail ROM loads. Build on `G3dFile`'s block model;
-  the invariant is byte-exact for an *unedited* object, byte-*valid* for an edited one.
-- **Full conversion (the g3dcvtr replacement):** source (glTF/IMD-like) → NSBMD/NSBTX/NSBCA/…. This is the
-  open-source win flagged in memory `g3dcvtr-re-resource`: **PDSMS depends on the g3dcvtr binary**, and a
-  native encoder lets it drop that. RE the *writer* against `g3dcvtr` (fair-use) + the gold-standard docs.
-- **Oracle for the writer:** decode-encode-decode must be stable, and output must load in-game / re-read
-  identically via the gold-standard decoders. This is harder than reading — the DS packs data many valid
-  ways; match g3dcvtr's layout choices where a ROM expects them.
+### F4 — The writer / encoder side — **step 1 DONE, full conversion is the remaining frontier**
+- **Editing round-trip ✅.** `G3dFile.writeBlockU8/U16` make same-size in-place edits (unedited → byte-exact,
+  edited → byte-valid; offset table untouched). Concrete: NSBMA `ColorChannel.setRaw/setRgb` +
+  `ScalarChannel.set`; NSBTX `TextureSet.setPaletteColor` (incl. embedded TEX0 → `ModelSet.save()` re-emits
+  a valid repainted model). Verified minimal/reversible + a visible manene recolour. Commit `0b8d6ad`.
+- **Full conversion (the g3dcvtr replacement) — NOT STARTED (the major frontier).** source (glTF/IMD-like)
+  → NSBMD/NSBTX/NSBCA/…: display-list encoding (quantise verts, choose primitive strips, emit the geometry
+  command stream), build NNS dictionaries incl. the **Patricia tree** (currently only preserved verbatim —
+  see `G3dDictionary.rawTree`; a writer must construct it), texture/palette encoding, and the container
+  offset table. This is the open-source win flagged in memory `g3dcvtr-re-resource`: **PDSMS depends on the
+  g3dcvtr binary**, and a native encoder drops it. RE the *writer* against `g3dcvtr` (fair-use) + the
+  gold-standard docs. **Oracle:** decode→encode→decode stable, and output loads in-game / re-reads
+  identically; match g3dcvtr's layout where a ROM expects it. Size-changing edits (add keyframes, longer
+  names) need the offset-table rebuild this frontier provides — the in-place editor above deliberately
+  covers only same-size edits until then.
 
 **Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE from the
-**gold standard** (nsbmd_docs + Apicula, §6) and use the jar as a byte-level second opinion; validate the
-lossy decode value-by-value in a throwaway probe (how the NSBCA rotation decompression and NSBTA channels
-were confirmed); **triangulate** placement against the g3dcvtr header box + the decoder-independent
-vertex-count oracle (no single source is infallible — §5.8, §6 caveat); bucket/measure, keep the split
-oracle floors, commit checkpoints, keep the tree clean.
+**gold standard** (nsbmd_docs + Apicula, §6) and use the jar as a byte-level second opinion (NSBMA had no
+jar — RE straight from the retail files, cross-checking offset spacing to fix element strides); validate
+the lossy decode value-by-value in a throwaway probe; **triangulate** (no single source is infallible —
+§5.8, §6 caveat); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
+Rendered checkpoints live in `g3d_out/` (walk/scroll/flip-book/recolour GIFs+PNGs, animated `.gltf`).
