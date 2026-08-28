@@ -387,9 +387,10 @@ public class TextureSet extends G3dFile
         for (int p = 0; p < w * h; p++)
         {
             int argb = img.getRGB(p % w, p / w);
-            int r = ((argb >> 16) & 0xFF) * 31 / 255;
-            int g = ((argb >> 8) & 0xFF) * 31 / 255;
-            int b = (argb & 0xFF) * 31 / 255;
+            // >>3 is the exact inverse of the decoder's (bits<<3), so a decoded image re-encodes losslessly
+            int r = ((argb >> 16) & 0xFF) >> 3;
+            int g = ((argb >> 8) & 0xFF) >> 3;
+            int b = (argb & 0xFF) >> 3;
             int v = r | (g << 5) | (b << 10);
             if ((argb >>> 24) >= 128)
                 v |= 0x8000; // alpha/opaque bit
