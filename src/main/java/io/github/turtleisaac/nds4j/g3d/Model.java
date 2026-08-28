@@ -426,7 +426,9 @@ public class Model
                     case 0x10: case 0x14: case 0x20: case 0x21:         // MTX_MODE / MTX_RESTORE / COLOR / NORMAL
                     case 0x29: case 0x2A: case 0x2B:                    // POLYGON_ATTR / TEXIMAGE_PARAM / PLTT_BASE
                         pos += 4; break;
-                    case 0x1B: pos += 12; break;                         // MTX_SCALE (3 params)
+                    case 0x1B: pos += 12; break;                         // MTX_SCALE (3 params): consumed
+                        // but not applied - the reference renderer's MTX_SCALE.execute() is a no-op too,
+                        // so skipping it matches (and the 100% vertex-count oracle confirms the width).
                     case 0x22: {                                        // TEXCOORD (s,t as 1.11.4 fixed)
                         long p = readU32(d, pos); pos += 4;
                         uv[0] = (short) (p & 0xFFFF) / 16.0;

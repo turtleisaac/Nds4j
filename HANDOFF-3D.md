@@ -1,17 +1,19 @@
 # Handoff: Nds4j 3D (NSB*) support
 
-**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `b021133`.
+**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `9c057b2`.
 **Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
 hard-won lessons and traps so the next agent doesn't repeat them.
 
-> **Status update (tasks #26 and #27 are DONE).** Placement now composes node scale separately (the
-> NNS renderer's rule, not a baked `T·R·S` matrix): multi-node placement **75%→96%**, overall **99%**.
-> Materials are wired to TEX0 textures with normalised UVs; a self-contained **glTF 2.0** exporter
-> (`GltfExporter`) inlines geometry + PNG textures. **NSBCA** skeletal animation is decoded byte-exact
-> (round-trip 825/825 across all five ROMs; channel decode matches the reference jar exactly) and
-> `Model.pose(animation, frame)` re-poses the bind-pose skeleton — the manene walk cycle renders
-> posed + textured. 177 tests green. See §4 for what the numbered-task fix actually was vs. the
-> hypothesis, and §10 for what's left (NSBTA/NSBTP/NSBVA, MTX_SCALE, billboards).
+> **Status: the numbered tasks (#26, #27) AND every §10 follow-up are done.** Placement composes node
+> scale separately (the NNS renderer's rule, not a baked `T·R·S` matrix): multi-node **75%→~97%**.
+> Materials are wired to TEX0 textures; a self-contained **glTF 2.0** exporter (`GltfExporter`) and a
+> pure-JVM **`SoftwareRenderer`** preview both work. All six NSB* formats are byte-exact and decoded:
+> NSBMD, NSBTX, **NSBCA** (skeletal) with `Model.pose()`, **NSBTA** (texture-SRT), **NSBTP** (pattern),
+> **NSBVA** (visibility) — round-trip totals 5482 / 825 / 548 / 506 / 15, animation channel decode
+> validated against the reference jar. Billboard/skinning models are flagged (`Model.hasDynamicPose()`)
+> and excluded from the placement oracle; MTX_SCALE confirmed a reference no-op. **183 tests green.**
+> See §4 for the #26 fix (hypothesis was wrong), §10 for the genuinely-open nice-to-haves (wire the
+> texture/visibility animations into the renderer/exporter; a live viewer; SPA particles).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory note
 `nds4j-3d-formats-first-class-plan`. This doc is the *working* handoff; `TECH_DEBT.md` is the durable
@@ -44,18 +46,25 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `ModelSet` (NSBMD) | MDL0 model dict → `List<Model>`, byte-exact container; `getEmbeddedTextures()` | done |
 | `Model` | geometry + **node placement** + **materials→textures/UVs** + `pose(anim, frame)` | done to ~99% |
 | `GltfExporter` | `Model` (+ `TextureSet`) → self-contained **glTF 2.0** (geometry + PNG textures inlined) | done |
+| `SoftwareRenderer` | headless pure-JVM preview: `Model` (bind pose or `pose()` frame) + `TextureSet` → `BufferedImage` | done |
 | `SkeletalAnimationSet` (NSBCA) | BCA0/JNT0 → `List<Animation>` of per-node SRT tracks; byte-exact container | done |
+| `TextureSrtAnimationSet` (NSBTA) | BTA0/SRT0 → per-material texture-matrix (scale/rot/trans) tracks; byte-exact | done |
+| `TexturePatternAnimationSet` (NSBTP) | BTP0/PAT0 → per-material flip-book keyframes (frame→texture/palette); byte-exact | done |
+| `VisibilityAnimationSet` (NSBVA) | BVA0/VIS0 → per-node on/off bit stream; byte-exact | done |
 
-**Numbers (all five ROMs, current `b021133`):**
-- Container byte-exact: NSBMD **5482/5482**, NSBCA **825/825**.
+**Numbers (all five ROMs, current `9c057b2`):**
+- Container byte-exact: NSBMD **5482/5482**, NSBCA **825/825**, NSBTA **548/548**, NSBTP **506/506**,
+  NSBVA **15/15**.
 - Vertex-count oracle: **5482/5482 (100%)**.
-- Placement (decoded AABB vs header box): **99.0% overall**, single-node **99.4%**, multi-node **96.4%**
-  (residual misses are billboard/skinning nodes a static bind-pose decode can't represent — §10).
-- NSBCA channel decode vs the reference jar: exact (manene's 5 anims — 1156 T, 120 S, 9630 R samples, 0
-  mismatches).
+- Placement (decoded AABB vs header box, billboard/skinning excluded via `Model.hasDynamicPose()`):
+  single-node **98.8%**, multi-node static-pose **97.5%** (96.5% Platinum).
+- Animation channel decode vs the reference jar: NSBCA exact (manene's 5 anims — 1156 T, 120 S, 9630 R
+  samples, 0 mismatches); NSBTA exact over 112974 samples (the only 2 deltas are negative fx16 constants
+  the reference mis-reads as unsigned — our signed reading is correct, confirmed against the raw bytes).
 
-**Test suite:** 177 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
-`g3d/GltfExporterTest.java`, `g3d/SkeletalAnimationSetTest.java`. Run:
+**Test suite:** 183 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+`g3d/GltfExporterTest.java`, `g3d/SkeletalAnimationSetTest.java`, `g3d/TextureAndVisibilityAnimationTest.java`,
+`g3d/SoftwareRendererTest.java`. Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
@@ -256,36 +265,40 @@ commit**). `Model` already exposes `getNodeCount()`, `isSingleNode()`, `getDecod
 - **§2 clean-exposure principle** — followed: `Model`/`Mesh`/`Material`, `GltfExporter`,
   `SkeletalAnimationSet`/`Animation`/`NodeAnim` are all named by concept, not extension.
 - **§3 3D format/library decision (glTF 2.0, pure-Java, reject LWJGL/JOGL, hand-emit glTF)** — executed
-  by `GltfExporter` (base64 buffer + `ImageIO` PNG, zero native deps). The renders in this work used a
-  throwaway pure-Java software rasterizer (kept in `/tmp`, not committed); a first-class in-library
-  rasterizer/preview is still open if a headless preview is wanted.
+  by `GltfExporter` (base64 buffer + `ImageIO` PNG, zero native deps) and `SoftwareRenderer` (headless
+  preview, pure JVM).
 
-**Resolved debt:** node inverse-scale / SSC-flag hypothesis (turned out unused — §4). **Remaining
-decode gaps (all small, none break byte-exact round-trip):** see §10.
+**Resolved debt:** node inverse-scale / SSC-flag hypothesis (turned out unused — §4); the three remaining
+NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview rasterizer (all done — §10).
 
 ---
 
 ## 10. What's left (for the next agent)
 
-The numbered tasks are done. Remaining, in rough priority:
+The §4 numbered tasks **and** every item this section previously listed are now done:
 
-1. **Other NSB* animation formats** (the memory plan `nds4j-3d-formats-first-class-plan`): **NSBTA**
-   (`BTA0`, texture-SRT animation — manene ships one beside its BCA0s), **NSBTP** (`BTP0`, texture
-   *pattern* animation), **NSBVA** (`BVA0`, visibility animation). Same recipe that worked here: subclass
-   `G3dFile` for byte-exact round-trip first (§0), then decode the block against
-   `nitroreader.{nsbta,nsbtp,nsbva}.*`, then apply on top of the model. Reference `renderer.ObjectGL`
-   shows how each composes at draw time.
-2. **`MTX_SCALE` (display-list op `0x1B`)** — still skipped. Small `g_demo_*` effect population; the
-   vertex-count oracle is already 100%, so this only matters for those models' placement. Reference:
-   `nsbmd.gpucommands.MTX_SCALE`. Do it if cheap.
-3. **Billboard / skinning final pose** (`BB`/`BBY`/`NODEMIX`) — *parsed* (the SBC walk stays in sync) but
-   not *posed*; a static bind-pose AABB can't represent a camera-facing billboard, so these are the
-   residual ~1% placement misses. Consider excluding them from the placement oracle rather than
-   "fixing" them, and render billboards only in a live viewer.
-4. **First-class preview/rasterizer** — the software rasterizer used for the milestone renders lives in
-   `/tmp` only. If an in-library headless preview is wanted, port it (pure Java, per §3).
+1. **Other NSB* animation formats** — ✅ **done.** `TextureSrtAnimationSet` (NSBTA/BTA0), 
+   `TexturePatternAnimationSet` (NSBTP/BTP0), `VisibilityAnimationSet` (NSBVA/BVA0): all `G3dFile`
+   subclasses (byte-exact round-trip **548/548, 506/506, 15/15**) with the block decoded from
+   `nitroreader.{nsbta,nsbtp,nsbva}.*`. NSBTA channel decode validated against the jar (112974 samples).
+   *Not yet wired into rendering/export* — the tracks are decoded and sampleable, but `SoftwareRenderer`
+   and `GltfExporter` don't yet apply texture-SRT/pattern/visibility. That's the natural next step if a
+   fully-animated preview is wanted (glTF 2.0 also supports UV-transform animation via samplers).
+2. **`MTX_SCALE` (display-list op `0x1B`)** — ✅ **resolved.** The reference `gpucommands.MTX_SCALE.execute()`
+   is a **no-op**, so consuming-but-not-applying it (as we do) matches the reference exactly; the 100%
+   vertex-count oracle confirms the 12-byte operand width. Not a gap. (Comment added at the op in `Model`.)
+3. **Billboard / skinning final pose** — ✅ **handled.** `Model.hasDynamicPose()` flags `BB`/`BBY`/`NODEMIX`
+   models; the placement oracle now excludes them (a static bind-pose AABB can't represent a camera-facing
+   or blended pose), so the multi-node number is honest (97.5% static-pose). Actually *rendering* a
+   billboard still needs a live camera — out of scope for a static decode.
+4. **First-class preview/rasterizer** — ✅ **done.** `SoftwareRenderer` (pure Java) renders a `Model` at
+   bind pose or from `pose()` positions; used by `SoftwareRendererTest`.
+
+**Genuinely open (nice-to-haves, none blocking):** apply NSBTA/NSBTP/NSBVA in the renderer/exporter (see
+#1); a live/interactive viewer for billboards; SPA (particles) and the other future formats in the memory
+plan `nds4j-3d-formats-first-class-plan`.
 
 **Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE the
 block from the reference *bytecode* (not prose); validate the lossy decode against the reference jar
-value-by-value in a throwaway probe (this is how the NSBCA rotation decompression was confirmed — 0
-mismatches); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
+value-by-value in a throwaway probe (this is how the NSBCA rotation decompression and NSBTA channels were
+confirmed); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
