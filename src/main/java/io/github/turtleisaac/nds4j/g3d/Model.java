@@ -59,6 +59,10 @@ public class Model
     private final float[] headerBoxMax = new float[3];
     private final List<Mesh> meshes = new ArrayList<>();
     private final List<Material> materials = new ArrayList<>();
+    // Bind-pose skeleton, retained so an animation can re-pose the model: each node's local transform,
+    // its parent (for hierarchy composition), and the raw (pre-placement) vertices per mesh.
+    private Srt[] nodeLocals;
+    private int[] nodeParent;
 
     Model(byte[] mdl0, int modelStart, String name)
     {
@@ -96,11 +100,11 @@ public class Model
         // Per-node local transforms and, by walking the render commands, which node's world matrix each
         // shape is drawn with (and which material is bound). This is what positions a multi-node model's
         // parts correctly and ties each shape to its texture.
-        Srt[] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
+        nodeLocals = parseNodeLocals(mdl0, modelStart + 0x40);
         int[] shapeNode = new int[shapeCountHeader];
         int[] shapeMaterial = new int[shapeCountHeader];
         java.util.Arrays.fill(shapeMaterial, -1);
-        Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeMaterial, shapeCountHeader);
+        Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocals, shapeNode, shapeMaterial, shapeCountHeader);
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
@@ -117,6 +121,8 @@ public class Model
             int dlSize = (int) readU32(mdl0, shapeStruct + 12);
             Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
+            mesh.nodeIndex = node;
+            mesh.rawPositions = mesh.positions.clone(); // pre-placement vertices, kept for re-posing
             Srt world = (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null;
             transformInPlace(mesh.positions, world, posScale);
             mesh.material = (i < shapeMaterial.length && shapeMaterial[i] >= 0 && shapeMaterial[i] < materials.size())
@@ -311,6 +317,7 @@ public class Model
                 default: stop = true; break;                        // an unmodelled command - stop rather than desync
             }
         }
+        nodeParent = parent; // retained so an animation can recompose the hierarchy
         Srt[] world = new Srt[count];
         for (int n = 0; n < count; n++)
             world[n] = resolveWorld(n, parent, nodeLocal, world);
@@ -571,6 +578,45 @@ public class Model
     }
 
     /**
+     * Poses this model by a skeletal animation and returns the vertex positions for each mesh at the
+     * given frame &mdash; the same list order as {@link #getMeshes()}. Each animated node replaces its
+     * bind-pose scale/rotation/translation with the animation's value for that frame (a "base" track
+     * keeps the bind-pose value), the node hierarchy is recomposed exactly as at bind pose, and the raw
+     * vertices are re-placed. The model's own meshes are left at their bind pose.
+     * @param animation the animation to apply (its nodes correspond to this model's nodes, in order)
+     * @param frame the frame index to sample
+     * @return one {@code float[]} of {@code x,y,z} triples per mesh, in {@link #getMeshes()} order
+     */
+    public List<float[]> pose(SkeletalAnimationSet.Animation animation, int frame)
+    {
+        int count = nodeLocals.length;
+        List<SkeletalAnimationSet.NodeAnim> animNodes = animation.getNodes();
+        Srt[] local = new Srt[count];
+        for (int n = 0; n < count; n++)
+        {
+            Srt bind = nodeLocals[n];
+            SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
+            double[] t = na != null ? na.translationAt(frame) : null;
+            double[] s = na != null ? na.scaleAt(frame) : null;
+            double[] r = na != null ? na.rotationAt(frame) : null;
+            local[n] = new Srt(t != null ? t : bind.t, s != null ? s : bind.s, r != null ? r : bind.r);
+        }
+        Srt[] world = new Srt[count];
+        for (int n = 0; n < count; n++)
+            world[n] = resolveWorld(n, nodeParent, local, world);
+
+        List<float[]> posed = new ArrayList<>(meshes.size());
+        for (Mesh mesh : meshes)
+        {
+            float[] out = mesh.rawPositions.clone();
+            Srt w = (mesh.nodeIndex >= 0 && mesh.nodeIndex < count) ? world[mesh.nodeIndex] : null;
+            transformInPlace(out, w, posScale);
+            posed.add(out);
+        }
+        return posed;
+    }
+
+    /**
      * @return the number of vertices the model header declares (equals the number the display-list
      *         interpreter emits when it decodes correctly)
      */
@@ -711,6 +757,8 @@ public class Model
                                             // texture's size to normalise)
         private final int[] triangleIndices; // 3 indices per triangle
         private Material material;          // the bound material (texture/palette), or null
+        float[] rawPositions;              // pre-placement vertices (for re-posing by an animation)
+        int nodeIndex;                     // the skeleton node this mesh is drawn under
 
         Mesh(String name, float[] positions, float[] texcoords, int[] triangleIndices)
         {
