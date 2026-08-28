@@ -91,14 +91,17 @@ public final class ImdImporter
         int numTri = intAttr("output_info", "triangle_size");
         int numQuad = intAttr("output_info", "quad_size");
         String nodeName = attr("node", "name");
-        String matName = attr("material", "name");
-        String polyName = attr("polygon", "name");
 
-        byte[] dl = buildDisplayList();
+        List<String> materials = blocks("material");        // each <material .../>
+        List<String> polygons = blocks("polygon");          // each <polygon ...>...</polygon>
+        int[][] displays = parseDisplays();                 // {materialIdx, polygonIdx} per node display
+
+        List<byte[]> dls = new ArrayList<>();
+        for (String poly : polygons) dls.add(buildDisplayList(poly));
         byte[] nodeSet = buildNodeSet(nodeName);
-        byte[] sbc = buildSbc();
-        byte[] matSet = buildMaterialSet(matName);
-        byte[] shapeSet = buildShapeSet(polyName, dl);
+        byte[] sbc = buildSbc(displays);
+        byte[] matSet = buildMaterialSet(materials);
+        byte[] shapeSet = buildShapeSet(polygons, dls);
 
         int headerLen = 0x40;
         int ofsSbc = headerLen + nodeSet.length;
@@ -113,8 +116,9 @@ public final class ImdImporter
         u32(model, 16, modelLen);            // ofsEndOrEnvelope: past the last section (no envelope)
         int info = 0x14;
         model[info + 3] = 1;                 // numNode
-        model[info + 4] = 1;                 // matCount
-        model[info + 5] = 1;                 // shapeCount
+        model[info + 4] = (byte) materials.size(); // matCount
+        model[info + 5] = (byte) polygons.size();  // shapeCount
+        model[info + 6] = (byte) (displays.length > 1 ? 1 : 0); // firstUnusedMtxStackId (NODEDESC store slot)
         u32(model, info + 8, (long) posScale * 4096);       // posScale (fx32)
         u32(model, info + 0xC, 4096L / posScale);           // inverse posScale
         u16(model, info + 0x10, numVtx);
@@ -219,11 +223,11 @@ public final class ImdImporter
     }
     private static int hexDigit(char c) { return Character.digit(c, 16); }
 
-    // --- geometry: translate the polygon's primitive commands into GPU commands, pad the DL to /8 ---
-    private byte[] buildDisplayList()
+    // --- geometry: translate one polygon's primitive commands into GPU commands, pad the DL to /8 ---
+    private byte[] buildDisplayList(String polygon)
     {
         List<DisplayList.Command> cmds = new ArrayList<>();
-        Matcher pm = Pattern.compile("<primitive [^>]*type=\"(\\w+)\"[^>]*>(.*?)</primitive>", Pattern.DOTALL).matcher(imd);
+        Matcher pm = Pattern.compile("<primitive [^>]*type=\"(\\w+)\"[^>]*>(.*?)</primitive>", Pattern.DOTALL).matcher(polygon);
         pm.find();
         String type = pm.group(1);
         int prim = type.equals("triangles") ? 0 : type.equals("quads") ? 1 : type.equals("triangle_strip") ? 2 : 3;
@@ -264,80 +268,139 @@ public final class ImdImporter
         return concat(dict, nodeStruct);
     }
 
-    // --- SBC render stream: NODEDESC, NODE, [BB if billboard], POSSCALE, MAT, SHP, POSSCALE|end, RET ---
-    private byte[] buildSbc()
+    // --- SBC render stream: NODEDESC[+store if >1 shape], NODE, [BB], POSSCALE, {MAT,SHP}*, POSSCALE|end, RET ---
+    private byte[] buildSbc(int[][] displays)
     {
         boolean billboard = "on".equals(attr("node", "billboard"));
         int vis = "off".equals(attr("node", "visibility")) ? 0 : 1;
+        boolean multi = displays.length > 1;
         ByteArrayOutputStream sb = new ByteArrayOutputStream();
-        sb.write(0x06); sb.write(0); sb.write(0); sb.write(0); // NODEDESC(node 0, parent 0, opt 0)
+        if (multi) { sb.write(0x26); sb.write(0); sb.write(0); sb.write(0); sb.write(0); } // NODEDESC+store slot 0
+        else       { sb.write(0x06); sb.write(0); sb.write(0); sb.write(0); }              // NODEDESC(0,0,0)
         sb.write(0x02); sb.write(0); sb.write(vis);            // NODE(node 0, visibility)
         if (billboard) { sb.write(0x07); sb.write(0); }        // BB(node 0)
         sb.write(0x0b);                                        // POSSCALE (begin)
-        sb.write(0x04); sb.write(0);                           // MAT(material 0)
-        sb.write(0x05); sb.write(0);                           // SHP(shape 0)
+        for (int[] d : displays)                               // one MAT/SHP pair per display, in order
+        {
+            sb.write(0x04); sb.write(d[0]);                    // MAT(materialIdx)
+            sb.write(0x05); sb.write(d[1]);                    // SHP(polygonIdx)
+        }
         sb.write(0x2b);                                        // POSSCALE | 0x20 (end)
         sb.write(0x01);                                        // RET
         while (sb.size() % 4 != 0) sb.write(0);
         return sb.toByteArray();
     }
 
-    // --- material set: header, material dict, tex/pltt->material dicts, index lists, material struct ---
-    private byte[] buildMaterialSet(String matName)
+    // --- material set: header, material dict, tex/pltt->material dicts (grouped by resource), index lists,
+    //     then the material structs. Materials sharing a texture/palette are grouped into one dict entry
+    //     whose index list names the materials that use it. ---
+    private byte[] buildMaterialSet(List<String> materials)
     {
-        byte[] ms = new byte[44];
-        u16(ms, 0, 0);
-        u16(ms, 2, 44);                                       // sizeof
-        u32(ms, 4, rgb15(doubles(attr("material", "diffuse"))) | (1 << 15) | (rgb15(doubles(attr("material", "ambient"))) << 16));
-        u32(ms, 8, rgb15(doubles(attr("material", "specular"))) | (rgb15(doubles(attr("material", "emission"))) << 16));
-        int alpha = intAttr("material", "alpha");
-        int lights = 0;
-        for (int i = 0; i < 4; i++) if ("on".equals(attr("material", "light" + i))) lights |= 1 << i;
-        u32(ms, 0x0C, ((long) alpha << 16) | 0x80 | lights);  // polygon_attr (modulate, render front)
-        u32(ms, 0x10, 0x3f1ff8ffL);                           // polygon_attr_mask
-        u32(ms, 0x14, (1L << 16) | (1L << 17));               // teximage_param: repeat S/T
-        u32(ms, 0x18, 0xffffffffL);                           // unknown3
-        u16(ms, 0x1C, 0);                                     // pltt_base
-        u16(ms, 0x1E, 0x1fce);                                // misc (no texture matrix)
-        u16(ms, 0x20, intAttr("tex_image", "width"));
-        u16(ms, 0x22, intAttr("tex_image", "height"));
-        u32(ms, 0x24, 0x1000);                                // unknown5 = 1.0
-        u32(ms, 0x28, 0x1000);                                // unknown6 = 1.0
+        int n = materials.size();
+        List<byte[]> matStructs = new ArrayList<>();
+        List<String> matNames = new ArrayList<>();
+        // group material indices by texture/palette name; the dict entries are ordered by name (bytewise),
+        // matching g3dcvtr, and each entry lists the materials that use it (in material order)
+        java.util.TreeMap<String, List<Integer>> byTex = new java.util.TreeMap<>();
+        java.util.TreeMap<String, List<Integer>> byPlt = new java.util.TreeMap<>();
+        for (int i = 0; i < n; i++)
+        {
+            String m = materials.get(i);
+            matNames.add(a(m, "name"));
+            int texIdx = Integer.parseInt(a(m, "tex_image_idx"));
+            int pltIdx = Integer.parseInt(a(m, "tex_palette_idx"));
+            String texName = a(blocks("tex_image").get(texIdx), "name");
+            String pltName = a(blocks("tex_palette").get(pltIdx), "name");
+            byTex.computeIfAbsent(texName, k -> new ArrayList<>()).add(i);
+            byPlt.computeIfAbsent(pltName, k -> new ArrayList<>()).add(i);
+            matStructs.add(buildMaterialStruct(m, texIdx));
+        }
 
-        String texName = attr("tex_image", "name");
-        String pltName = attr("tex_palette", "name");
-        int matDictLen = serialize(G3dDictionary.build(List.of(matName), List.of(rec4(0)), 4)).length;
-        int texDictLen = serialize(G3dDictionary.build(List.of(texName), List.of(rec4(0)), 4)).length;
-        int pltDictLen = serialize(G3dDictionary.build(List.of(pltName), List.of(rec4(0)), 4)).length;
+        List<byte[]> dummy = new ArrayList<>();
+        for (int i = 0; i < n; i++) dummy.add(rec4(0));
+        int matDictLen = serialize(G3dDictionary.build(matNames, dummy, 4)).length;
+        int texDictLen = serialize(G3dDictionary.build(new ArrayList<>(byTex.keySet()), placeholders(byTex.size()), 4)).length;
+        int pltDictLen = serialize(G3dDictionary.build(new ArrayList<>(byPlt.keySet()), placeholders(byPlt.size()), 4)).length;
         int ofsTexDict = 4 + matDictLen;
         int ofsPltDict = ofsTexDict + texDictLen;
-        int idxBase = ofsPltDict + pltDictLen;                // 4-byte index-list region
-        int structOfs = idxBase + 4;
-        byte[] set = new byte[structOfs + 44];
+        int idxBase = ofsPltDict + pltDictLen;
+        // index-list region: each tex group's material list, then each pltt group's, padded to /4
+        ByteArrayOutputStream idx = new ByteArrayOutputStream();
+        List<byte[]> texRecs = new ArrayList<>();
+        for (java.util.Map.Entry<String, List<Integer>> e : byTex.entrySet()) { texRecs.add(rec4(((idxBase + idx.size()) & 0xFFFF) | ((long) e.getValue().size() << 16))); for (int mi : e.getValue()) idx.write(mi); }
+        List<byte[]> pltRecs = new ArrayList<>();
+        for (java.util.Map.Entry<String, List<Integer>> e : byPlt.entrySet()) { pltRecs.add(rec4(((idxBase + idx.size()) & 0xFFFF) | ((long) e.getValue().size() << 16))); for (int mi : e.getValue()) idx.write(mi); }
+        int idxLen = (idx.size() + 3) & ~3;
+        int structsBase = idxBase + idxLen;
+        int setLen = structsBase + 44 * n;
+
+        byte[] set = new byte[setLen];
         u16(set, 0, ofsTexDict);
         u16(set, 2, ofsPltDict);
-        System.arraycopy(serialize(G3dDictionary.build(List.of(matName), List.of(rec4(structOfs)), 4)), 0, set, 4, matDictLen);
-        System.arraycopy(serialize(G3dDictionary.build(List.of(texName), List.of(rec4((idxBase & 0xFFFF) | (1 << 16))), 4)), 0, set, ofsTexDict, texDictLen);
-        System.arraycopy(serialize(G3dDictionary.build(List.of(pltName), List.of(rec4(((idxBase + 1) & 0xFFFF) | (1 << 16))), 4)), 0, set, ofsPltDict, pltDictLen);
-        set[idxBase] = 0;     // texture -> material 0
-        set[idxBase + 1] = 0; // palette -> material 0
-        System.arraycopy(ms, 0, set, structOfs, 44);
+        List<byte[]> matRecs = new ArrayList<>();
+        for (int i = 0; i < n; i++) matRecs.add(rec4(structsBase + i * 44));
+        System.arraycopy(serialize(G3dDictionary.build(matNames, matRecs, 4)), 0, set, 4, matDictLen);
+        System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byTex.keySet()), texRecs, 4)), 0, set, ofsTexDict, texDictLen);
+        System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byPlt.keySet()), pltRecs, 4)), 0, set, ofsPltDict, pltDictLen);
+        System.arraycopy(idx.toByteArray(), 0, set, idxBase, idx.size());
+        for (int i = 0; i < n; i++) System.arraycopy(matStructs.get(i), 0, set, structsBase + i * 44, 44);
         return set;
     }
 
-    // --- shape set: shape dictionary + 16-byte shape struct (vtx-attribute mask + DL pointer) + the DL ---
-    private byte[] buildShapeSet(String polyName, byte[] dl)
+    // one 44-byte NITRO material struct from a <material> element (texture size from tex_image index)
+    private byte[] buildMaterialStruct(String m, int texIdx)
     {
-        byte[] dict = serialize(G3dDictionary.build(List.of(polyName), List.of(rec4(40)), 4));
-        byte[] shapeStruct = new byte[16];
-        String prim = imd.replaceAll("(?s).*<primitive index=\"0\"[^>]*>(.*?)</primitive>.*", "$1");
-        int vtxFlags = (prim.contains("<nrm") ? 1 : 0) | (prim.contains("<clr") ? 2 : 0) | (prim.contains("<tex") ? 4 : 0);
-        u16(shapeStruct, 0, 0);
-        u16(shapeStruct, 2, 0x10);       // sizeof
-        u32(shapeStruct, 4, vtxFlags);   // vertex-attribute mask: normal(1) | color(2) | texcoord(4)
-        u32(shapeStruct, 8, 16);         // dlOffset (relative to the shape struct)
-        u32(shapeStruct, 12, dl.length); // dlSize
-        return concat(dict, shapeStruct, dl);
+        String tex = blocks("tex_image").get(texIdx);
+        byte[] ms = new byte[44];
+        u16(ms, 0, 0);
+        u16(ms, 2, 44);
+        u32(ms, 4, rgb15(doubles(a(m, "diffuse"))) | (1 << 15) | (rgb15(doubles(a(m, "ambient"))) << 16));
+        u32(ms, 8, rgb15(doubles(a(m, "specular"))) | (rgb15(doubles(a(m, "emission"))) << 16));
+        int alpha = Integer.parseInt(a(m, "alpha"));
+        int lights = 0;
+        for (int i = 0; i < 4; i++) if ("on".equals(a(m, "light" + i))) lights |= 1 << i;
+        u32(ms, 0x0C, ((long) alpha << 16) | 0x80 | lights);
+        u32(ms, 0x10, 0x3f1ff8ffL);
+        u32(ms, 0x14, (1L << 16) | (1L << 17));
+        u32(ms, 0x18, 0xffffffffL);
+        u16(ms, 0x1C, 0);
+        u16(ms, 0x1E, 0x1fce);
+        u16(ms, 0x20, Integer.parseInt(a(tex, "width")));
+        u16(ms, 0x22, Integer.parseInt(a(tex, "height")));
+        u32(ms, 0x24, 0x1000);
+        u32(ms, 0x28, 0x1000);
+        return ms;
+    }
+
+    // --- shape set: shape dictionary + N 16-byte shape structs + N display lists ---
+    private byte[] buildShapeSet(List<String> polygons, List<byte[]> dls)
+    {
+        int n = polygons.size();
+        List<String> names = new ArrayList<>();
+        for (String p : polygons) names.add(a(p, "name"));
+        int dictLen = serialize(G3dDictionary.build(names, placeholders(n), 4)).length;
+        int dlBase = dictLen + n * 16;
+        List<byte[]> recs = new ArrayList<>();
+        byte[][] structs = new byte[n][16];
+        int dlCursor = dlBase;
+        for (int i = 0; i < n; i++)
+        {
+            int structOfs = dictLen + i * 16;
+            recs.add(rec4(structOfs));
+            String prim = polygons.get(i).replaceAll("(?s).*<primitive[^>]*>(.*?)</primitive>.*", "$1");
+            int vtxFlags = (prim.contains("<nrm") ? 1 : 0) | (prim.contains("<clr") ? 2 : 0) | (prim.contains("<tex") ? 4 : 0);
+            u16(structs[i], 2, 0x10);
+            u32(structs[i], 4, vtxFlags);
+            u32(structs[i], 8, dlCursor - structOfs); // dlOffset relative to this struct
+            u32(structs[i], 12, dls.get(i).length);
+            dlCursor += dls.get(i).length;
+        }
+        byte[] set = new byte[dlCursor];
+        System.arraycopy(serialize(G3dDictionary.build(names, recs, 4)), 0, set, 0, dictLen);
+        for (int i = 0; i < n; i++) System.arraycopy(structs[i], 0, set, dictLen + i * 16, 16);
+        int p = dlBase;
+        for (byte[] d : dls) { System.arraycopy(d, 0, set, p, d.length); p += d.length; }
+        return set;
     }
 
     // --- .imd parse helpers (the intermediate is simple XML) ---
@@ -347,6 +410,36 @@ public final class ImdImporter
         return m.find() ? m.group(1) : null;
     }
     private int intAttr(String tag, String name) { return Integer.parseInt(attr(tag, name)); }
+
+    // every <tag ...>...</tag> or <tag .../> element (matched at a word boundary), in document order
+    private List<String> blocks(String tag)
+    {
+        List<String> out = new ArrayList<>();
+        Matcher m = Pattern.compile("<" + tag + "\\b(?:[^>]*?/>|[^>]*?>.*?</" + tag + ">)", Pattern.DOTALL).matcher(imd);
+        while (m.find()) out.add(m.group());
+        return out;
+    }
+    // an attribute from a single element string
+    private static String a(String element, String name)
+    {
+        Matcher m = Pattern.compile("\\b" + name + "=\"([^\"]*)\"").matcher(element);
+        return m.find() ? m.group(1) : null;
+    }
+    // the node's <display material="m" polygon="p"/> entries as {materialIdx, polygonIdx} pairs
+    private int[][] parseDisplays()
+    {
+        List<int[]> out = new ArrayList<>();
+        Matcher m = Pattern.compile("<display\\b[^>]*/>").matcher(tagContent(imd, "node"));
+        while (m.find())
+            out.add(new int[]{Integer.parseInt(a(m.group(), "material")), Integer.parseInt(a(m.group(), "polygon"))});
+        return out.toArray(new int[0][]);
+    }
+    private static List<byte[]> placeholders(int n)
+    {
+        List<byte[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(rec4(0));
+        return l;
+    }
     private static String firstQuoted(String s) { Matcher m = Pattern.compile("\"([^\"]*)\"").matcher(s); m.find(); return m.group(1); }
     private static double[] doubles(String s)
     {

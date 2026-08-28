@@ -55,12 +55,12 @@ public class ImdImporterTest
                 .as("%s.imd translates byte-for-byte to g3dcvtr's NSBMD", base)
                 .isEqualTo(expected);
 
-        // and the output is a real model the production decoder reads
+        // and the output is a real model the production decoder reads (vertex-count oracle)
         ModelSet ms = new ModelSet(actual);
         assertThat(ms.getModels()).hasSize(1);
         Model m = ms.getModels().get(0);
         assertThat(m.getName()).isEqualTo(base);
-        assertThat(m.getMeshes()).hasSize(1);
+        assertThat(m.getMeshes()).isNotEmpty();
         assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
     }
 
@@ -96,4 +96,18 @@ public class ImdImporterTest
     @Test
     @DisplayName("with the texture embedded (-eboth), the whole MDL0+TEX0 matches g3dcvtr byte-for-byte")
     void embeddedTexturesMatchG3dcvtr() { assertByteExactWithTextures("rock"); assertByteExactWithTextures("book"); }
+
+    @Test
+    @DisplayName("a two-material, two-shape model (shared texture) matches g3dcvtr byte-for-byte")
+    void multiShapeSharedTexture()
+    {
+        assertByteExact("two");
+        Model m = new ModelSet(ImdImporter.toNsbmd(new String(resource("two.imd"), StandardCharsets.ISO_8859_1), "two")).getModels().get(0);
+        assertThat(m.getMeshes()).hasSize(2);
+        assertThat(m.getMaterials()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("a two-material, two-shape model with two distinct textures matches g3dcvtr byte-for-byte")
+    void multiShapeDistinctTextures() { assertByteExact("twotex"); }
 }
