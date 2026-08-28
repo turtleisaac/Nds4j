@@ -1,8 +1,17 @@
 # Handoff: Nds4j 3D (NSB*) support
 
-**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `767f072`.
-**Scope of this doc:** where the Nitro-3D work stands, the next two tasks (#26, #27), and — most
-importantly — the hard-won lessons and traps so the next agent doesn't repeat them.
+**Branch:** `feature/3d-formats` (off updated `main`). **Last commit:** `b021133`.
+**Scope of this doc:** where the Nitro-3D work stands, the next tasks, and — most importantly — the
+hard-won lessons and traps so the next agent doesn't repeat them.
+
+> **Status update (tasks #26 and #27 are DONE).** Placement now composes node scale separately (the
+> NNS renderer's rule, not a baked `T·R·S` matrix): multi-node placement **75%→96%**, overall **99%**.
+> Materials are wired to TEX0 textures with normalised UVs; a self-contained **glTF 2.0** exporter
+> (`GltfExporter`) inlines geometry + PNG textures. **NSBCA** skeletal animation is decoded byte-exact
+> (round-trip 825/825 across all five ROMs; channel decode matches the reference jar exactly) and
+> `Model.pose(animation, frame)` re-poses the bind-pose skeleton — the manene walk cycle renders
+> posed + textured. 177 tests green. See §4 for what the numbered-task fix actually was vs. the
+> hypothesis, and §10 for what's left (NSBTA/NSBTP/NSBVA, MTX_SCALE, billboards).
 
 Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the memory note
 `nds4j-3d-formats-first-class-plan`. This doc is the *working* handoff; `TECH_DEBT.md` is the durable
@@ -32,16 +41,22 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `G3dFile` | shared NSB* container base (block-verbatim, byte-exact `save()`, `equals`/`hashCode`) | done |
 | `G3dDictionary` | NNS resource dict (patricia + named records) | done |
 | `TextureSet` (NSBTX) | TEX0 decode, 7 formats → `BufferedImage`, PNG export | done |
-| `ModelSet` (NSBMD) | MDL0 model dict → `List<Model>`, byte-exact container | done |
-| `Model` | per-model geometry: display-list → meshes + **node/skeleton placement** | done to ~96% |
+| `ModelSet` (NSBMD) | MDL0 model dict → `List<Model>`, byte-exact container; `getEmbeddedTextures()` | done |
+| `Model` | geometry + **node placement** + **materials→textures/UVs** + `pose(anim, frame)` | done to ~99% |
+| `GltfExporter` | `Model` (+ `TextureSet`) → self-contained **glTF 2.0** (geometry + PNG textures inlined) | done |
+| `SkeletalAnimationSet` (NSBCA) | BCA0/JNT0 → `List<Animation>` of per-node SRT tracks; byte-exact container | done |
 
-**Numbers (all five ROMs, current `767f072`):**
-- Container byte-exact: **5482/5482**.
+**Numbers (all five ROMs, current `b021133`):**
+- Container byte-exact: NSBMD **5482/5482**, NSBCA **825/825**.
 - Vertex-count oracle: **5482/5482 (100%)**.
-- Placement (decoded AABB vs header box): **95.9% overall**, single-node **99%**, multi-node **~70%**.
+- Placement (decoded AABB vs header box): **99.0% overall**, single-node **99.4%**, multi-node **96.4%**
+  (residual misses are billboard/skinning nodes a static bind-pose decode can't represent — §10).
+- NSBCA channel decode vs the reference jar: exact (manene's 5 anims — 1156 T, 120 S, 9630 R samples, 0
+  mismatches).
 
-**Test suite:** 169 tests, 0 failures. NSBMD tests are `g3d/ModelSetTest.java`; NSBTX is
-`g3d/TextureSetTest.java`. Run: `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
+**Test suite:** 177 tests, 0 failures. Tests: `g3d/ModelSetTest.java`, `g3d/TextureSetTest.java`,
+`g3d/GltfExporterTest.java`, `g3d/SkeletalAnimationSetTest.java`. Run:
+`mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
 **Naming convention (enforced, see `TECH_DEBT.md §2`):** classes are named by *domain concept*, never
 by file extension. NSBTX=`TextureSet`, NSBMD=`ModelSet` (holds `Model`s), mesh=`Model.Mesh`. When you
@@ -112,42 +127,36 @@ not go chasing animation to fix an AABB number (see §5).
 
 ---
 
-## 4. Next tasks
+## 4. Tasks #26 and #27 — DONE (what the fix actually was)
 
-### Task #26 — segment-scale-compensate (the multi-node tail, ~30% of multi-node)
-The remaining multi-node misses (`nodes=4`: 50%, `nodes=6`: 54%, `nodes=15/16/24`: low) share
-**non-unit hierarchical scale**. Two things are currently discarded in `parseNodeLocals`:
-- the **per-node inverse scale** — the *second* `3× fx32` at `Model.java:163` (`p += 24` reads 24 bytes
-  but only the first 12, the forward scale, are used).
-- the **node-flag high bits** (`flags & 0xFF00`) — never interpreted. NNS "segment scale compensate"
-  (SSC) / "no-scale-in-hierarchy" hints almost certainly live here.
+### Task #26 — hierarchical scale (multi-node 75%→96%, overall 99%) ✅
+The handoff **hypothesis** (use the discarded inverse scale + node-flag high bits for
+segment-scale-compensate) was **wrong** — the reference `nitroreader.nsbmd.Node` discards the inverse
+scale too, and never reads SSC flag bits. The real mechanism (from disassembling `renderer.TransfMatrix`
++ `gpucommands.VTX`): the NNS renderer **never bakes scale into a matrix**. It keeps translation, per-axis
+scale and rotation **separate** per node, accumulates scale as its own factor, and applies
+`scale → rotate → posScale → translate` per vertex. Baking `T·R·S` and multiplying down the tree (what we
+did) let a parent's scale *shear* a scaled child's rotated geometry — that was the entire multi-node-scale
+gap. Fix: `Model.Srt` (t/s/r kept apart), `compose()` = `renderer.TransfMatrix.applyParentTransf`
+(`s*=parent.s`, `t=parent.t + (t*parent.s)*parent.r`, `r=child.r*parent.r`, row-vector), and
+`transformInPlace` applies `((v⊙s)·r)*posScale + t`. Commit `b1d15a9`. Placement floor raised 60%→90%.
 
-SSC changes how a child composes with a scaled parent (it cancels the parent's scale for that child so
-scale doesn't cascade down the skeleton). The fix is in the **world-matrix composition** (`resolveWorld`
-/ `multiply`), gated on the node's SSC flag, using the stored inverse scale. **Reference:** disassemble
-`nitroreader.nsbmd.Node` and the SBC `execute()` methods (see §6) to see exactly when the inverse scale
-is applied. Validate by the placement oracle per node-count bucket (use the throwaway bucketing probe
-pattern in §7).
+**Still open (small):** `MTX_SCALE` (display-list op `0x1B`) is still skipped (`Model.java`, `pos += 12`)
+— a handful of `g_demo_*` effect models. Low population, vertex-count oracle is still 100%; folded into
+§10.
 
-Also small/separate: **`MTX_SCALE` (display-list op 0x1B) is skipped** (`Model.java:299`, `pos += 12`),
-so a handful of degenerate effect models (`g_demo_*`, `posScale=32`) blow up. Low population; do it only
-if it's cheap.
-
-### Task #27 — the appearance layer (make it *look* like the reference photo)
-This is what actually turns correct geometry into a recognizable, posed Mime Jr. **Two independent
-sub-layers, do them in this order:**
-1. **Textures/materials (TEX0 → UVs on meshes).** `TextureSet` already decodes TEX0 to images. Wire the
-   MDL0 **materials** (op `MAT` binds a material per shape) and the display-list **TEXCOORD** stream
-   (already decoded into `Mesh.texcoords`) to the right texture, and emit UVs + material refs into the
-   export. Target **glTF 2.0** for the rich version (`TECH_DEBT.md §3`), OBJ/MTL as the zero-dep
-   intermediate. This alone makes models viewable-as-intended in any glTF viewer.
-2. **Skeletal animation (NSBCA / `BCA0`).** A new domain class (byte-exact round-trip first, per §0),
-   then apply a frame's per-node SRT on top of the bind-pose skeleton to pose the model. **manene ships
-   in a NARC beside 16 `BCA0` + a `BTA0`** — confirmed HG/SS file #322, Pt #142. Reference jar:
-   `nitroreader.nsbca.*` (`JointAnm`, `NodeAnimation`, `animtag/JointAnm{Rot,Scale,Trans}*`).
-
-**Sequencing note:** #26 (bind pose) should land before #27's animation, because animation composes on
-top of the bind-pose skeleton — if the bind pose is wrong, animated poses are wrong too.
+### Task #27 — the appearance layer ✅
+1. **Textures/materials → UVs → glTF.** MDL0 material set parsed (`parseMaterials`): the material dict +
+   the tex/pltt→material dicts name each material's texture/palette. The SBC walk binds the `MAT` material
+   per `SHP`. Texcoords stay in **texel units** (the material's size field is 0; the renderer takes size
+   from the bound TEX0 texture). `ModelSet.getEmbeddedTextures()` exposes the embedded TEX0.
+   `GltfExporter` writes a self-contained glTF 2.0 (geometry base64 buffer + PNG textures as data URIs,
+   DS wrap/flip → sampler modes, alpha-test → `MASK`). Commits `57fd902`, `d46ad90`.
+2. **NSBCA skeletal animation.** `SkeletalAnimationSet` (BCA0/JNT0): per-node scale/rot/trans tracks
+   (identity / base / const / variable; keyframes every 1/2/4 frames + linear interp; rotations = u16
+   indices into pivot-6-byte / 5-value-10-byte pools, 3rd row = cross product). `Model.pose(anim, frame)`
+   re-poses the bind-pose skeleton. Decode matches the reference jar exactly (0 mismatches on manene's 5
+   anims); round-trip 825/825. Commit `b021133`.
 
 ---
 
@@ -189,6 +198,12 @@ top of the bind-pose skeleton — if the bind pose is wrong, animated poses are 
    pivot prototype (with/without-transform counts got swapped). Edit the real library file directly and
    lean on the oracle to measure.
 
+8. **The handoff's own #26 hypothesis (inverse scale + SSC flag bits) was a red herring.** The reference
+   discards both. The fix was the compose *math* (separate scale), not extra parsed fields. **Lesson
+   (again, §5.5): the reference bytecode is ground truth over any prose theory — including this doc's.**
+   Before implementing a hypothesised mechanism, disassemble the reference path that consumes the data
+   (`renderer.TransfMatrix` / `gpucommands.VTX` here) and copy what it *does*, not what a comment says.
+
 ---
 
 ## 6. The reference jar (decoding oracle, NOT a dependency)
@@ -204,10 +219,16 @@ JAR=<workspace-root>/Nds4j/NitroSystemTool.jar
 javap -c -p -classpath "$JAR" nitroreader.nsbmd.sbccommands.NODEDESC   # operand parse
 jar tf "$JAR" | grep -iE "nsbca|nsbmd"                                  # find classes
 ```
-Key classes for the next tasks:
-- Task #26: `nitroreader.nsbmd.Node`, `nitroreader.nsbmd.sbccommands.*` (`execute()` shows matrix ops).
-- Task #27: `nitroreader.nsbca.{JointAnm,JointAnmSet,NodeAnimation}`, `nsbca.animtag.*`,
-  `nitroreader.nsbmd.Material`, `nsbmd.gpucommands.TEXCOORD`.
+Classes used for the done tasks (kept as a map for the remaining formats):
+- Placement (#26): `renderer.TransfMatrix.applyParentTransf` + `gpucommands.VTX.execute` (the vertex
+  math), `nitroreader.nsbmd.Node` (SRT parse, incl. `getPivotMatrix`).
+- Materials/textures (#27.1): `nitroreader.nsbmd.Model.readMaterialSet`, `nsbmd.Material`.
+- NSBCA (#27.2): `nsbca.{JointAnmSet,JointAnm,TagData,NodeAnimation}`, `nsbca.animtag.*` (const/variable
+  trans/scale/rot + `readRot3Matrix`/`readRot5Matrix`), `renderer.ObjectGL.generateAnimation`
+  (interpolation = linear).
+- Remaining formats (§10): `nitroreader.nsbta.*` (NSBTA texture SRT anim), `nsbtp.*` (NSBTP pattern
+  anim), `nsbva.*` (NSBVA visibility anim). `g3dcvtr` (see memory `g3dcvtr-re-resource`) is the fair-use
+  RE target when the jar is thin, especially for the **writer/encoder** side.
 
 ---
 
@@ -228,34 +249,43 @@ commit**). `Model` already exposes `getNodeCount()`, `isSingleNode()`, `getDecod
 
 ---
 
-## 8. Tech-debt status (accurate as of `767f072`)
+## 8. Tech-debt status (accurate as of `b021133`)
 
 `TECH_DEBT.md` entries are still current:
-- **§1 shared paletted-raster ("L2")** — still deferred; trigger unchanged (a real 2nd/3rd consumer of
-  non-NCGR indexed pixels). Nothing here changed it.
-- **§2 clean-exposure principle** — still the standard; NSBMD's `Model`/`Mesh` + planned glTF export
-  follow it. Apply it to NSBCA (name it by concept).
-- **§3 3D format/library decision (glTF 2.0, OBJ/MTL intermediate, pure-Java rasterizer, reject
-  LWJGL/JOGL, hand-emit glTF)** — still the plan; task #27 executes it.
+- **§1 shared paletted-raster ("L2")** — still deferred; trigger unchanged. Nothing here changed it.
+- **§2 clean-exposure principle** — followed: `Model`/`Mesh`/`Material`, `GltfExporter`,
+  `SkeletalAnimationSet`/`Animation`/`NodeAnim` are all named by concept, not extension.
+- **§3 3D format/library decision (glTF 2.0, pure-Java, reject LWJGL/JOGL, hand-emit glTF)** — executed
+  by `GltfExporter` (base64 buffer + `ImageIO` PNG, zero native deps). The renders in this work used a
+  throwaway pure-Java software rasterizer (kept in `/tmp`, not committed); a first-class in-library
+  rasterizer/preview is still open if a headless preview is wanted.
 
-**New, undocumented-until-now debt to be aware of (this doc is the record):**
-- **Node inverse-scale + node-flag high bits are parsed-but-discarded** (`Model.java:163`, and flags
-  masked to `0xFF` semantics). This is the substance of task #26; not a bug in the "byte-exact" sense
-  (container still round-trips), but a decode gap that caps multi-node placement at ~70%.
-- **`MTX_SCALE` (display-list 0x1B) skipped** (`Model.java:299`) — small population, folded into #26.
-- **Billboard/skinning final pose** (BB/BBY/NODEMIX) is *parsed* (walk stays in sync) but not
-  *rendered* (a static AABB can't represent a camera-facing billboard). These legitimately can't pass
-  the bind-pose oracle; consider excluding them from the oracle rather than "fixing" them.
+**Resolved debt:** node inverse-scale / SSC-flag hypothesis (turned out unused — §4). **Remaining
+decode gaps (all small, none break byte-exact round-trip):** see §10.
 
 ---
 
-## 9. First moves for the next agent
+## 10. What's left (for the next agent)
 
-1. `git checkout feature/3d-formats`; confirm clean tree; run the suite (169 green).
-2. Skim `Model.java` §2 regions and this doc's §2/§5.
-3. Start **task #26**: `javap` `nitroreader.nsbmd.Node` + SBC `execute()`, find where the inverse scale
-   and SSC flag gate composition, implement in `resolveWorld`/`multiply`, measure with the §7 bucketer,
-   keep the split oracle green, commit + push.
-4. Then **task #27**: TEX0 materials/UVs → glTF export first (visible win), then NSBCA.
-5. Keep committing checkpoints; keep the working tree clean between tasks; have an adversarial senior
-   dev agent review, but **verify its diagnosis against the actual ROM bytes** (§5.5).
+The numbered tasks are done. Remaining, in rough priority:
+
+1. **Other NSB* animation formats** (the memory plan `nds4j-3d-formats-first-class-plan`): **NSBTA**
+   (`BTA0`, texture-SRT animation — manene ships one beside its BCA0s), **NSBTP** (`BTP0`, texture
+   *pattern* animation), **NSBVA** (`BVA0`, visibility animation). Same recipe that worked here: subclass
+   `G3dFile` for byte-exact round-trip first (§0), then decode the block against
+   `nitroreader.{nsbta,nsbtp,nsbva}.*`, then apply on top of the model. Reference `renderer.ObjectGL`
+   shows how each composes at draw time.
+2. **`MTX_SCALE` (display-list op `0x1B`)** — still skipped. Small `g_demo_*` effect population; the
+   vertex-count oracle is already 100%, so this only matters for those models' placement. Reference:
+   `nsbmd.gpucommands.MTX_SCALE`. Do it if cheap.
+3. **Billboard / skinning final pose** (`BB`/`BBY`/`NODEMIX`) — *parsed* (the SBC walk stays in sync) but
+   not *posed*; a static bind-pose AABB can't represent a camera-facing billboard, so these are the
+   residual ~1% placement misses. Consider excluding them from the placement oracle rather than
+   "fixing" them, and render billboards only in a live viewer.
+4. **First-class preview/rasterizer** — the software rasterizer used for the milestone renders lives in
+   `/tmp` only. If an in-library headless preview is wanted, port it (pure Java, per §3).
+
+**Working style that paid off (repeat it):** subclass `G3dFile` → free byte-exact round-trip; RE the
+block from the reference *bytecode* (not prose); validate the lossy decode against the reference jar
+value-by-value in a throwaway probe (this is how the NSBCA rotation decompression was confirmed — 0
+mismatches); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
