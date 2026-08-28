@@ -122,6 +122,28 @@ public class ModelSetTest
     }
 
     @Test
+    @DisplayName("MTX_SCALE (op 0x1B) is consumed without desyncing the display-list stream")
+    void mtxScaleModelsStayInSync()
+    {
+        // A few g_demo_*/effect models carry MTX_SCALE. Its 12 operand bytes must be consumed so the rest
+        // of the stream stays aligned (a wrong width would desync and blow the vertex-count oracle); the
+        // command itself is intentionally not applied (redundant with posScale - see Model#usesMtxScale).
+        int withScale = 0;
+        for (byte[] file : nsbmdFiles)
+        {
+            for (Model model : new ModelSet(file).getModels())
+            {
+                if (!model.usesMtxScale()) continue;
+                withScale++;
+                assertThat(model.getVertexCount())
+                        .as("MTX_SCALE model %s stays vertex-count exact", model.getName())
+                        .isEqualTo(model.getExpectedVertexCount());
+            }
+        }
+        assertThat(withScale).as("Platinum ships MTX_SCALE effect models").isGreaterThan(0);
+    }
+
+    @Test
     @DisplayName("decoded geometry, with node transforms, lands in the header bounding box")
     void modelsArePlacedInHeaderBox()
     {

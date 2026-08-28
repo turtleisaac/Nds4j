@@ -66,6 +66,7 @@ public class Model
     // True if the SBC uses billboard (BB/BBY) or skinning (NODEMIX) commands: the final pose is
     // camera- or blend-dependent, so a static bind-pose decode legitimately can't reproduce it.
     private boolean dynamicPose;
+    boolean usesMtxScale; // set if any shape's display list contains an MTX_SCALE (op 0x1B) command
     // Per-node billboard flag (BB/BBY), for inspection/rendering. A billboard node's geometry faces the
     // camera at runtime; a static decode leaves it at its authored orientation.
     private boolean[] billboardNode;
@@ -445,9 +446,13 @@ public class Model
                     case 0x10: case 0x14: case 0x20: case 0x21:         // MTX_MODE / MTX_RESTORE / COLOR / NORMAL
                     case 0x29: case 0x2A: case 0x2B:                    // POLYGON_ATTR / TEXIMAGE_PARAM / PLTT_BASE
                         pos += 4; break;
-                    case 0x1B: pos += 12; break;                         // MTX_SCALE (3 params): consumed
-                        // but not applied - the reference renderer's MTX_SCALE.execute() is a no-op too,
-                        // so skipping it matches (and the 100% vertex-count oracle confirms the width).
+                    case 0x1B: usesMtxScale = true; pos += 12; break;    // MTX_SCALE (3x fx32): consumed, not
+                        // applied. This is not a gap: the reference jar's MTX_SCALE.execute() is a no-op, and
+                        // the placement oracle agrees - actually multiplying the 32 retail MTX_SCALE models'
+                        // vertices by it regresses them (9/32 in their header box -> 0/32), because the DL
+                        // magnify is redundant with the header posScale we already apply in transformInPlace.
+                        // The remaining static-pose misses among these models are the usual SSC / header-box
+                        // "TODO verify" cases (see the note at §3), not MTX_SCALE. Verified empirically; §5.8.
                     case 0x22: {                                        // TEXCOORD (s,t as 1.11.4 fixed)
                         long p = readU32(d, pos); pos += 4;
                         uv[0] = (short) (p & 0xFFFF) / 16.0;
@@ -794,6 +799,18 @@ public class Model
     public boolean hasDynamicPose()
     {
         return dynamicPose;
+    }
+
+    /**
+     * @return true if any of this model's display lists contains an {@code MTX_SCALE} (op 0x1B) command.
+     *         These are a handful of {@code g_demo_*} / effect models; the command is consumed (its 12
+     *         operand bytes are skipped so the stream stays in sync) but deliberately not applied &mdash;
+     *         the DS magnify it carries is redundant with the header {@code posScale}, and multiplying it
+     *         in regresses those models' placement, matching the reference renderer's no-op.
+     */
+    public boolean usesMtxScale()
+    {
+        return usesMtxScale;
     }
 
     /**
