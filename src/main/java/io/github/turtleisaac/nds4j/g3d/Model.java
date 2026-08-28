@@ -89,9 +89,9 @@ public class Model
 
         // Per-node local transforms and, by walking the render commands, which node's world matrix each
         // shape is drawn with. This is what positions a multi-node model's parts correctly.
-        double[][] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
+        Srt[] nodeLocal = parseNodeLocals(mdl0, modelStart + 0x40);
         int[] shapeNode = new int[shapeCountHeader];
-        double[][] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeCountHeader);
+        Srt[] nodeWorld = walkSbc(mdl0, modelStart + ofsSbc, nodeLocal, shapeNode, shapeCountHeader);
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
@@ -108,19 +108,41 @@ public class Model
             int dlSize = (int) readU32(mdl0, shapeStruct + 12);
             Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
-            transformInPlace(mesh.positions, (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null);
+            Srt world = (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null;
+            transformInPlace(mesh.positions, world, posScale);
             meshes.add(mesh);
         }
     }
 
+    // A node's local placement as the NNS renderer keeps it: translation, per-axis scale and a 3x3
+    // rotation, held <b>separately</b> (never baked into one matrix). Composition down the skeleton and
+    // the final vertex transform both depend on keeping scale apart from rotation &mdash; see
+    // {@link #compose} and {@link #transformInPlace}. Row-major rotation, row-vector convention
+    // ({@code v' = v * r}), matching the reference {@code renderer.TransfMatrix}.
+    private static final class Srt
+    {
+        final double[] t;      // translation (x,y,z), model units
+        final double[] s;      // per-axis scale
+        final double[] r;      // 3x3 rotation, row-major
+
+        Srt(double[] t, double[] s, double[] r) { this.t = t; this.s = s; this.r = r; }
+
+        static Srt identity() { return new Srt(new double[]{0, 0, 0}, new double[]{1, 1, 1}, IDENT.clone()); }
+    }
+
+    private static final double[] IDENT = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+
     // Parses each node's local transform (NNS node data): u16 flags, fx16 rotation[0][0], then optional
-    // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form we
-    // approximate as identity), and scale (3x fx32 + 3x fx32 inverse). Returns a 3x4 matrix per node.
-    private double[][] parseNodeLocals(byte[] d, int nodeSet)
+    // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form),
+    // and scale (3x fx32, followed by an unused 3x fx32 inverse the renderer also discards). Returns the
+    // node's translation/scale/rotation kept separate (an {@link Srt}), not a baked matrix: cascading a
+    // parent's scale through a baked matrix shears scaled children, which is exactly what the NNS
+    // renderer avoids by composing scale separately (verified against renderer.TransfMatrix).
+    private Srt[] parseNodeLocals(byte[] d, int nodeSet)
     {
         int count = d[nodeSet + 1] & 0xFF;
         int recordsOffset = nodeSet + 2 + 10 + count * 4 + 4; // dict header + patricia + elemSize/ofsData
-        double[][] local = new double[count][];
+        Srt[] local = new Srt[count];
         for (int n = 0; n < count; n++)
         {
             int p = nodeSet + (int) readU32(d, recordsOffset + n * 4);
@@ -160,12 +182,8 @@ public class Model
                     r[7] = readFx16(d, p + 12);r[8] = readFx16(d, p + 14); p += 16;
                 }
             }
-            if ((flags & 0x4) == 0) { s[0] = readFx32(d, p); s[1] = readFx32(d, p + 4); s[2] = readFx32(d, p + 8); p += 24; }
-            // local = translate * rotate * scale (3x4)
-            local[n] = new double[]{
-                    r[0] * s[0], r[1] * s[1], r[2] * s[2], t[0],
-                    r[3] * s[0], r[4] * s[1], r[5] * s[2], t[1],
-                    r[6] * s[0], r[7] * s[1], r[8] * s[2], t[2]};
+            if ((flags & 0x4) == 0) { s[0] = readFx32(d, p); s[1] = readFx32(d, p + 4); s[2] = readFx32(d, p + 8); /* + unused 3x fx32 inverse */ }
+            local[n] = new Srt(t, s, r);
         }
         return local;
     }
@@ -176,7 +194,7 @@ public class Model
     // consumed so the walk stays in sync. Operand widths follow NNS exactly: NODEDESC is nodeId, parentId,
     // opt, then +1 if the 0x20 (store) flag is set and +1 if the 0x40 (restore) flag is set; BB/BBY are
     // nodeId + the same optional store/restore bytes; NODEMIX is 2 + 3*count; CALLDL is 8; etc.
-    private double[][] walkSbc(byte[] d, int sbc, double[][] nodeLocal, int[] shapeNode, int shapeCount)
+    private Srt[] walkSbc(byte[] d, int sbc, Srt[] nodeLocal, int[] shapeNode, int shapeCount)
     {
         int count = nodeLocal.length;
         int[] parent = new int[count];
@@ -220,51 +238,79 @@ public class Model
                 default: stop = true; break;                        // an unmodelled command - stop rather than desync
             }
         }
-        double[][] world = new double[count][];
+        Srt[] world = new Srt[count];
         for (int n = 0; n < count; n++)
             world[n] = resolveWorld(n, parent, nodeLocal, world);
         return world;
     }
 
-    private double[] resolveWorld(int n, int[] parent, double[][] local, double[][] world)
+    private Srt resolveWorld(int n, int[] parent, Srt[] local, Srt[] world)
     {
         if (world[n] != null)
             return world[n];
         world[n] = local[n]; // guard against cycles
         if (parent[n] < 0 || parent[n] == n)
             return local[n];
-        double[] pw = resolveWorld(parent[n], parent, local, world);
-        world[n] = multiply(pw, local[n]);
+        Srt pw = resolveWorld(parent[n], parent, local, world);
+        world[n] = compose(pw, local[n]);
         return world[n];
     }
 
-    // Multiplies two 3x4 matrices (each an implicit 4x4 with bottom row 0,0,0,1).
-    private static double[] multiply(double[] a, double[] b)
+    // Composes a child's local placement under its parent's world placement, exactly as the NNS renderer
+    // does (renderer.TransfMatrix.applyParentTransf). Scale is <b>not</b> baked into rotation: it
+    // accumulates as a separate factor, so a scaled parent scales a child's axes without shearing its
+    // rotated geometry. With row-vector convention the composed rotation is child*parent, the child's
+    // translation is first scaled by the parent's scale then rotated into the parent's frame and offset,
+    // and the scales multiply componentwise.
+    private static Srt compose(Srt parent, Srt child)
     {
-        double[] r = new double[12];
+        double[] s = {child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2]};
+        double[] ts = {child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2]};
+        double[] tr = rowMul(parent.r, ts);
+        double[] t = {parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2]};
+        return new Srt(t, s, matMul(child.r, parent.r));
+    }
+
+    // Row-vector times matrix: out = v * r (out[i] = sum_j v[j] * r[j][i]), r row-major.
+    private static double[] rowMul(double[] r, double[] v)
+    {
+        return new double[]{
+                v[0] * r[0] + v[1] * r[3] + v[2] * r[6],
+                v[0] * r[1] + v[1] * r[4] + v[2] * r[7],
+                v[0] * r[2] + v[1] * r[5] + v[2] * r[8]};
+    }
+
+    // 3x3 * 3x3 (row-major): out[i][j] = sum_k a[i][k] * b[k][j].
+    private static double[] matMul(double[] a, double[] b)
+    {
+        double[] r = new double[9];
         for (int i = 0; i < 3; i++)
-            for (int j = 0; j < 4; j++)
+            for (int j = 0; j < 3; j++)
             {
                 double s = 0;
                 for (int k = 0; k < 3; k++)
-                    s += a[i * 4 + k] * b[k * 4 + j];
-                if (j == 3)
-                    s += a[i * 4 + 3];
-                r[i * 4 + j] = s;
+                    s += a[i * 3 + k] * b[k * 3 + j];
+                r[i * 3 + j] = s;
             }
         return r;
     }
 
-    private static void transformInPlace(float[] positions, double[] m)
+    // Applies a node's world placement to raw (pre-posScale) vertices, matching the NNS vertex path
+    // (renderer.nsbmd.gpucommands.VTX): scale the vertex, rotate it (row-vector), apply the model's
+    // posScale, then offset by the node's world translation. A null placement means the identity node,
+    // so only posScale is applied.
+    private static void transformInPlace(float[] positions, Srt m, double posScale)
     {
-        if (m == null)
-            return;
+        Srt w = (m == null) ? Srt.identity() : m;
         for (int i = 0; i < positions.length; i += 3)
         {
-            double x = positions[i], y = positions[i + 1], z = positions[i + 2];
-            positions[i] = (float) (m[0] * x + m[1] * y + m[2] * z + m[3]);
-            positions[i + 1] = (float) (m[4] * x + m[5] * y + m[6] * z + m[7]);
-            positions[i + 2] = (float) (m[8] * x + m[9] * y + m[10] * z + m[11]);
+            double x = positions[i] * w.s[0], y = positions[i + 1] * w.s[1], z = positions[i + 2] * w.s[2];
+            double rx = x * w.r[0] + y * w.r[3] + z * w.r[6];
+            double ry = x * w.r[1] + y * w.r[4] + z * w.r[7];
+            double rz = x * w.r[2] + y * w.r[5] + z * w.r[8];
+            positions[i] = (float) (rx * posScale + w.t[0]);
+            positions[i + 1] = (float) (ry * posScale + w.t[1]);
+            positions[i + 2] = (float) (rz * posScale + w.t[2]);
         }
     }
 
@@ -370,13 +416,15 @@ public class Model
         if (primitive >= 0)
             triangulate(primitive, primVerts, triangles);
 
+        // Raw (pre-posScale) positions: posScale is applied together with the node placement in
+        // transformInPlace, so scale/rotation/translation and posScale compose in the NNS vertex order.
         float[] pos3 = new float[positions.size() * 3];
         float[] uv2 = new float[texcoords.size() * 2];
         for (int i = 0; i < positions.size(); i++)
         {
-            pos3[i * 3] = (float) (positions.get(i)[0] * posScale);
-            pos3[i * 3 + 1] = (float) (positions.get(i)[1] * posScale);
-            pos3[i * 3 + 2] = (float) (positions.get(i)[2] * posScale);
+            pos3[i * 3] = positions.get(i)[0];
+            pos3[i * 3 + 1] = positions.get(i)[1];
+            pos3[i * 3 + 2] = positions.get(i)[2];
             uv2[i * 2] = texcoords.get(i)[0];
             uv2[i * 2 + 1] = texcoords.get(i)[1];
         }
