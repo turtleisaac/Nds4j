@@ -66,6 +66,9 @@ public class Model
     // True if the SBC uses billboard (BB/BBY) or skinning (NODEMIX) commands: the final pose is
     // camera- or blend-dependent, so a static bind-pose decode legitimately can't reproduce it.
     private boolean dynamicPose;
+    // Per-node billboard flag (BB/BBY), for inspection/rendering. A billboard node's geometry faces the
+    // camera at runtime; a static decode leaves it at its authored orientation.
+    private boolean[] billboardNode;
 
     Model(byte[] mdl0, int modelStart, String name)
     {
@@ -280,6 +283,7 @@ public class Model
         int count = nodeLocal.length;
         int[] parent = new int[count];
         java.util.Arrays.fill(parent, -1);
+        billboardNode = new boolean[count];
         int[] stackNode = new int[64];
         int current = 0;
         int currentMat = -1;
@@ -309,6 +313,7 @@ public class Model
                 case 0x08: {                                        // BBY (billboard-Y) nodeId (+ store/restore slots)
                     dynamicPose = true;                             // camera-facing; a static decode can't place it
                     int nid = d[p++] & 0xFF; current = nid;
+                    if (nid < count) billboardNode[nid] = true;
                     if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; }
                     if ((flags & 0x40) != 0) p++;
                     break;
@@ -775,6 +780,16 @@ public class Model
     public boolean hasDynamicPose()
     {
         return dynamicPose;
+    }
+
+    /**
+     * @param node a node index
+     * @return true if that node is drawn as a billboard (BB/BBY) &mdash; camera-facing at runtime. A
+     *         static decode leaves it at its authored orientation.
+     */
+    public boolean isBillboardNode(int node)
+    {
+        return billboardNode != null && node >= 0 && node < billboardNode.length && billboardNode[node];
     }
 
     /**
