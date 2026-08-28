@@ -51,7 +51,10 @@ All of the Nitro 3D (`NSB*`) and `SPA` formats round-trip **byte-for-byte** acro
 were reverse-engineered natively (no third-party reader is wrapped or depended upon). Beyond reading, the 3D
 stack can **author** files from scratch and **preview** them, all in pure Java (no native/OS-specific deps):
 
-* **Convert** &mdash; `g3d.ObjImporter` (Wavefront OBJ &rarr; geometry) + `g3d.ModelBuilder` author an NSBMD
+* **Convert** &mdash; `g3d.ImdImporter` translates a NITRO intermediate model (`.imd`) into an NSBMD
+  **byte-for-byte identically to Nintendo's `g3dcvtr`** (the `.imd` already carries the exporter's optimiser
+  decisions, so a faithful translation reproduces its exact output; verified against `g3dcvtr` on its sample
+  models). `g3d.ObjImporter` (Wavefront OBJ &rarr; geometry) + `g3d.ModelBuilder` author an NSBMD
   (untextured, textured, or multi-shape/multi-material with an embedded `TEX0`); `g3d.AnimationBuilder` authors
   an NSBTA. Two of the format's hardest-to-reproduce sections encode **byte-identically** to NITRO's own tool:
   the resource dictionaries (`g3d.G3dDictionary` emits nodes in the same pre-order `g3dcvtr` does &mdash;

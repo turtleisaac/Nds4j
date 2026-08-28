@@ -395,13 +395,22 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   re-encode path that survives edits (the pieces that change on a geometry/resource edit are exactly the
   ones rebuilt from semantics).
 - **In-place edits** (colour/palette/alpha) — byte-exact (`G3dFile.writeBlockU8/U16`).
-- **Remaining for *authoring* parity (not round-trip):** deriving the fixed structs (model header/box, node
-  SRT, material structs, SBC) *from semantics* rather than preserving them, and — the one genuinely hard
-  piece — g3dcvtr's **vertex-format optimiser** (RE'd on the `rock` model: it emits `NORMAL` + a leading
-  `VTX_10` then `VTX_XY`/`VTX_YZ`/`VTX_XZ` for constant-axis runs, quads, and strips). Byte-exact re-encode
-  of an *existing* model needs neither (the command codec already reproduces its stream); only authoring
-  *new* geometry that g3dcvtr would pack identically does. The g3dcvtr oracle (under wine) + the retail
-  files drive both.
+- **Authoring parity — the `.imd` &rarr; NSBMD translator (`ImdImporter`), byte-identical to g3dcvtr.** The
+  key realisation: the `.imd` intermediate already carries every optimiser decision the Maya exporter made
+  (`pos_s` full vs `pos_xy`/`pos_xz`/`pos_yz` deltas, strip/quad grouping, node transforms, material state),
+  so *translating it faithfully reproduces g3dcvtr's bytes exactly* — no need to reimplement the exporter's
+  vertex-format optimiser. `ImdImporter.toNsbmd()` parses the `.imd` and encodes every MDL0 struct (model
+  header/box from `model_info`+`box_test`; the node local matrix; the SBC render stream — `NODEDESC · NODE ·
+  [BB if billboard] · POSSCALE · MAT · SHP · POSSCALE|end · RET`, padded /4; the 44-byte material struct,
+  layout per Apicula's `read_material` + the retail bytes; the shape struct's vertex-attribute mask
+  normal(1)|color(2)|texcoord(4)) and composes them with the byte-exact primitives (`DisplayList`,
+  `G3dDictionary`, `assembleContainer`). **Verified byte-for-byte against `g3dcvtr -emdl` on `rock`/`book`/
+  `pole`** (billboard/non-billboard, lit/vertex-coloured); fixtures + expected bytes are checked in
+  (`src/test/resources/imd/`, CI-safe — no wine). This is the native g3dcvtr replacement PDSMS needs.
+  **Coverage so far:** single-node / single-material / single-shape textured models; multi-node/material/
+  shape extends the same section encoders (each section is already a list-driven builder elsewhere). The DL
+  is padded to /8; a `pos_s` vertex becomes `VTX_10` when 1.3.6-exact else `VTX_16`. The genuinely hard
+  optimiser is *not needed* because the `.imd` already contains its output.
 
 **Genuinely optional remainder (not in the §9 list):** a glTF (vs OBJ) front-end; NSBCA/NSBTP/NSBVA/NSBMA
 *writers* (the `AnimationBuilder` recipe generalizes); 2D companion formats (NCGR/NCLR/NSCR — `NitroLz`
