@@ -947,16 +947,6 @@ public class IndexedImage extends GenericNtrFile
     }
 
     /**
-     * Gets the bit depth (bits per pixel) of this <code>IndexedImage</code>: 4 for a 16-colour
-     * image or 8 for a 256-colour image. A 4bpp image indexes into 16-colour sub-palettes.
-     * @return an <code>int</code> that is either 4 or 8
-     */
-    public int getBitDepth()
-    {
-        return bitDepth;
-    }
-
-    /**
      * Gets the palette of this <code>IndexedImage</code>
      * @return a <code>Palette</code>
      */
