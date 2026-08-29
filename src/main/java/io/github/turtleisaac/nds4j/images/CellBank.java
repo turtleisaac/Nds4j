@@ -552,13 +552,20 @@ public class CellBank extends GenericNtrFile
         return new Rectangle(minX, minY, maxX - minX, maxY - minY);
     }
 
-    /** The outcome of {@link #applyImage}: how well the image fit the palette. */
+    /** The outcome of {@link #applyImage}/{@link #applyImageRebuildingPalette}. */
     public static final class ImportResult
     {
         /** Pixels whose colour wasn't an exact match in the OAM's (sub-)palette (0 = a perfect fit). */
         public final int unmatchedPixels;
+        /** The palette the pixels were indexed against — the input NCLR, or the freshly-built one after a
+         *  rebuild. Write it back to the NCLR when it changed. */
+        public final Palette palette;
 
-        private ImportResult(int unmatchedPixels) { this.unmatchedPixels = unmatchedPixels; }
+        private ImportResult(int unmatchedPixels, Palette palette)
+        {
+            this.unmatchedPixels = unmatchedPixels;
+            this.palette = palette;
+        }
     }
 
     /**
@@ -627,7 +634,86 @@ public class CellBank extends GenericNtrFile
             oamImages[k].setPixels(grid);
             oamImages[k].save(); // splices these pixels into the NCGR tiles this OAM references
         }
-        return new ImportResult(unmatched);
+        return new ImportResult(unmatched, palette);
+    }
+
+    /**
+     * Like {@link #applyImage}, but BUILDS a new palette from the image instead of matching an existing one
+     * — the NCER analog of {@code importPng}'s "rebuild palette" mode. Each 16-colour sub-palette (4bpp) is
+     * rebuilt from the opaque colours of the OAMs that use it (grouped by {@code oam.palette}), reserving
+     * slot 0 for transparency (the DS sprite convention) and median-cutting down only if a sub-palette
+     * overflows 15 colours; 8bpp rebuilds the single 256-colour palette. Sub-palettes this cell doesn't use
+     * are preserved from {@code templatePalette}. Returns the new palette via {@link ImportResult#palette} —
+     * write it back to the NCLR. The NCGR is still mutated (call {@code ncgr.save()}).
+     *
+     * @param cellIndex the cell whose composed image {@code image} is
+     * @param image the edited assembled-cell image (must be the cell's bounds size)
+     * @param ncgr the NCGR whose tiles back this cell (mutated)
+     * @param templatePalette the existing NCLR — supplies the sub-palette count/size and any unused blocks
+     * @return the decomposition stats + the new palette
+     */
+    public ImportResult applyImageRebuildingPalette(int cellIndex, BufferedImage image, IndexedImage ncgr, Palette templatePalette)
+    {
+        Cell cell = cells[cellIndex];
+        Rectangle bounds = cellBounds(cell);
+        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
+        if (image.getWidth() != cw || image.getHeight() != ch)
+            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
+                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+
+        int bitDepth = ncgr.getBitDepth();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        Color[] tmpl = templatePalette.getColors();
+        int subCount = Math.max(1, tmpl.length / subSize);
+
+        // Gather each sub-palette's opaque colours from the OAMs that draw with it.
+        java.util.List<java.util.LinkedHashSet<Integer>> perSub = new java.util.ArrayList<>();
+        for (int i = 0; i < subCount; i++) perSub.add(new java.util.LinkedHashSet<Integer>());
+        for (Cell.OAM oam : cell.oams)
+        {
+            int[] sz = getOamSize(oam);
+            int dx = oam.xCoord - bounds.x, dy = oam.yCoord - bounds.y;
+            int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
+            for (int y = 0; y < sz[1]; y++)
+                for (int x = 0; x < sz[0]; x++)
+                {
+                    int sx = dx + x, sy = dy + y;
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) continue;
+                    int argb = image.getRGB(sx, sy);
+                    if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette colour
+                    perSub.get(sub).add(argb & 0xFFFFFF);
+                }
+        }
+
+        // Build the new palette: keep unused sub-palettes; for used ones, slot 0 = transparent marker and
+        // the opaque colours fill slots 1..subSize-1 (median-cut if they overflow).
+        Color[] colors = java.util.Arrays.copyOf(tmpl, tmpl.length);
+        int cap = subSize - 1; // slot 0 reserved
+        for (int p = 0; p < subCount; p++)
+        {
+            java.util.LinkedHashSet<Integer> set = perSub.get(p);
+            if (set.isEmpty()) continue;
+            java.util.List<Color> quant;
+            if (set.size() <= cap)
+            {
+                quant = new java.util.ArrayList<>();
+                for (int rgb : set) quant.add(new Color(rgb));
+            }
+            else
+            {
+                java.util.List<int[]> rgbs = new java.util.ArrayList<>();
+                for (int rgb : set) rgbs.add(new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF});
+                quant = IndexedImage.medianCut(rgbs, cap);
+            }
+            colors[p * subSize] = Color.MAGENTA; // rendered transparent when index-0 transparency is on
+            for (int i = 0; i < cap; i++)
+                colors[p * subSize + 1 + i] = i < quant.size() ? quant.get(i) : Color.BLACK;
+        }
+
+        Palette newPal = new Palette(colors);
+        ncgr.setPalette(newPal);
+        int unmatched = applyImage(cellIndex, image, ncgr, newPal).unmatchedPixels;
+        return new ImportResult(unmatched, newPal);
     }
 
     /**

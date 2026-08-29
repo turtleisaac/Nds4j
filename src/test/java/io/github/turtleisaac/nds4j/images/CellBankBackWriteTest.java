@@ -118,4 +118,59 @@ public class CellBankBackWriteTest
         }
         Assumptions.assumeTrue(exercised, "no loadable NCER+NCGR+NCLR bundle found in the test ROM");
     }
+
+    @Test
+    @DisplayName("rebuilding the palette from a rendered cell reproduces it (transparent-mode), unmatched 0")
+    void cellRoundTripsWithPaletteRebuild()
+    {
+        boolean exercised = false;
+        for (int f = 0; f < rom.getNumFiles() && !exercised; f++)
+        {
+            if (!magic(rom.getFile(f)).equals("NARC")) continue;
+            Narc narc;
+            try { narc = new Narc(rom.getFile(f)); } catch (RuntimeException e) { continue; }
+            int ncerI = indexOf(narc, "RECN"), ncgrI = indexOf(narc, "RGCN"), nclrI = indexOf(narc, "RLCN");
+            if (ncerI < 0 || ncgrI < 0 || nclrI < 0) continue;
+
+            IndexedImage ncgr;
+            Palette palette;
+            CellBank bank;
+            try
+            {
+                ncgr = new IndexedImage(narc.getFile(ncgrI), 0, 0, 1, 1, true);
+                palette = new Palette(narc.getFile(nclrI), 0);
+                ncgr.setPalette(palette);
+                bank = new CellBank(narc.getFile(ncerI));
+                bank.setParentImage(ncgr);
+            }
+            catch (RuntimeException e) { continue; }
+
+            int cellIndex = -1;
+            for (int c = 0; c < bank.getNumCells(); c++)
+            {
+                java.awt.Rectangle b = bank.getCellBounds(c);
+                if (b.width > 0 && b.height > 0) { cellIndex = c; break; }
+            }
+            if (cellIndex < 0) continue;
+
+            // Transparent render: index-0 pixels are transparent, so the rebuild (which reserves slot 0)
+            // round-trips exactly — opaque colours come back, transparent pixels stay transparent.
+            BufferedImage rendered = bank.getTransparentNcerImage(cellIndex);
+            CellBank.ImportResult res = bank.applyImageRebuildingPalette(cellIndex, rendered, ncgr, palette);
+            assertThat(res.unmatchedPixels).isEqualTo(0);
+            assertThat(res.palette).isNotNull();
+
+            BufferedImage again = bank.getTransparentNcerImage(cellIndex);
+            for (int y = 0; y < rendered.getHeight(); y++)
+                for (int x = 0; x < rendered.getWidth(); x++)
+                {
+                    int a = rendered.getRGB(x, y), b = again.getRGB(x, y);
+                    boolean aT = (a >>> 24) == 0, bT = (b >>> 24) == 0;
+                    if (aT || bT) assertThat(bT).as("transparency at (%d,%d)", x, y).isEqualTo(aT);
+                    else assertThat(b & 0xFFFFFF).as("colour at (%d,%d)", x, y).isEqualTo(a & 0xFFFFFF);
+                }
+            exercised = true;
+        }
+        Assumptions.assumeTrue(exercised, "no loadable NCER+NCGR+NCLR bundle found in the test ROM");
+    }
 }
