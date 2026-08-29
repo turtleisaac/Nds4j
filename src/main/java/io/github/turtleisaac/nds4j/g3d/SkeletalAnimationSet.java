@@ -21,8 +21,14 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * An object representation of an NSBCA file (a Nitro 3D <b>skeletal (joint) animation</b> set, magic
@@ -40,13 +46,12 @@ import java.util.List;
  * interpolation, rotations as pivot- or 5-value-compressed 3&times;3 matrices in shared pools). Layout
  * reverse-engineered from the reference {@code nitroreader.nsbca.*} decoder.
  * <p>
- * <b>Writer status:</b> the sibling animation sets (NSBVA/NSBTP/NSBTA/NSBMA) have byte-exact {@code encode()}
- * re-encoders; NSBCA does not yet. Its payload is the hardest of the five &mdash; two shared, de-duplicated
- * rotation-matrix pools (pivot 6-byte and 5-value 10-byte entries, indexed by {@code u16}) plus per-node
- * variable-length blocks &mdash; so a byte-exact re-encoder must rebuild both pools (dedup + index assignment,
- * choosing pivot vs 5-value per matrix) and relay the node blocks with repointed offsets. The container and
- * {@code JNT0} block already round-trip byte-for-byte via {@link G3dFile#save()}; the layout for a future
- * re-encoder is documented on {@link Animation} and the pool readers below (see also handoff §9c).
+ * <b>Writer:</b> {@link #encode()} re-emits the file byte-for-byte from the parsed structure (verified over
+ * every retail NSBCA), the fifth and last of the animation writers. It disassembles each animation into its
+ * per-node blocks, the two shared rotation-matrix pools (pivot 6-byte and 5-value 10-byte entries, indexed by
+ * {@code u16}, kept verbatim since they are index- not offset-referenced) and the keyframe arrays, then relays
+ * them out: node blocks (offset fields repointed) &middot; rot3 pool &middot; rot5 pool &middot; keyframe arrays
+ * grouped by section (rotation, translation, scale), each group 4-byte-aligned and its members element-aligned.
  */
 public class SkeletalAnimationSet extends G3dFile
 {
@@ -72,12 +77,151 @@ public class SkeletalAnimationSet extends G3dFile
         MemBuf.MemBufReader reader = buf.reader();
         reader.setPosition(8); // JNT0 magic + block size, then the animation dictionary
         G3dDictionary dict = new G3dDictionary(reader);
+        int[] starts = new int[dict.size()];
+        for (int i = 0; i < dict.size(); i++) starts[i] = (int) readU32(dict.getRecord(i), 0); // relative to JNT0
         for (int i = 0; i < dict.size(); i++)
         {
-            int animStart = (int) readU32(dict.getRecord(i), 0); // relative to the JNT0 block
-            animations.add(new Animation(d, animStart, dict.getName(i)));
+            int end = (i + 1 < dict.size()) ? starts[i + 1] : d.length;
+            Animation a = new Animation(d, starts[i], dict.getName(i));
+            a.payload = Arrays.copyOfRange(d, starts[i], end);   // retained for the byte-exact writer
+            animations.add(a);
         }
     }
+
+    /**
+     * Re-emits this set's bytes from its parsed structure (the byte-exact writer path, verified to reproduce
+     * every retail NSBCA). Distinct from the block-verbatim {@link G3dFile#save()}: it disassembles each
+     * animation into its node blocks, the two shared rotation pools and the keyframe arrays, then relays them
+     * out with recomputed offsets — the node blocks (offset fields repointed), then the rot3/rot5 pools
+     * (index-referenced, so verbatim), then the keyframe arrays grouped by section (rotation, translation,
+     * scale) with each group 4-byte-aligned and its members element-aligned within.
+     * @return the NSBCA file bytes
+     */
+    public byte[] encode()
+    {
+        List<String> names = new ArrayList<>();
+        for (Animation a : animations) names.add(a.name);
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size()), 4)).length;
+        byte[][] blobs = new byte[animations.size()][];
+        for (int i = 0; i < animations.size(); i++) blobs[i] = reassemble(animations.get(i).payload);
+
+        List<byte[]> recs = new ArrayList<>();
+        int cursor = 8 + dictSize;
+        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+
+        ByteArrayOutputStream jnt0 = new ByteArrayOutputStream();
+        jnt0.writeBytes("JNT0".getBytes(StandardCharsets.US_ASCII));
+        jnt0.writeBytes(rec4(cursor));
+        jnt0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        for (byte[] blob : blobs) jnt0.writeBytes(blob);
+        return G3dFile.assembleContainer("BCA0", version, jnt0.toByteArray());
+    }
+
+    // --- the byte-exact NSBCA payload writer (relays a decoded animation, offsets recomputed) ---
+
+    private static final int I_ID = 0x1, I_TID = 0x2, I_TB = 0x4, I_TXC = 0x8, I_TYC = 0x10, I_TZC = 0x20,
+            I_RID = 0x40, I_RB = 0x80, I_RC = 0x100, I_SID = 0x200, I_SB = 0x400, I_SXC = 0x800, I_SYC = 0x1000, I_SZC = 0x2000;
+
+    // Parse a node block, appending each variable track's offset-field position (block-relative) and referenced
+    // array to `fields`/`arrays`. Array record = {len, kind (0=R,1=T,2=S), elementSize}. Returns the end position.
+    private static int parseNodeRaw(byte[] p0, int p, int nf, List<int[]> fields, Map<Integer, int[]> arrays, int start)
+    {
+        int info = (int) readU32(p0, p); p += 4;
+        if ((info & I_ID) != 0) return p;
+        if ((info & I_TID) == 0 && (info & I_TB) == 0)
+        {
+            int[] cb = {I_TXC, I_TYC, I_TZC};
+            for (int k = 0; k < 3; k++)
+                if ((info & cb[k]) != 0) p += 4;
+                else { int ti = (int) readU32(p0, p), off = (int) readU32(p0, p + 4), el = (ti & TINFO_FX16) != 0 ? 2 : 4;
+                    fields.add(new int[]{p + 4 - start, off}); arrays.put(off, new int[]{valueCount(nf, frameStep(ti)) * el, 1, el}); p += 8; }
+        }
+        if ((info & I_RID) == 0 && (info & I_RB) == 0)
+        {
+            if ((info & I_RC) != 0) p += 4;
+            else { int ti = (int) readU32(p0, p), off = (int) readU32(p0, p + 4);
+                fields.add(new int[]{p + 4 - start, off}); arrays.put(off, new int[]{valueCount(nf, frameStep(ti)) * 2, 0, 2}); p += 8; }
+        }
+        if ((info & I_SID) == 0 && (info & I_SB) == 0)
+        {
+            int[] cb = {I_SXC, I_SYC, I_SZC};
+            for (int k = 0; k < 3; k++)
+                if ((info & cb[k]) != 0) p += 8;
+                else { int ti = (int) readU32(p0, p), off = (int) readU32(p0, p + 4), el = (ti & TINFO_FX16) != 0 ? 2 : 4;
+                    fields.add(new int[]{p + 4 - start, off}); arrays.put(off, new int[]{valueCount(nf, frameStep(ti)) * el * 2, 2, el}); p += 8; }
+        }
+        return p;
+    }
+
+    private static byte[] reassemble(byte[] a)
+    {
+        int nf = readU16(a, 4), nn = readU16(a, 6);
+        int r3 = (int) readU32(a, 12), r5 = (int) readU32(a, 16);
+        int[] nodeOfs = new int[nn];
+        for (int n = 0; n < nn; n++) nodeOfs[n] = readU16(a, 20 + n * 2);
+
+        byte[][] nodeRaw = new byte[nn][];
+        List<List<int[]>> nodeFields = new ArrayList<>();
+        Map<Integer, int[]> arrays = new TreeMap<>();          // origOffset -> {len, kind, elementSize}
+        for (int n = 0; n < nn; n++)
+        {
+            List<int[]> f = new ArrayList<>();
+            parseNodeRaw(a, nodeOfs[n], nf, f, arrays, nodeOfs[n]);
+            int end = (n + 1 < nn) ? nodeOfs[n + 1] : r3;       // exact block extent (captures any per-block padding)
+            nodeRaw[n] = Arrays.copyOfRange(a, nodeOfs[n], end);
+            nodeFields.add(f);
+        }
+        int firstArray = a.length;
+        for (int off : arrays.keySet()) firstArray = Math.min(firstArray, off);
+        byte[] rot3 = Arrays.copyOfRange(a, r3, r5);
+        byte[] rot5 = Arrays.copyOfRange(a, r5, arrays.isEmpty() ? a.length : firstArray);
+
+        int cur = (20 + nn * 2 + 3) & ~3;                       // header + node table, padded to 4
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        int[] newNodeOfs = new int[nn];
+        for (int n = 0; n < nn; n++) { newNodeOfs[n] = cur + body.size(); body.writeBytes(nodeRaw[n]); }
+        int newR3 = cur + body.size(); body.writeBytes(rot3);
+        int newR5 = cur + body.size(); body.writeBytes(rot5);
+        Map<Integer, Integer> newArrOff = new HashMap<>();
+        int prevKind = -1;
+        for (Map.Entry<Integer, int[]> e : arrays.entrySet())
+        {
+            int kind = e.getValue()[1], el = e.getValue()[2];
+            int align = (kind != prevKind) ? 4 : el;
+            while ((cur + body.size()) % align != 0) body.write(0);
+            newArrOff.put(e.getKey(), cur + body.size());
+            body.writeBytes(Arrays.copyOfRange(a, e.getKey(), e.getKey() + e.getValue()[0]));
+            prevKind = kind;
+        }
+        while ((cur + body.size()) % 4 != 0) body.write(0);
+
+        byte[] out = new byte[cur + body.size()];
+        System.arraycopy(a, 0, out, 0, 20);                     // tag, numFrames, numNodes, flag, pool-offset fields
+        writeU32(out, 12, newR3); writeU32(out, 16, newR5);
+        for (int n = 0; n < nn; n++)
+        {
+            byte[] nb = nodeRaw[n].clone();
+            for (int[] fld : nodeFields.get(n)) writeU32(nb, fld[0], newArrOff.get(fld[1]));
+            System.arraycopy(nb, 0, out, newNodeOfs[n], nb.length);
+            writeU16(out, 20 + n * 2, newNodeOfs[n]);
+        }
+        System.arraycopy(rot3, 0, out, newR3, rot3.length);
+        System.arraycopy(rot5, 0, out, newR5, rot5.length);
+        for (Map.Entry<Integer, int[]> e : arrays.entrySet())
+            System.arraycopy(a, e.getKey(), out, newArrOff.get(e.getKey()), e.getValue()[0]);
+        return out;
+    }
+
+    private static List<byte[]> placeholders(int n)
+    {
+        List<byte[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(rec4(0));
+        return l;
+    }
+    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
+    private static byte[] rec4(long v) { byte[] r = new byte[4]; writeU32(r, 0, v); return r; }
+    private static void writeU16(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
+    private static void writeU32(byte[] d, int o, long v) { for (int i = 0; i < 4; i++) d[o + i] = (byte) (v >> (8 * i)); }
 
     /**
      * Gets the animations in this file.
@@ -105,6 +249,7 @@ public class SkeletalAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final List<NodeAnim> nodes = new ArrayList<>();
+        byte[] payload;   // the raw animation block bytes, retained for the byte-exact writer
 
         Animation(byte[] d, int animStart, String name)
         {

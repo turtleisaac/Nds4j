@@ -104,6 +104,15 @@ public class AnimationWriterTest
     }
 
     @Test
+    @DisplayName("every retail NSBCA (skeletal) re-encodes byte-for-byte")
+    void skeletalRoundTrip()
+    {
+        NintendoDsRom rom = TestRoms.require("Platinum.nds");
+        int n = roundTrip(rom, "BCA0", bf -> new SkeletalAnimationSet(bf).encode());
+        Assumptions.assumeTrue(n > 0, "no NSBCA files found");
+    }
+
+    @Test
     @DisplayName("an authored visibility animation round-trips through decode")
     void authorVisibility()
     {
