@@ -40,6 +40,12 @@ Read this alongside `TECH_DEBT.md` (the *decided* design constraints) and the me
 scurest/nsbmd_docs + Apicula — see §6). This doc is the *working* handoff; `TECH_DEBT.md` is the durable
 policy.
 
+> **Newer Nds4j work (2026-08-29) is 2D, not 3D — see §11.** The `images/` formats gained **write-back**
+> APIs (`Screen.applyImage`, `CellBank.applyImage`, + palette-rebuild variants) driven by **NitroViewer**
+> (the in-browser Tinke replacement — its `HANDOFF.md`). **Critical cross-cutting rule from that work:**
+> CheerpJ's JRE is **Java 8**, so any Nds4j class a browser can reach must avoid **Java 9+ API calls**
+> (`List.of` cost `ModelBuilder` a browser-only `NoSuchMethodError`). Full detail + the new APIs in **§11**.
+
 ---
 
 ## 0. The one rule that defines "done"
@@ -679,3 +685,53 @@ jar — RE straight from the retail files, cross-checking offset spacing to fix 
 the lossy decode value-by-value in a throwaway probe; **triangulate** (no single source is infallible —
 §5.8, §6 caveat); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
 Rendered checkpoints live in `g3d_out/` (walk/scroll/flip-book/recolour GIFs+PNGs, animated `.gltf`).
+
+---
+
+## 11. 2D image write-back + the CheerpJ (Java 8) constraint — added 2026-08-29
+
+Outside this doc's 3D (NSB*) scope, but the current Nds4j work: the 2D image formats (`src/main/java/…/images/`)
+gained **write-back** so an edited *assembled* image can be decomposed back into its source graphics. All are
+driven by **NitroViewer** (the in-browser Tinke replacement — see its `HANDOFF.md`), byte-exact-tested against
+the retail corpus, and **Java-8-clean** (they run in CheerpJ).
+
+### 11a. The CheerpJ Java-8 constraint — read before adding any Nds4j API a browser consumes
+CheerpJ's JRE is **Java 8** (`java.version` = `1.8.0_492`). A **Java 9+ API *call*** — `List.of`, `Map.of`,
+`Optional.isEmpty`, `String.repeat`, `ByteArrayOutputStream.writeBytes`, … — compiles fine under
+`source/target 8` but throws a bare **`NoSuchMethodError` (null message, empty stack)** *at runtime in the
+browser*: it passes JUnit on a JDK 17/20 and dies only under CheerpJ. This bit `ModelBuilder` (it used
+`List.of()`); fixed by making it Java-8-clean (`List.of`→`Arrays.asList`/`Collections`, byte-exact output
+preserved). **Latent:** `SkeletalAnimationSet.encode` uses `ByteArrayOutputStream.writeBytes` (Java 11) — the
+next write path a browser exercises will hit it. **Rule: avoid Java 9+ API *calls* in any class the facade can
+reach.** (NitroViewer's own `nitroviewer-core` is guarded with `maven.compiler.release=8`, which turns such a
+call into a *compile* error; Nds4j itself is not guarded — keep this rule in mind manually.)
+
+### 11b. Write-back APIs added (`images/`)
+- **NSCR — `Screen`.** `applyImage(image, ncgr, palette, dedupFlips)` and
+  `applyImageRebuildingPalette(image, ncgr, numSubPalettes, dedupFlips)` invert `getImage`: cut an assembled
+  background into an **NCGR tileset + NSCR tilemap** with **H/V-flip tile dedup** and per-cell sub-palette
+  selection; **match** the existing NCLR or **rebuild** it (8bpp median-cut; 4bpp greedy per-tile sub-palette
+  packing). New blank `Screen(int width, int height, long screenFormat)` ctor for from-scratch authoring.
+  `ImportResult{ncgr, palette, uniqueTiles, unmatchedPixels}`. Test: `ScreenBackWriteTest` (render→apply→render
+  pixel-identical incl. multi-sub-palette + 8bpp rebuild, save/reload).
+- **NCER/NANR — `CellBank`.** `applyImage(cellIndex, image, ncgr, palette)` and
+  `applyImageRebuildingPalette(cellIndex, image, ncgr, templatePalette)` invert `renderCell`: for each OAM,
+  extract its region of the edited cell image, colour-match to that OAM's sub-palette, and reuse the existing
+  **`Cell.OAM.OamImage.setPixels()+save()`** primitive (which already splices into the NCGR at the OAM's
+  `tileOffset`). Rebuild synthesises a new NCLR per sub-palette from the OAMs that use it, **slot 0 reserved
+  for transparency**, median-cut only on >15-colour overflow. `ImportResult{unmatchedPixels, palette}`. Test:
+  `CellBankBackWriteTest`. NANR back-write = the same, on the cell a frame references (`frame.getCellIndex()`).
+  - **Renderer bug fixed here:** `OamImage.generateImageData` now sets `oamImage.paletteIdx` from `oam.palette`,
+    so a 4bpp OAM draws through **its own** 16-colour sub-palette instead of always sub-palette 0 (which
+    mis-coloured any sprite whose OAMs use `palette != 0`). This both corrects the viewer and makes the
+    back-write round-trip exact.
+- **NCGR / palette.** The existing headless quantisers `IndexedImage.applyImageMatched` /
+  `applyImageQuantized` (PNG→NCGR, no JPanel); `IndexedImage.medianCut` widened `private`→**package-private**
+  so `Screen`/`CellBank` reuse the tested median-cut.
+
+### 11c. Correctness bar (same spirit as §0)
+Byte-exact `save()` stays the invariant — the existing `CellBankTest`/`ScreenTest` round-trip tests **must stay
+green** (the sub-palette renderer fix does not touch `save()`). The write-back's own oracle is **render →
+`applyImage` → render is pixel-identical** on real retail bundles (found by scanning NARCs for a coherent
+NCER/NCGR/NCLR or NSCR/NCGR/NCLR set, as `CrossLayerRenderingTest` does). Run:
+`mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
