@@ -971,6 +971,26 @@ public class NintendoDsRom
     }
 
     /**
+     * Gets the ROM's icon/title banner as an editable {@link IconBanner} (the 32&times;32 menu icon and the
+     * per-language game titles), or {@code null} if the ROM has none.
+     * @return an {@link IconBanner}, or {@code null}
+     */
+    public IconBanner getBanner()
+    {
+        return iconBanner == null || iconBanner.length == 0 ? null : new IconBanner(iconBanner);
+    }
+
+    /**
+     * Replaces the ROM's icon/title banner with the (possibly edited) one, recomputing its checksum. The
+     * banner keeps its size, so this is a same-size in-place swap.
+     * @param banner the banner to store
+     */
+    public void setBanner(IconBanner banner)
+    {
+        this.iconBanner = banner.toBytes();
+    }
+
+    /**
      * Unpacks the rom to the target directory on disk
      * @param dir a <code>String</code> containing the path to the target directory
      * @throws IOException if any of the output files fail to be written
