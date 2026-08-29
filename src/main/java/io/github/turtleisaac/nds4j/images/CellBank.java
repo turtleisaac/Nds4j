@@ -458,10 +458,14 @@ public class CellBank extends GenericNtrFile
      */
     public void setParentImage(IndexedImage image)
     {
+        // The OAM composition addresses the parent as TILED character data (convertToTiles + tile
+        // offsets). A scanned (bitmap) NCGR is laid out linearly, so its OAM offsets don't map onto a
+        // re-tiled grid — composing it produces scrambled output. Bitmap-OBJ composition isn't
+        // implemented yet, so refuse rather than emit garbage. Note: the scanned NCGR's own pixels are
+        // a correct bitmap, so callers can still render it directly (e.g. DPPt trbgra.narc trainer
+        // sprites are viewable as the raw NCGR). See IndexedImage#isScanned().
         if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED)
-        {
             throw new RuntimeException("Can't use a scanned image with an NCER");
-        }
         this.image = image;
     }
 

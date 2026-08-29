@@ -873,6 +873,172 @@ public class IndexedImage extends GenericNtrFile
         return this;
     }
 
+    // --- Headless PNG import ------------------------------------------------------------------------
+    // Clean replacements for the deprecated IndexedImage(Image, JPanel) / indexSelf(JPanel) path, which
+    // was a half-finished port from PokEditor: it hardcoded 80x80, capped at 16 exact-match colours,
+    // padded with magenta, took a Swing JPanel it never used (only fed commented-out JOptionPane
+    // dialogs), and left the palette assignment commented out ("//todo fix and uncomment"). These
+    // operate on an existing image so its geometry (dimensions, bit depth, tiling) is preserved and the
+    // result re-encodes cleanly with save(); they are headless (no Swing) and support any size + 4/8bpp.
+
+    /**
+     * Overwrite this image's pixels by matching every pixel of {@code src} to the nearest colour in
+     * this image's current palette (squared-RGB distance). Fully transparent pixels (alpha &lt; 128)
+     * map to palette index 0, the DS transparent slot. This image's dimensions, bit depth and tiling
+     * are unchanged, so the result re-encodes with {@link #save()}.
+     *
+     * @param src an image whose dimensions equal this image's
+     * @return the number of pixels whose nearest palette colour was not an exact match (a measure of
+     *         how well the image fits the existing palette)
+     * @throws RuntimeException if {@code src}'s dimensions differ, or this image has no palette
+     */
+    public int applyImageMatched(BufferedImage src)
+    {
+        requireSameSize(src);
+        if (palette == null)
+            throw new RuntimeException("This image has no palette to match against.");
+        Color[] pal = palette.getColors();
+        // A 4bpp NCGR indexes into a single 16-colour sub-palette; never emit an index past 15.
+        int limit = (bitDepth == 4) ? Math.min(16, pal.length) : pal.length;
+        if (limit < 1)
+            throw new RuntimeException("The palette is empty.");
+        int unmatched = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int argb = src.getRGB(x, y);
+                if ((argb >>> 24) < 128) { pixels[y][x] = 0; continue; } // transparent -> index 0
+                int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                int best = 0, bestDist = Integer.MAX_VALUE;
+                for (int i = 0; i < limit; i++)
+                {
+                    Color c = pal[i];
+                    int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
+                    int d = dr * dr + dg * dg + db * db;
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                if (bestDist != 0) unmatched++;
+                pixels[y][x] = best;
+            }
+        }
+        update = true;
+        return unmatched;
+    }
+
+    /**
+     * Rebuild this image's palette from {@code src} (median-cut to at most {@code maxColors} entries,
+     * with index 0 reserved as the transparent slot) and re-index every pixel against the new palette.
+     * Sets this image's palette and returns it. Headless.
+     *
+     * @param src an image whose dimensions equal this image's
+     * @param maxColors the palette size to fill (16 for a 4bpp NCGR, 256 for 8bpp)
+     * @return the newly built {@link Palette} (also now this image's palette)
+     */
+    public Palette applyImageQuantized(BufferedImage src, int maxColors)
+    {
+        requireSameSize(src);
+        if (maxColors < 2) maxColors = 2;
+
+        boolean[][] transparent = new boolean[height][width];
+        java.util.List<int[]> opaque = new ArrayList<>();
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int argb = src.getRGB(x, y);
+                if ((argb >>> 24) < 128) { transparent[y][x] = true; continue; }
+                opaque.add(new int[]{ (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF });
+            }
+        }
+
+        // Slot 0 is transparent; median-cut the opaque colours into the remaining slots.
+        java.util.List<Color> boxed = medianCut(opaque, maxColors - 1);
+        Color[] colors = new Color[maxColors];
+        colors[0] = Color.MAGENTA; // rendered transparent when index-0 transparency is enabled
+        for (int i = 1; i < maxColors; i++)
+            colors[i] = (i - 1 < boxed.size()) ? boxed.get(i - 1) : Color.BLACK;
+        Palette newPal = new Palette(colors);
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (transparent[y][x]) { pixels[y][x] = 0; continue; }
+                int argb = src.getRGB(x, y);
+                int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                int best = 1, bestDist = Integer.MAX_VALUE;
+                for (int i = 1; i < maxColors; i++)
+                {
+                    Color c = colors[i];
+                    int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
+                    int d = dr * dr + dg * dg + db * db;
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                pixels[y][x] = best;
+            }
+        }
+
+        setPalette(newPal);
+        update = true;
+        return newPal;
+    }
+
+    private void requireSameSize(BufferedImage src)
+    {
+        if (src == null)
+            throw new RuntimeException("No image was provided.");
+        if (src.getWidth() != width || src.getHeight() != height)
+            throw new RuntimeException(String.format(
+                    "Imported image is %dx%d but this image is %dx%d; they must match.",
+                    src.getWidth(), src.getHeight(), width, height));
+    }
+
+    /**
+     * Median-cut {@code colors} (each an {@code int[]{r,g,b}}) into {@code count} representative colours
+     * (the average of each final box). Splits the box with the widest single-channel range each step.
+     */
+    private static java.util.List<Color> medianCut(java.util.List<int[]> colors, int count)
+    {
+        java.util.List<Color> out = new ArrayList<>();
+        if (count < 1) count = 1;
+        if (colors.isEmpty()) { out.add(Color.BLACK); return out; }
+
+        java.util.List<java.util.List<int[]>> boxes = new ArrayList<>();
+        boxes.add(new ArrayList<>(colors));
+        while (boxes.size() < count)
+        {
+            int bi = -1, bestRange = -1, bestCh = 0;
+            for (int i = 0; i < boxes.size(); i++)
+            {
+                java.util.List<int[]> bx = boxes.get(i);
+                if (bx.size() < 2) continue;
+                for (int ch = 0; ch < 3; ch++)
+                {
+                    int mn = 255, mx = 0;
+                    for (int[] c : bx) { mn = Math.min(mn, c[ch]); mx = Math.max(mx, c[ch]); }
+                    if (mx - mn > bestRange) { bestRange = mx - mn; bi = i; bestCh = ch; }
+                }
+            }
+            if (bi < 0) break; // nothing left worth splitting
+            java.util.List<int[]> bx = boxes.remove(bi);
+            final int ch = bestCh;
+            bx.sort((a, b) -> Integer.compare(a[ch], b[ch]));
+            int mid = bx.size() / 2;
+            boxes.add(new ArrayList<>(bx.subList(0, mid)));
+            boxes.add(new ArrayList<>(bx.subList(mid, bx.size())));
+        }
+
+        for (java.util.List<int[]> bx : boxes)
+        {
+            long r = 0, g = 0, b = 0;
+            for (int[] c : bx) { r += c[0]; g += c[1]; b += c[2]; }
+            int n = Math.max(1, bx.size());
+            out.add(new Color((int) (r / n), (int) (g / n), (int) (b / n)));
+        }
+        return out;
+    }
+
     // TODO figure out what is going on with the following three methods - why did I write these and give them such shitty names
 
 //    /**
@@ -1083,6 +1249,19 @@ public class IndexedImage extends GenericNtrFile
     public NcgrUtils.ScanMode getScanMode()
     {
         return scanMode;
+    }
+
+    /**
+     * Whether this NCGR is stored as a scanned (linear bitmap) image rather than tiled character data.
+     * A scanned image's {@link #getPixels() pixels} are a correct bitmap, but it can't be composed
+     * through an NCER (whose OAM offsets assume tiled data) — see {@link CellBank#setParentImage}.
+     * Exposed publicly so callers in other packages can branch without reaching the protected
+     * {@link NcgrUtils.ScanMode} enum.
+     * @return {@code true} if scanned (front-to-back or back-to-front)
+     */
+    public boolean isScanned()
+    {
+        return scanMode != NcgrUtils.ScanMode.NOT_SCANNED;
     }
 
     /**
