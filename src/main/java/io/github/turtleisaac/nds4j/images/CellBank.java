@@ -552,6 +552,84 @@ public class CellBank extends GenericNtrFile
         return new Rectangle(minX, minY, maxX - minX, maxY - minY);
     }
 
+    /** The outcome of {@link #applyImage}: how well the image fit the palette. */
+    public static final class ImportResult
+    {
+        /** Pixels whose colour wasn't an exact match in the OAM's (sub-)palette (0 = a perfect fit). */
+        public final int unmatchedPixels;
+
+        private ImportResult(int unmatchedPixels) { this.unmatchedPixels = unmatchedPixels; }
+    }
+
+    /**
+     * Writes an edited assembled-cell image back into the NCGR — the inverse of {@link #getNcerImage(int)}.
+     * The cell's OAM layout is unchanged: each OAM's region of the image is colour-matched to that OAM's
+     * sub-palette and written into the NCGR tiles it references (via each {@link Cell.OAM.OamImage}). Colours
+     * are matched to the EXISTING palette; {@link ImportResult#unmatchedPixels} reports the fit. Because OAMs
+     * (and other cells) can share tiles, editing one region changes every OAM that references those tiles —
+     * the NCGR is the single source of pixels. Persist by saving {@code ncgr}.
+     *
+     * @param cellIndex the cell whose composed image {@code image} is
+     * @param image the edited assembled-cell image (must be the cell's bounds size)
+     * @param ncgr the NCGR whose tiles back this cell (mutated in place)
+     * @param palette the NCLR to match colours against
+     * @return the decomposition stats
+     */
+    public ImportResult applyImage(int cellIndex, BufferedImage image, IndexedImage ncgr, Palette palette)
+    {
+        setParentImage(ncgr);
+        Cell cell = cells[cellIndex];
+        Rectangle bounds = cellBounds(cell);
+        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
+        if (image.getWidth() != cw || image.getHeight() != ch)
+            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
+                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+
+        Color[] colors = palette.getColors();
+        int bitDepth = ncgr.getBitDepth();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        int subCount = Math.max(1, colors.length / subSize);
+        Cell.OAM.OamImage[] oamImages = cell.getImages();
+        int unmatched = 0;
+
+        for (int k = 0; k < cell.oams.length; k++)
+        {
+            Cell.OAM oam = cell.oams[k];
+            int[] sz = getOamSize(oam);
+            int w = sz[0], h = sz[1];
+            int dx = oam.xCoord - bounds.x, dy = oam.yCoord - bounds.y;
+            int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
+            int base = sub * subSize;
+
+            int[][] grid = new int[h][w];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = dx + x, sy = dy + y;
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) { grid[y][x] = 0; continue; }
+                    int argb = image.getRGB(sx, sy);
+                    if (((argb >>> 24) & 0xFF) == 0) { grid[y][x] = 0; continue; } // transparent -> index 0
+                    int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                    int bestIdx = 0;
+                    long bestD = Long.MAX_VALUE;
+                    for (int c = 0; c < subSize && base + c < colors.length; c++)
+                    {
+                        Color col = colors[base + c];
+                        long dr = r - col.getRed(), dg = g - col.getGreen(), db = b - col.getBlue();
+                        long d = dr * dr + dg * dg + db * db;
+                        if (d < bestD) { bestD = d; bestIdx = c; }
+                    }
+                    grid[y][x] = bestIdx;
+                    if (bestD != 0) unmatched++;
+                }
+            }
+            oamImages[k].setPixels(grid);
+            oamImages[k].save(); // splices these pixels into the NCGR tiles this OAM references
+        }
+        return new ImportResult(unmatched);
+    }
+
     /**
      * Gets the number of cells in this bank.
      * @return an <code>int</code>
@@ -977,6 +1055,12 @@ public class CellBank extends GenericNtrFile
                         storedWidth = oamSize[shape][size][0];
                         oamImage = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
                     }
+
+                    // Colour this OAM through its own 16-colour sub-palette (4bpp): the OAM's `palette`
+                    // field selects which block of the NCLR to draw with. Without this every OAM would
+                    // draw with sub-palette 0, mis-colouring any sprite whose OAMs use palette != 0.
+                    int subCount = Math.max(1, image.getPalette().getNumColors() / 16);
+                    oamImage.setPaletteIdx(image.getBitDepth() == 4 && palette >= 0 && palette < subCount ? palette : 0);
 
                     int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
                     byte[] imageData;
