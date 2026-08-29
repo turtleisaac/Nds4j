@@ -24,7 +24,11 @@ import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -96,6 +100,28 @@ public class Screen extends GenericNtrFile
         // Any bytes between the declared data and the end of the block are alignment padding (retail
         // files pad the screen data to a 4-byte boundary with zeros). They carry no screen data and
         // save() regenerates them, so they are not stored; screenSectionSize is otherwise unused.
+    }
+
+    /**
+     * Creates a blank screen of the given pixel dimensions, with every entry cleared (tile 0, no flip,
+     * sub-palette 0). Useful for authoring a screen from scratch — e.g. importing a background image via
+     * {@link #applyImage} without an existing NSCR to start from.
+     * @param width the screen width in pixels (a multiple of 8)
+     * @param height the screen height in pixels (a multiple of 8)
+     * @param screenFormat the raw 32-bit colour-mode/format word to store (see {@link #getScreenFormat()})
+     */
+    public Screen(int width, int height, long screenFormat)
+    {
+        super("RCSN");
+        if (width <= 0 || height <= 0)
+            throw new RuntimeException("A screen's dimensions must be positive.");
+        if (width % 8 != 0 || height % 8 != 0)
+            throw new RuntimeException(String.format("A screen is a grid of 8x8 tiles, so %dx%d must be multiples of 8.", width, height));
+        this.width = width;
+        this.height = height;
+        this.screenFormat = screenFormat;
+        this.entries = new short[(width / 8) * (height / 8)];
+        this.numBlocks = 1; // one NRCS block, so save() writes a valid single-section NTR header
     }
 
     /**
@@ -432,6 +458,312 @@ public class Screen extends GenericNtrFile
         int srcX = tileCol * 8 + (isHorizontalFlip(i) ? 7 - inTileX : inTileX);
         int srcY = tileRow * 8 + (isVerticalFlip(i) ? 7 - inTileY : inTileY);
         ncgr.setPixelValue(srcX, srcY, value);
+    }
+
+    /**
+     * The outputs of {@link #applyImage}: the rebuilt tileset and how the decomposition went.
+     */
+    public static final class ImportResult
+    {
+        /** The rebuilt NCGR tileset (unique tiles only). Save it alongside the mutated screen. */
+        public final IndexedImage ncgr;
+        /** The palette the tiles were indexed against: the input NCLR when matching, or the freshly-built
+         *  one when {@link #applyImageRebuildingPalette} was used. Write it back to the NCLR after a rebuild. */
+        public final Palette palette;
+        /** How many distinct tiles the image reduced to (equals the NCGR's tile count). */
+        public final int uniqueTiles;
+        /** Pixels whose colour wasn't an exact match in the chosen (sub-)palette (0 = perfect fit). */
+        public final int unmatchedPixels;
+
+        private ImportResult(IndexedImage ncgr, Palette palette, int uniqueTiles, int unmatchedPixels)
+        {
+            this.ncgr = ncgr;
+            this.palette = palette;
+            this.uniqueTiles = uniqueTiles;
+            this.unmatchedPixels = unmatchedPixels;
+        }
+    }
+
+    /**
+     * Decomposes a full screen-sized image back into a tilemap + tileset — the inverse of
+     * {@link #getImage(IndexedImage, Palette)}. This <b>mutates this screen</b> (its entries and
+     * dimensions are rebuilt to describe {@code image}) and <b>returns a fresh {@link IndexedImage}</b>
+     * holding the deduplicated tiles; the screen's {@code screenFormat} and the palette are preserved.
+     * The classic "import a background PNG" write-back that a screen editor needs.
+     * <p>
+     * How it works: the image is cut into 8x8 cells (both dimensions must be multiples of 8). Each cell
+     * is matched to the palette — for 4bpp graphics the 16-colour sub-palette that fits the cell best is
+     * chosen, for 8bpp the whole palette — and reduced to raw tile values (fully-transparent pixels map
+     * to colour index 0, as the DS treats it). Identical tiles are shared, and (when {@code dedupFlips})
+     * a cell that is the horizontal/vertical mirror of an existing tile reuses it with the matching flip
+     * flags, exactly as the DS 2D engine would. Colours are matched to the EXISTING palette (nearest
+     * colour when not exact); {@link ImportResult#unmatchedPixels} reports the fit, and the caller can
+     * rebuild the NCLR separately if it's poor.
+     *
+     * @param image       the assembled background image to import (width and height multiples of 8)
+     * @param templateNcgr an existing NCGR supplying the bit depth and the tileset's storage width
+     *                     (tiles-per-row) for the rebuilt tileset
+     * @param palette     the NCLR to match colours against (unchanged)
+     * @param dedupFlips  whether to share tiles across horizontal/vertical mirrors (smaller tileset)
+     * @return the rebuilt tileset and the decomposition stats ({@link ImportResult#palette} is {@code palette})
+     */
+    public ImportResult applyImage(BufferedImage image, IndexedImage templateNcgr, Palette palette, boolean dedupFlips)
+    {
+        return decompose(image, templateNcgr, palette, dedupFlips);
+    }
+
+    /**
+     * Like {@link #applyImage}, but BUILDS a new palette from the image instead of matching an existing
+     * one — the NSCR analog of {@code importPng}'s "rebuild palette" mode. For 4bpp it assigns each 8x8
+     * cell to one of {@code numSubPalettes} 16-colour sub-palettes (greedy: a cell joins a sub-palette it
+     * fits within, else opens a new one, else the closest is quantised down) so tiles keep their
+     * one-sub-palette-per-tile constraint; for 8bpp it median-cuts the whole image into a single palette.
+     * The new palette is returned as {@link ImportResult#palette} — write it back to the NCLR.
+     *
+     * @param image          the assembled background image to import (dimensions multiples of 8)
+     * @param templateNcgr   an existing NCGR supplying the bit depth and tileset storage width
+     * @param numSubPalettes how many 16-colour sub-palettes the new NCLR may use (4bpp; ignored for 8bpp)
+     * @param dedupFlips     whether to share tiles across horizontal/vertical mirrors
+     * @return the rebuilt tileset, the NEW palette, and the decomposition stats
+     */
+    public ImportResult applyImageRebuildingPalette(BufferedImage image, IndexedImage templateNcgr, int numSubPalettes, boolean dedupFlips)
+    {
+        Palette rebuilt = buildPalette(image, templateNcgr.getBitDepth(), Math.max(1, numSubPalettes));
+        return decompose(image, templateNcgr, rebuilt, dedupFlips);
+    }
+
+    private ImportResult decompose(BufferedImage image, IndexedImage templateNcgr, Palette palette, boolean dedupFlips)
+    {
+        int bitDepth = templateNcgr.getBitDepth();
+        if (bitDepth != 4 && bitDepth != 8)
+            throw new RuntimeException("The template NCGR has no usable bit depth (" + bitDepth + ").");
+
+        int w = image.getWidth();
+        int h = image.getHeight();
+        if (w % 8 != 0 || h % 8 != 0)
+            throw new RuntimeException(String.format("The image is %dx%d; a screen needs both dimensions to be multiples of 8.", w, h));
+
+        int columns = w / 8;
+        int rows = h / 8;
+
+        Color[] colors = palette.getColors();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        int numSubPals = Math.max(1, colors.length / subSize);
+
+        List<int[]> tiles = new ArrayList<>();          // each tile: int[64] raw values, row-major
+        Map<String, Integer> tileLookup = new HashMap<>(); // identity serialisation -> tile ordinal
+        short[] newEntries = new short[columns * rows];
+        int unmatched = 0;
+
+        int[] argb = new int[64];
+        for (int cellRow = 0; cellRow < rows; cellRow++)
+        {
+            for (int cellCol = 0; cellCol < columns; cellCol++)
+            {
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++)
+                        argb[y * 8 + x] = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
+
+                // Pick the sub-palette that fits this cell best (least total nearest-colour error).
+                int bestSub = 0;
+                int[] bestVals = null;
+                long bestErr = Long.MAX_VALUE;
+                int bestUnmatched = 0;
+                for (int p = 0; p < numSubPals; p++)
+                {
+                    int base = p * subSize;
+                    int[] vals = new int[64];
+                    long err = 0;
+                    int un = 0;
+                    for (int k = 0; k < 64; k++)
+                    {
+                        if (((argb[k] >>> 24) & 0xFF) == 0) // fully transparent -> index 0
+                        {
+                            vals[k] = 0;
+                            continue;
+                        }
+                        int r = (argb[k] >> 16) & 0xFF, g = (argb[k] >> 8) & 0xFF, b = argb[k] & 0xFF;
+                        int bestIdx = 0;
+                        long bestD = Long.MAX_VALUE;
+                        for (int c = 0; c < subSize && base + c < colors.length; c++)
+                        {
+                            long d = colorDistanceSq(r, g, b, colors[base + c]);
+                            if (d < bestD) { bestD = d; bestIdx = c; }
+                        }
+                        vals[k] = bestIdx;
+                        err += bestD;
+                        if (bestD != 0) un++;
+                    }
+                    if (err < bestErr) { bestErr = err; bestSub = p; bestVals = vals; bestUnmatched = un; }
+                }
+                unmatched += bestUnmatched;
+
+                // Share this tile with an existing one, trying the four flip orientations.
+                int ordinal = -1;
+                boolean hFlip = false, vFlip = false;
+                boolean[] options = dedupFlips ? new boolean[]{false, true} : new boolean[]{false};
+                search:
+                for (boolean tryV : options)
+                    for (boolean tryH : options)
+                    {
+                        Integer ord = tileLookup.get(serializeTile(flipTile(bestVals, tryH, tryV)));
+                        if (ord != null) { ordinal = ord; hFlip = tryH; vFlip = tryV; break search; }
+                    }
+                if (ordinal < 0)
+                {
+                    ordinal = tiles.size();
+                    tiles.add(bestVals);
+                    tileLookup.put(serializeTile(bestVals), ordinal);
+                }
+                if (ordinal > TILE_INDEX_MASK)
+                    throw new RuntimeException("The image needs more than " + (TILE_INDEX_MASK + 1)
+                            + " unique tiles, which a screen's 10-bit tile index can't address.");
+
+                int entry = (ordinal & TILE_INDEX_MASK)
+                        | (hFlip ? H_FLIP_BIT : 0)
+                        | (vFlip ? V_FLIP_BIT : 0)
+                        | ((bestSub & PALETTE_MASK) << PALETTE_SHIFT);
+                newEntries[cellRow * columns + cellCol] = (short) entry;
+            }
+        }
+
+        // Lay the unique tiles out at the template's storage width (tiles-per-row) into a fresh NCGR.
+        int tilesPerRow = Math.max(1, templateNcgr.getWidth() / 8);
+        int outTileRows = Math.max(1, (tiles.size() + tilesPerRow - 1) / tilesPerRow);
+        IndexedImage ncgr = new IndexedImage(outTileRows * 8, tilesPerRow * 8, bitDepth, palette);
+        for (int t = 0; t < tiles.size(); t++)
+        {
+            int tc = t % tilesPerRow, tr = t / tilesPerRow;
+            int[] tile = tiles.get(t);
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                    ncgr.setPixelValue(tc * 8 + x, tr * 8 + y, tile[y * 8 + x]);
+        }
+        ncgr.setNumTiles(tiles.size());   // write exactly the unique tiles (trailing grid cells are padding)
+        ncgr.setMappingType(32);          // 32 = the header carries explicit tile dimensions
+
+        // Commit the rebuilt tilemap onto this screen (screenFormat preserved).
+        this.entries = newEntries;
+        this.width = w;
+        this.height = h;
+
+        return new ImportResult(ncgr, palette, tiles.size(), unmatched);
+    }
+
+    // Builds a palette that fits the image, for applyImageRebuildingPalette. 8bpp: one median-cut palette
+    // of up to 256 colours. 4bpp: greedily pack each cell's colours into up to numSubPalettes 16-colour
+    // sub-palettes (a cell must fit one sub-palette, mirroring the DS constraint), quantising a sub-palette
+    // down with median-cut only if it overflows. The sub-palettes are concatenated into one Palette.
+    private static Palette buildPalette(BufferedImage image, int bitDepth, int numSubPalettes)
+    {
+        if (bitDepth != 4 && bitDepth != 8)
+            throw new RuntimeException("The template NCGR has no usable bit depth (" + bitDepth + ").");
+        int w = image.getWidth(), h = image.getHeight();
+        if (w % 8 != 0 || h % 8 != 0)
+            throw new RuntimeException(String.format("The image is %dx%d; a screen needs both dimensions to be multiples of 8.", w, h));
+
+        if (bitDepth == 8)
+        {
+            List<int[]> opaque = new ArrayList<>();
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int argb = image.getRGB(x, y);
+                    if (((argb >>> 24) & 0xFF) == 0) continue;
+                    opaque.add(new int[]{(argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF});
+                }
+            List<Color> cut = IndexedImage.medianCut(opaque, 256);
+            Color[] colors = new Color[256];
+            for (int i = 0; i < 256; i++)
+                colors[i] = i < cut.size() ? cut.get(i) : Color.BLACK;
+            return new Palette(colors);
+        }
+
+        // 4bpp: one colour set per sub-palette bucket (packed 0xRRGGBB, so equal colours collapse).
+        int columns = w / 8, rows = h / 8;
+        List<java.util.LinkedHashSet<Integer>> buckets = new ArrayList<>();
+        for (int cellRow = 0; cellRow < rows; cellRow++)
+        {
+            for (int cellCol = 0; cellCol < columns; cellCol++)
+            {
+                java.util.LinkedHashSet<Integer> cell = new java.util.LinkedHashSet<>();
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++)
+                    {
+                        int argb = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
+                        if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette colour
+                        cell.add(argb & 0xFFFFFF);
+                    }
+                if (cell.isEmpty()) continue;
+
+                // Join the first bucket this cell fits within 16 colours; else open a new bucket; else the
+                // bucket whose union is smallest (it may overflow 16 and get quantised at the end).
+                int fit = -1, best = -1, bestUnion = Integer.MAX_VALUE;
+                for (int b = 0; b < buckets.size(); b++)
+                {
+                    java.util.LinkedHashSet<Integer> merged = new java.util.LinkedHashSet<>(buckets.get(b));
+                    merged.addAll(cell);
+                    if (merged.size() <= 16) { fit = b; break; }
+                    if (merged.size() < bestUnion) { bestUnion = merged.size(); best = b; }
+                }
+                if (fit >= 0)
+                    buckets.get(fit).addAll(cell);
+                else if (buckets.size() < numSubPalettes)
+                    buckets.add(new java.util.LinkedHashSet<>(cell));
+                else
+                    buckets.get(best).addAll(cell);
+            }
+        }
+
+        Color[] colors = new Color[numSubPalettes * 16];
+        Arrays.fill(colors, Color.BLACK);
+        for (int p = 0; p < buckets.size() && p < numSubPalettes; p++)
+        {
+            List<Integer> packed = new ArrayList<>(buckets.get(p));
+            List<Color> sub;
+            if (packed.size() <= 16)
+            {
+                sub = new ArrayList<>();
+                for (int rgb : packed)
+                    sub.add(new Color(rgb));
+            }
+            else
+            {
+                List<int[]> rgbs = new ArrayList<>();
+                for (int rgb : packed)
+                    rgbs.add(new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF});
+                sub = IndexedImage.medianCut(rgbs, 16);
+            }
+            for (int i = 0; i < 16 && i < sub.size(); i++)
+                colors[p * 16 + i] = sub.get(i);
+        }
+        return new Palette(colors);
+    }
+
+    private static long colorDistanceSq(int r, int g, int b, Color c)
+    {
+        long dr = r - c.getRed(), dg = g - c.getGreen(), db = b - c.getBlue();
+        return dr * dr + dg * dg + db * db;
+    }
+
+    // Serialise a 64-value tile to a hashable/equatable key (each value 0-255 fits one char).
+    private static String serializeTile(int[] tile)
+    {
+        char[] cs = new char[64];
+        for (int i = 0; i < 64; i++)
+            cs[i] = (char) (tile[i] & 0xFF);
+        return new String(cs);
+    }
+
+    // Mirror a tile horizontally and/or vertically. flipTile(D,h,v)[a][b] = D[v?7-a:a][h?7-b:b] — the
+    // stored tile T for which drawing D at flags (h,v) reproduces D (the flip flags are self-inverse).
+    private static int[] flipTile(int[] tile, boolean hFlip, boolean vFlip)
+    {
+        int[] out = new int[64];
+        for (int a = 0; a < 8; a++)
+            for (int b = 0; b < 8; b++)
+                out[a * 8 + b] = tile[(vFlip ? 7 - a : a) * 8 + (hFlip ? 7 - b : b)];
+        return out;
     }
 
     /* END SECTION: rendering and write-back */

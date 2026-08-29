@@ -997,8 +997,10 @@ public class IndexedImage extends GenericNtrFile
     /**
      * Median-cut {@code colors} (each an {@code int[]{r,g,b}}) into {@code count} representative colours
      * (the average of each final box). Splits the box with the widest single-channel range each step.
+     * <p>Package-private so {@link Screen#applyImageRebuildingPalette} can reuse it when quantising a
+     * background's sub-palettes.
      */
-    private static java.util.List<Color> medianCut(java.util.List<int[]> colors, int count)
+    static java.util.List<Color> medianCut(java.util.List<int[]> colors, int count)
     {
         java.util.List<Color> out = new ArrayList<>();
         if (count < 1) count = 1;

@@ -24,6 +24,8 @@ import io.github.turtleisaac.nds4j.framework.MemBuf;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -231,9 +233,9 @@ public final class ModelBuilder
     // Builds the empty (untextured) material set: no materials, empty tex/pltt dictionaries.
     private static byte[] emptyMaterialSet()
     {
-        byte[] matDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
-        byte[] texDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
-        byte[] plttDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
+        byte[] matDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
+        byte[] texDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
+        byte[] plttDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
         int ofsTexDict = 4 + matDict.length, ofsPltDict = ofsTexDict + texDict.length;
         byte[] matSet = new byte[ofsPltDict + plttDict.length];
         u16(matSet, 0, ofsTexDict);
@@ -258,7 +260,7 @@ public final class ModelBuilder
                                        int posScale, float[] boxMin, float[] boxMax, int boxPosScale,
                                        byte[] matSet, byte[] sbc)
     {
-        return assembleMdl0(modelName, List.of(dl), List.of("shape0"), countMaterials(matSet), numVertex,
+        return assembleMdl0(modelName, Arrays.asList(dl), Arrays.asList("shape0"), countMaterials(matSet), numVertex,
                 numTriangle, posScale, boxMin, boxMax, boxPosScale, matSet, sbc);
     }
 
@@ -278,7 +280,7 @@ public final class ModelBuilder
                                        byte[] matSet, byte[] sbc)
     {
         int shapeCount = dls.size();
-        byte[] nodeDict = serialize(G3dDictionary.build(List.of("node0"), List.of(rec4(40)), 4));
+        byte[] nodeDict = serialize(G3dDictionary.build(Arrays.asList("node0"), Arrays.asList(rec4(40)), 4));
         byte[] nodeData = {0x07, 0x00, 0x00, 0x10}; // flags 7 (identity node): skip t/r/s, rotation[0][0]=1.0
         int nodeSetLen = nodeDict.length + nodeData.length;
         int matSetLen = matSet.length;
@@ -337,8 +339,8 @@ public final class ModelBuilder
         int dlPos = ofsShp + dlBase;
         for (byte[] d : dls) { System.arraycopy(d, 0, model, dlPos, d.length); dlPos += d.length; }
 
-        int modelStart = 8 + serialize(G3dDictionary.build(List.of(modelName), List.of(rec4(0)), 4)).length;
-        byte[] modelDict = serialize(G3dDictionary.build(List.of(modelName), List.of(rec4(modelStart)), 4));
+        int modelStart = 8 + serialize(G3dDictionary.build(Arrays.asList(modelName), Arrays.asList(rec4(0)), 4)).length;
+        byte[] modelDict = serialize(G3dDictionary.build(Arrays.asList(modelName), Arrays.asList(rec4(modelStart)), 4));
         int mdl0Len = (modelStart + model.length + 3) & ~3;
         byte[] mdl0 = new byte[mdl0Len];
         System.arraycopy("MDL0".getBytes(StandardCharsets.US_ASCII), 0, mdl0, 0, 4);
@@ -367,8 +369,8 @@ public final class ModelBuilder
         long texImageParam = ((long) 7 << 26) | ((long) widthSel << 20) | ((long) heightSel << 23);
         byte[] texRecord = new byte[8];
         u32(texRecord, 0, texImageParam);
-        byte[] texDict = serialize(G3dDictionary.build(List.of(name), List.of(texRecord), 8));
-        byte[] plttDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
+        byte[] texDict = serialize(G3dDictionary.build(Arrays.asList(name), Arrays.asList(texRecord), 8));
+        byte[] plttDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
 
         int headerSize = 0x3C;
         int texOfsDict = headerSize;
@@ -419,7 +421,7 @@ public final class ModelBuilder
         }
         byte[] data = texData.toByteArray();
         byte[] texDict = serialize(G3dDictionary.build(names, records, 8));
-        byte[] plttDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
+        byte[] plttDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
 
         int headerSize = 0x3C;
         int texOfsDict = headerSize;
@@ -450,7 +452,7 @@ public final class ModelBuilder
         for (int i = 0; i < n; i++) dummy.add(rec4(0));
         int matDictLen = serialize(G3dDictionary.build(matNames, dummy, 4)).length;
         int texDictLen = serialize(G3dDictionary.build(texNames, dummy, 4)).length;
-        int plttDictLen = serialize(G3dDictionary.build(List.of(), List.of(), 4)).length;
+        int plttDictLen = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4)).length;
 
         int structsBase = 4 + matDictLen;
         int matStructLen = 0x18;
@@ -481,7 +483,7 @@ public final class ModelBuilder
         }
         System.arraycopy(serialize(G3dDictionary.build(matNames, matRecords, 4)), 0, matSet, 4, matDictLen);
         System.arraycopy(serialize(G3dDictionary.build(texNames, texRecords, 4)), 0, matSet, ofsTexDict, texDictLen);
-        System.arraycopy(serialize(G3dDictionary.build(List.of(), List.of(), 4)), 0, matSet, ofsPltDict, plttDictLen);
+        System.arraycopy(serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4)), 0, matSet, ofsPltDict, plttDictLen);
         return matSet;
     }
 
@@ -491,9 +493,9 @@ public final class ModelBuilder
     private static byte[] buildTexturedMaterialSet(String matName, String texName, int texW, int texH)
     {
         // Measure dictionary sizes first (fixed by their record counts) so the offsets are exact.
-        int matDictLen = serialize(G3dDictionary.build(List.of(matName), List.of(rec4(0)), 4)).length;
-        int texDictLen = serialize(G3dDictionary.build(List.of(texName), List.of(rec4(0)), 4)).length;
-        int plttDictLen = serialize(G3dDictionary.build(List.of(), List.of(), 4)).length;
+        int matDictLen = serialize(G3dDictionary.build(Arrays.asList(matName), Arrays.asList(rec4(0)), 4)).length;
+        int texDictLen = serialize(G3dDictionary.build(Arrays.asList(texName), Arrays.asList(rec4(0)), 4)).length;
+        int plttDictLen = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4)).length;
 
         int structOfs = 4 + matDictLen;
         int matStructLen = 0x18;                 // through texImageParam at +0x14
@@ -506,7 +508,7 @@ public final class ModelBuilder
         u16(matSet, 0, ofsTexDict);
         u16(matSet, 2, ofsPltDict);
 
-        byte[] matDict = serialize(G3dDictionary.build(List.of(matName), List.of(rec4(structOfs)), 4));
+        byte[] matDict = serialize(G3dDictionary.build(Arrays.asList(matName), Arrays.asList(rec4(structOfs)), 4));
         System.arraycopy(matDict, 0, matSet, 4, matDict.length);
 
         // material struct: repeat S/T so UVs in [0,texSize] tile; format/size mirror the texture (ignored
@@ -519,9 +521,9 @@ public final class ModelBuilder
 
         // texture->material binding: entry = listOffset (bits 0-15) | listLen (bits 16-23); list = [matIdx].
         long texEntry = (indexListOfs & 0xFFFFL) | (1L << 16);
-        byte[] texDict = serialize(G3dDictionary.build(List.of(texName), List.of(rec4(texEntry)), 4));
+        byte[] texDict = serialize(G3dDictionary.build(Arrays.asList(texName), Arrays.asList(rec4(texEntry)), 4));
         System.arraycopy(texDict, 0, matSet, ofsTexDict, texDict.length);
-        byte[] plttDict = serialize(G3dDictionary.build(List.of(), List.of(), 4));
+        byte[] plttDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
         System.arraycopy(plttDict, 0, matSet, ofsPltDict, plttDict.length);
         matSet[indexListOfs] = 0; // material index 0
 
