@@ -659,7 +659,13 @@ public class NintendoDsRom
 
         // DSi-enhanced: append the preserved TWL data region (ARM9i/ARM7i binaries + digest hash tables) at
         // its original absolute offset, so the extended-header pointers stay valid and the ROM keeps its DSi
-        // content instead of it being dropped
+        // content instead of it being dropped.
+        //
+        // FUTURE (low priority, cosmetic): after editing NTR files the digest hash tables (HMAC-SHA1 over the
+        // digest region) and the RSA header signature go stale. Regenerating the digests needs the 64-byte DSi
+        // digest HMAC key (in the Launcher firmware, not public); and even then the RSA signature over the
+        // master hash is unforgeable. Neither is checked in NDS-mode / flashcart / emulator play, so this is
+        // deliberately not done. See the dsi-enhanced-rom-support notes for the algorithm + validation recipe.
         if (dsi && dsiRegion.length > 0)
         {
             if (writer.getPosition() > dsiRegionOffset)
