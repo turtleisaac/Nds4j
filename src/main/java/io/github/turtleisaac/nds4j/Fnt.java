@@ -40,7 +40,7 @@ public class Fnt
 
         public Folder()
         {
-            this.folders = new HashMap<>();
+            this.folders = new LinkedHashMap<>(); // preserve FNT read order so save() reproduces it byte-exactly
             this.files = new ArrayList<>();
             this.firstId = 0;
             this.name = "";
@@ -48,7 +48,7 @@ public class Fnt
 
         public Folder(String name)
         {
-            this.folders = new HashMap<>();
+            this.folders = new LinkedHashMap<>(); // preserve FNT read order so save() reproduces it byte-exactly
             this.files = new ArrayList<>();
             this.firstId = 0;
             this.name = name;
@@ -57,9 +57,9 @@ public class Fnt
         public Folder(HashMap<String, Folder> folders, ArrayList<String> files, int firstId)
         {
             if (folders != null)
-                this.folders = new HashMap<>(folders);
+                this.folders = new LinkedHashMap<>(folders);
             else
-                this.folders = new HashMap<>();
+                this.folders = new LinkedHashMap<>(); // preserve FNT read order so save() reproduces it byte-exactly
 
             if (files != null)
                 this.files = new ArrayList<>(files);
