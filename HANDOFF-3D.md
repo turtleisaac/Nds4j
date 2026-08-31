@@ -735,3 +735,32 @@ green** (the sub-palette renderer fix does not touch `save()`). The write-back's
 `applyImage` → render is pixel-identical** on real retail bundles (found by scanning NARCs for a coherent
 NCER/NCGR/NCLR or NSCR/NCGR/NCLR set, as `CrossLayerRenderingTest` does). Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
+
+---
+
+## 12. Audio (SDAT) support — added 2026-08-29
+
+Outside the 3D/2D scope but the current Nds4j work: a new package
+`io.github.turtleisaac.nds4j.sound` brings **NDS audio (SDAT)** to the same bar as the rest of the
+library — byte-exact container round-trip, pure-JVM decode, and a headless renderer. References: **ndspy**,
+**GBATEK**, lowlines. Full detail (format layouts, offsets, correctness numbers, gotchas) lives in the
+memory note **`nds4j-audio-sdat-support`**; the short version:
+
+- **`SoundArchive` (SDAT)** — container (SYMB/INFO/FAT/FILE), named embedded files, INFO records.
+  **6/6 retail SDATs byte-exact** (incl. White2's 89 MB). SDAT is a top-level packed ROM file (magic
+  `SDAT`), not inside a NARC.
+- **`Wave`/`WaveArchive` (SWAV/SWAR)** — PCM8/PCM16/**IMA-ADPCM** → 16-bit PCM (`Adpcm` shared step
+  machine). Platinum `WAVE_ARC_PV*` = Pokémon cries.
+- **`Stream` (STRM)** — block-interleaved multi-channel stream. White2 `STRM_TITLE` = 112 s stereo.
+- **`InstrumentBank` (SBNK)** — single/drum-set/key-split instruments, `resolve(program,note)`.
+  **521/521 byte-exact.** *Trap:* the BANK INFO record is **12 bytes** — `u16 fileId`, `u16 unknown`,
+  then the 4 `u16` waveArc slots (read them at offset 4, not 2).
+- **`Sequence`/`SequenceArchive` (SSEQ/SSAR)** — MIDI-like bytecode. **1013/1013 SSEQ byte-exact.**
+- **`SequencePlayer`** — SSEQ+SBNK+SWAR **software synth → stereo PCM** (a *render*, like
+  `SoftwareRenderer`, not a round-trip). `forSequence(sdat, i)` is the one-call entry point.
+  16-voice cap + `tanh` soft-limiter (the raw polyphonic sum clips hard without it).
+- **`WavFile`** (pure-JVM RIFF writer, CheerpJ-safe), **`WaveformRenderer`** (headless envelope image).
+
+Tests: `src/test/java/.../sound/{SoundArchiveTest,SequencePlayerTest}.java` (ROM-gated). Whole suite green.
+**Same Java-8-clean rule as §11a** (NitroViewer/CheerpJ). Rendered/exported checkpoints (waveform PNGs +
+`.wav`) written to `g3d_out/` and the workspace root. This feeds NitroViewer's planned audio browser/preview.
