@@ -186,8 +186,138 @@ public class Wave
         return (loopStartWords + lengthWords) * perWord;
     }
     public int getLengthWords() { return lengthWords; }
-    /** @return number of decoded PCM samples this wave yields. */
-    public int getSampleCount() { return decode().length; }
+    /** @return number of decoded PCM samples this wave yields (from the encoded size, no decode). */
+    public int getSampleCount()
+    {
+        switch (waveType)
+        {
+            case PCM8:  return sampleData.length;
+            case PCM16: return sampleData.length / 2;
+            case ADPCM: return sampleData.length < 4 ? 0 : (sampleData.length - 4) * 2 + 1;
+            default:    return decode().length;
+        }
+    }
+
+    /** @return the encoded sample payload (no 12-byte info struct). */
+    public byte[] getSampleData() { return sampleData; }
+
+    /**
+     * Build a wave from signed 16-bit mono PCM, encoding it as {@code waveType} (PCM8 / PCM16 / ADPCM).
+     * {@code loopStartSample} is ignored when {@code loops} is false; when looping, 0 means the whole
+     * sample loops.
+     */
+    public static Wave fromPcm(short[] samples, int sampleRate, boolean loops, int loopStartSample, int waveType)
+    {
+        if (samples == null || samples.length == 0)
+            throw new IllegalArgumentException("wave has no samples");
+        if (sampleRate < 1)
+            throw new IllegalArgumentException("sample rate must be positive");
+        if (waveType != PCM8 && waveType != PCM16 && waveType != ADPCM)
+            throw new IllegalArgumentException("unknown wave type " + waveType);
+
+        byte[] encoded = encode(samples, waveType);
+        int totalWords = (encoded.length + 3) / 4;
+        byte[] padded = new byte[totalWords * 4];
+        System.arraycopy(encoded, 0, padded, 0, encoded.length);
+
+        int loopWords = 0;
+        if (loops)
+        {
+            int start = loopStartSample < 0 ? 0 : loopStartSample;
+            loopWords = sampleIndexToWords(waveType, start);
+            if (loopWords >= totalWords) loopWords = 0;
+        }
+        int lengthWords = totalWords - loopWords;
+        int timer = 16756991 / sampleRate;
+        if (timer < 1) timer = 1;
+        if (timer > 0xFFFF) timer = 0xFFFF;
+        return new Wave(waveType, loops, sampleRate, timer, loopWords, lengthWords, padded);
+    }
+
+    /** Encode a WAV file as a wave of {@code waveType}, looping the whole sample when {@code loops}. */
+    public static Wave fromWav(byte[] wavBytes, int waveType, boolean loops)
+    {
+        WavFile.Pcm pcm = WavFile.read(wavBytes);
+        return fromPcm(pcm.samples, pcm.sampleRate, loops, 0, waveType);
+    }
+
+    /** @return a standalone SWAV file ({@code "SWAV"} + NTR header + {@code "DATA"} + info + samples). */
+    public byte[] toSwavFile()
+    {
+        byte[] info = infoBytes();
+        byte[] out = new byte[0x24 + sampleData.length];
+        writeAscii(out, 0, "SWAV");
+        writeU16(out, 4, 0xFEFF);
+        writeU16(out, 6, 0x0100);
+        writeU32(out, 8, out.length);
+        writeU16(out, 12, 0x10);
+        writeU16(out, 14, 1);
+        writeAscii(out, 16, "DATA");
+        writeU32(out, 20, out.length - 16);
+        System.arraycopy(info, 0, out, 0x18, 12);
+        System.arraycopy(sampleData, 0, out, 0x24, sampleData.length);
+        return out;
+    }
+
+    /** @return the 12-byte SWAR info struct for this wave. */
+    byte[] infoBytes()
+    {
+        byte[] info = new byte[12];
+        info[0] = (byte) waveType;
+        info[1] = (byte) (loops ? 1 : 0);
+        writeU16(info, 2, sampleRate);
+        writeU16(info, 4, timer);
+        writeU16(info, 6, loopStartWords);
+        writeU32(info, 8, lengthWords);
+        return info;
+    }
+
+    private static byte[] encode(short[] samples, int waveType)
+    {
+        switch (waveType)
+        {
+            case PCM8:
+            {
+                byte[] out = new byte[samples.length];
+                for (int i = 0; i < samples.length; i++) out[i] = (byte) (samples[i] >> 8);
+                return out;
+            }
+            case PCM16:
+            {
+                byte[] out = new byte[samples.length * 2];
+                for (int i = 0; i < samples.length; i++) writeU16(out, i * 2, samples[i] & 0xFFFF);
+                return out;
+            }
+            case ADPCM:
+                return Adpcm.encode(samples);
+            default:
+                throw new IllegalArgumentException("unknown wave type " + waveType);
+        }
+    }
+
+    private static int sampleIndexToWords(int waveType, int sample)
+    {
+        if (waveType == PCM16) return sample / 2;
+        if (waveType == PCM8) return sample / 4;
+        return (sample + 7) / 8; // ADPCM: inverse of words*8 − 7
+    }
+
+    private static void writeAscii(byte[] b, int o, String s)
+    {
+        for (int i = 0; i < s.length(); i++) b[o + i] = (byte) s.charAt(i);
+    }
+    private static void writeU16(byte[] b, int o, int v)
+    {
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+    }
+    private static void writeU32(byte[] b, int o, int v)
+    {
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+        b[o + 2] = (byte) (v >> 16);
+        b[o + 3] = (byte) (v >> 24);
+    }
 
     static int u16(byte[] b, int o) { return (b[o] & 0xFF) | ((b[o + 1] & 0xFF) << 8); }
     static long u32(byte[] b, int o)

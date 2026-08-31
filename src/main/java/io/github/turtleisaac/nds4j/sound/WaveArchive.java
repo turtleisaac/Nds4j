@@ -75,7 +75,7 @@ public class WaveArchive extends GenericNtrFile
         }
     }
 
-    /** @return the archive reproduced byte-for-byte (preserved verbatim). */
+    /** @return the archive reproduced byte-for-byte (preserved verbatim until a wave is replaced). */
     public byte[] save() { return raw; }
 
     public int getWaveCount() { return waves.size(); }
@@ -83,4 +83,91 @@ public class WaveArchive extends GenericNtrFile
     public Wave getWave(int index) { return waves.get(index); }
 
     public List<Wave> getWaves() { return waves; }
+
+    /**
+     * Replace wave {@code index} and rebuild the archive. Other waves are preserved verbatim
+     * (their encoded payload, not a re-encode).
+     */
+    public void replaceWave(int index, Wave wave)
+    {
+        if (index < 0 || index >= waves.size())
+            throw new IndexOutOfBoundsException("wave " + index + " of " + waves.size());
+        if (wave == null) throw new IllegalArgumentException("wave is null");
+        waves.set(index, wave);
+        rebuild();
+    }
+
+    /**
+     * Import a PCM WAV over wave {@code index}, encoding it as that wave's existing type and
+     * keeping its loop flag (the whole imported sample loops when the original did).
+     */
+    public void importWav(int index, byte[] wavBytes)
+    {
+        Wave old = getWave(index);
+        replaceWave(index, Wave.fromWav(wavBytes, old.getWaveType(), old.loops()));
+    }
+
+    private void rebuild()
+    {
+        int n = waves.size();
+        int table = 0x3C + n * 4;
+        int pos = table;
+        byte[][] blobs = new byte[n][];
+        int[] offsets = new int[n];
+        for (int i = 0; i < n; i++)
+        {
+            Wave w = waves.get(i);
+            byte[] info = w.infoBytes();
+            byte[] data = w.getSampleData();
+            blobs[i] = new byte[info.length + data.length];
+            System.arraycopy(info, 0, blobs[i], 0, info.length);
+            System.arraycopy(data, 0, blobs[i], info.length, data.length);
+            offsets[i] = pos;
+            pos += blobs[i].length;
+        }
+
+        byte[] out = new byte[pos];
+        // preserve BOM/version/endianness from the original header when we have one
+        if (raw != null && raw.length >= 16)
+            System.arraycopy(raw, 0, out, 0, 16);
+        else
+        {
+            writeAscii(out, 0, "SWAR");
+            writeU16(out, 4, 0xFEFF);
+            writeU16(out, 6, 0x0100);
+            writeU16(out, 12, 0x10);
+            writeU16(out, 14, 1);
+        }
+        writeAscii(out, 0, "SWAR");
+        writeU32(out, 8, out.length);
+        writeAscii(out, 16, "DATA");
+        writeU32(out, 20, out.length - 16);
+        if (raw != null && raw.length >= 0x38)
+            System.arraycopy(raw, 0x18, out, 0x18, 32); // reserved
+        writeU32(out, 0x38, n);
+        for (int i = 0; i < n; i++)
+        {
+            writeU32(out, 0x3C + i * 4, offsets[i]);
+            System.arraycopy(blobs[i], 0, out, offsets[i], blobs[i].length);
+        }
+        raw = out;
+        fileSize = out.length;
+    }
+
+    private static void writeAscii(byte[] b, int o, String s)
+    {
+        for (int i = 0; i < s.length(); i++) b[o + i] = (byte) s.charAt(i);
+    }
+    private static void writeU16(byte[] b, int o, int v)
+    {
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+    }
+    private static void writeU32(byte[] b, int o, int v)
+    {
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+        b[o + 2] = (byte) (v >> 16);
+        b[o + 3] = (byte) (v >> 24);
+    }
 }

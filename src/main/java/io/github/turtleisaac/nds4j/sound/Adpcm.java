@@ -56,4 +56,52 @@ final class Adpcm
         if (index > 88) index = 88;
         return new int[] { predictor, index };
     }
+
+    /**
+     * Encode signed 16-bit PCM as DS IMA-ADPCM: a 4-byte seed (predictor + step index) followed by
+     * packed nibbles (low nibble first), matching {@link Wave}'s decoder.
+     */
+    static byte[] encode(short[] samples)
+    {
+        if (samples == null || samples.length == 0)
+            return new byte[] { 0, 0, 0, 0 };
+        int predictor = samples[0];
+        int index = 0;
+        int rest = samples.length - 1;
+        byte[] out = new byte[4 + (rest + 1) / 2];
+        out[0] = (byte) predictor;
+        out[1] = (byte) (predictor >> 8);
+        out[2] = 0;
+        out[3] = 0;
+        int o = 4;
+        for (int i = 0; i < rest; i += 2)
+        {
+            int[] r0 = bestNibble(predictor, index, samples[1 + i]);
+            predictor = r0[0]; index = r0[1];
+            int n0 = r0[2];
+            int n1 = 0;
+            if (i + 1 < rest)
+            {
+                int[] r1 = bestNibble(predictor, index, samples[2 + i]);
+                predictor = r1[0]; index = r1[1];
+                n1 = r1[2];
+            }
+            out[o++] = (byte) (n0 | (n1 << 4));
+        }
+        return out;
+    }
+
+    /** Standard greedy IMA nibble: sign + 3 magnitude bits against the current step. */
+    private static int[] bestNibble(int predictor, int index, int target)
+    {
+        int st = STEP[index];
+        int diff = target - predictor;
+        int nibble = 0;
+        if (diff < 0) { nibble = 8; diff = -diff; }
+        if (diff >= st) { nibble |= 4; diff -= st; }
+        if (diff >= (st >> 1)) { nibble |= 2; diff -= st >> 1; }
+        if (diff >= (st >> 2)) nibble |= 1;
+        int[] r = step(predictor, index, nibble);
+        return new int[] { r[0], r[1], nibble };
+    }
 }

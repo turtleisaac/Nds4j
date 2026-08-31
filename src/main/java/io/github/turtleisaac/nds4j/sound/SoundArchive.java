@@ -274,7 +274,7 @@ public class SoundArchive extends GenericNtrFile
     {
         switch (type)
         {
-            case SEQUENCE: case BANK: case WAVE_ARCHIVE: case STREAM:
+            case SEQUENCE: case SEQUENCE_ARCHIVE: case BANK: case WAVE_ARCHIVE: case STREAM:
                 byte[] r = getInfoRecord(type, index);
                 return (r == null) ? -1 : (r[0] & 0xFF) | ((r[1] & 0xFF) << 8);
             default:
@@ -307,5 +307,105 @@ public class SoundArchive extends GenericNtrFile
         for (int i = 0; i < 4; i++)          // fileId(u16), unknown(u16), then 4x waveArc(u16)
             out[i] = (r[4 + i * 2] & 0xFF) | ((r[5 + i * 2] & 0xFF) << 8);
         return out;
+    }
+
+    /**
+     * Replace embedded FAT file {@code fatIndex} and rebuild the FAT + FILE blocks. SYMB and INFO
+     * are preserved (they don't carry file sizes). Files are packed 32-byte-aligned from the
+     * archive start, matching retail SDATs.
+     */
+    public void replaceFile(int fatIndex, byte[] newBytes)
+    {
+        if (newBytes == null) throw new IllegalArgumentException("file bytes are null");
+        int n = fatEntryOffset.length;
+        if (fatIndex < 0 || fatIndex >= n)
+            throw new IndexOutOfBoundsException("FAT index " + fatIndex + " of " + n);
+        byte[][] files = new byte[n][];
+        for (int i = 0; i < n; i++)
+            files[i] = (i == fatIndex) ? newBytes : getFileData(i);
+        rebuildFiles(files);
+    }
+
+    /**
+     * Import a PCM WAV over wave {@code waveIndex} of wave-archive {@code waveArchiveIndex}. The
+     * wave is re-encoded as that slot's existing type (PCM8 / PCM16 / ADPCM) so instrument banks
+     * keep pointing at a sample they can play; the whole imported sample loops when the original did.
+     */
+    public void importWav(int waveArchiveIndex, int waveIndex, byte[] wavBytes)
+    {
+        byte[] swarBytes = getFileFor(RecordType.WAVE_ARCHIVE, waveArchiveIndex);
+        if (swarBytes == null || swarBytes.length < 4)
+            throw new IllegalArgumentException("no wave archive at index " + waveArchiveIndex);
+        WaveArchive swar = WaveArchive.fromBytes(swarBytes);
+        swar.importWav(waveIndex, wavBytes);
+        int fid = getFileId(RecordType.WAVE_ARCHIVE, waveArchiveIndex);
+        if (fid < 0) throw new IllegalStateException("wave archive " + waveArchiveIndex + " has no FAT file");
+        replaceFile(fid, swar.save());
+    }
+
+    private void rebuildFiles(byte[][] files)
+    {
+        int n = files.length;
+        int fileOff = (int) fileOffset;
+        // "FILE" + size + count, then pad so the first file is 32-byte aligned from archive start
+        int pos = fileOff + 12;
+        int align = 32;
+        int pad = (align - (pos % align)) % align;
+        pos += pad;
+
+        int[] newOff = new int[n];
+        int[] newSize = new int[n];
+        for (int i = 0; i < n; i++)
+        {
+            newOff[i] = pos;
+            newSize[i] = files[i].length;
+            pos += files[i].length;
+            pos += (align - (pos % align)) % align;
+        }
+        int fileBlockSize = pos - fileOff;
+
+        byte[] out = new byte[pos];
+        System.arraycopy(raw, 0, out, 0, fileOff); // header + SYMB + INFO + FAT (FAT rewritten below)
+
+        // FAT: keep "FAT " + block size + count; rewrite offsets/sizes; copy reserved 8 bytes
+        int fatPos = (int) fatOffset + 12;
+        for (int i = 0; i < n; i++)
+        {
+            writeU32(out, fatPos, newOff[i]);
+            writeU32(out, fatPos + 4, newSize[i]);
+            System.arraycopy(raw, (int) fatOffset + 12 + i * 16 + 8, out, fatPos + 8, 8);
+            fatPos += 16;
+        }
+
+        writeAscii(out, fileOff, "FILE");
+        writeU32(out, fileOff + 4, fileBlockSize);
+        writeU32(out, fileOff + 8, n);
+        for (int i = 0; i < n; i++)
+            System.arraycopy(files[i], 0, out, newOff[i], files[i].length);
+
+        writeU32(out, 8, out.length);            // NTR fileSize
+        writeU32(out, 0x2C, fileBlockSize);      // FILE block size in the header table
+
+        raw = out;
+        fileSize = fileBlockSize; // FILE block size (shadows GenericNtrFile.fileSize)
+        fatEntryOffset = new long[n];
+        fatEntrySize = new long[n];
+        for (int i = 0; i < n; i++)
+        {
+            fatEntryOffset[i] = newOff[i];
+            fatEntrySize[i] = newSize[i];
+        }
+    }
+
+    private static void writeAscii(byte[] b, int o, String s)
+    {
+        for (int i = 0; i < s.length(); i++) b[o + i] = (byte) s.charAt(i);
+    }
+    private static void writeU32(byte[] b, int o, int v)
+    {
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+        b[o + 2] = (byte) (v >> 16);
+        b[o + 3] = (byte) (v >> 24);
     }
 }
