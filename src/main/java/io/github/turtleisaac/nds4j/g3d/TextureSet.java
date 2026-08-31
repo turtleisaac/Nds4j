@@ -32,7 +32,7 @@ import java.util.List;
  * An object representation of an NSBTX file (a Nitro 3D texture archive, magic {@code BTX0}).
  * <p>
  * An NSBTX holds a single {@code TEX0} block: a set of named {@link Texture}s and named
- * {@link Palette}s (both indexed by {@link G3dDictionary}), plus the raw texel and colour data they
+ * {@link Palette}s (both indexed by {@link G3dDictionary}), plus the raw texel and color data they
  * point into. The same {@code TEX0} block also appears embedded inside an NSBMD model; this class
  * reads the standalone form. Textures name their pixel format, size and data location through a
  * 32-bit {@code texImageParam}; palettes are shared, so a texture is decoded against a chosen palette.
@@ -248,7 +248,7 @@ public class TextureSet extends G3dFile
 
     /**
      * Decodes a texture to an image, choosing the palette whose name best matches (the same name, else
-     * the palette at the same index, else the first). Direct-colour textures ignore the palette.
+     * the palette at the same index, else the first). Direct-color textures ignore the palette.
      * @param texture a {@link Texture} from this archive
      * @return a <code>BufferedImage</code>
      */
@@ -272,7 +272,7 @@ public class TextureSet extends G3dFile
     /**
      * Decodes a texture to an image against a specific palette.
      * @param texture a {@link Texture}
-     * @param palette a {@link Palette} (may be null for direct-colour textures)
+     * @param palette a {@link Palette} (may be null for direct-color textures)
      * @return a <code>BufferedImage</code>
      */
     public BufferedImage getImage(Texture texture, Palette palette)
@@ -341,11 +341,11 @@ public class TextureSet extends G3dFile
     /**
      * Encodes an image back into a texture's on-disk texel bytes &mdash; the writer-side counterpart to
      * {@link #getImage(Texture, Palette)}, for source&rarr;NSB* conversion. Paletted formats map each
-     * pixel to its palette index (colour 0 handles transparency); direct colour packs {@code BGR555}.
-     * Re-encoding a decoded texture reproduces its bytes exactly when the palette colours are distinct.
+     * pixel to its palette index (color 0 handles transparency); direct color packs {@code BGR555}.
+     * Re-encoding a decoded texture reproduces its bytes exactly when the palette colors are distinct.
      * @param img the image (its size must match the texture)
      * @param texture the target texture (for format/size)
-     * @param palette the palette to index against (ignored for direct colour)
+     * @param palette the palette to index against (ignored for direct color)
      * @return the encoded texel bytes, or null for an unsupported format (A3I5/A5I3/compressed 4x4)
      */
     /**
@@ -377,7 +377,7 @@ public class TextureSet extends G3dFile
         int w = img.getWidth(), h = img.getHeight();
         boolean color0Transparent = texture.isColor0Transparent();
         int colors = 1 << bpp;
-        // reverse map colour -> lowest index (skip index 0 when it means "transparent")
+        // reverse map color -> lowest index (skip index 0 when it means "transparent")
         java.util.Map<Integer, Integer> byColor = new java.util.HashMap<>();
         for (int i = colors - 1; i >= (color0Transparent ? 1 : 0); i--)
             byColor.put(colorValue(palette, i) & 0xFFFFFF, i);
@@ -489,7 +489,7 @@ public class TextureSet extends G3dFile
                 int blockNum = by * blocksWide + bx;
                 int texelOff = texelBase + blockNum * 4;
                 int control = (tex0[idxBase + blockNum * 2] & 0xFF) | ((tex0[idxBase + blockNum * 2 + 1] & 0xFF) << 8);
-                int paletteBase = (control & 0x3FFF) << 1; // in colours, within the palette region
+                int paletteBase = (control & 0x3FFF) << 1; // in colors, within the palette region
                 int mode = (control >> 14) & 3;
 
                 for (int ty = 0; ty < 4; ty++)
@@ -508,7 +508,7 @@ public class TextureSet extends G3dFile
 
     private int comp4x4Color(Palette palette, int paletteBase, int index, int mode)
     {
-        // Colours are read relative to the palette's own base; the block adds its paletteBase on top.
+        // Colors are read relative to the palette's own base; the block adds its paletteBase on top.
         int c0 = colorValue(palette, paletteBase + 0);
         int c1 = colorValue(palette, paletteBase + 1);
         switch (mode)
@@ -556,7 +556,7 @@ public class TextureSet extends G3dFile
 
     /**
      * Reads a palette entry as {@code 0xRRGGBB}. @param palette a palette from this set @param index the
-     * colour index @return the colour as 24-bit RGB
+     * color index @return the color as 24-bit RGB
      */
     public int getPaletteColor(Palette palette, int index)
     {
@@ -564,15 +564,15 @@ public class TextureSet extends G3dFile
     }
 
     /**
-     * Recolours a palette entry in place &mdash; the writer-side edit that "repaints" a texture. The
-     * {@code 0xRRGGBB} colour is quantised to the DS's 15-bit {@code BGR555} and written straight into the
+     * Recolors a palette entry in place &mdash; the writer-side edit that "repaints" a texture. The
+     * {@code 0xRRGGBB} color is quantised to the DS's 15-bit {@code BGR555} and written straight into the
      * live {@code TEX0} block, so it shows immediately in a re-decoded {@link #getImage} and is emitted by
      * the owning container's {@code save()} (this {@link TextureSet} for a standalone NSBTX, or the
      * {@link ModelSet} whose embedded {@code TEX0} this views). The edit is same-size, so an unedited file
      * still round-trips byte-for-byte.
      * @param palette a palette from this set
-     * @param index the colour index to change
-     * @param rgb the new colour as {@code 0xRRGGBB}
+     * @param index the color index to change
+     * @param rgb the new color as {@code 0xRRGGBB}
      */
     public void setPaletteColor(Palette palette, int index, int rgb)
     {
@@ -629,7 +629,7 @@ public class TextureSet extends G3dFile
         public int getHeight() { return 8 << ((int) (texImageParam >> 23) & 7); }
         /** @return this texture's NNS format id (1-7) */
         public int getFormat() { return (int) (texImageParam >> 26) & 7; }
-        /** @return whether palette colour 0 is treated as transparent */
+        /** @return whether palette color 0 is treated as transparent */
         public boolean isColor0Transparent() { return ((texImageParam >> 29) & 1) != 0; }
         /** @return the byte offset of this texture's data within its texel region */
         public int getDataOffset() { return (int) (texImageParam & 0xFFFF) << 3; }
@@ -641,7 +641,7 @@ public class TextureSet extends G3dFile
         }
     }
 
-    /** A named palette: a start offset into the archive's shared colour data. */
+    /** A named palette: a start offset into the archive's shared color data. */
     public class Palette
     {
         private final String name;

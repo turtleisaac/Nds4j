@@ -69,8 +69,8 @@ stack can **author** files from scratch and **preview** them, all in pure Java (
 * **Preview** &mdash; `g3d.SoftwareRenderer` (headless rasteriser), `g3d.ModelViewer`/`ModelViewerFrame` (Swing
   orbit/scrub/play), `g3d.NitroAnimation` (composes all four animation tracks), `g3d.AnimatedGif`, and
   `g3d.ParticleRenderer` (plays an `SPA` move effect).
-* **Edit** &mdash; `G3dFile.writeBlockU8/U16` for byte-valid in-place edits (e.g. `NSBMA` colour/alpha keyframes,
-  `TextureSet.setPaletteColor` recolour incl. the embedded `TEX0`).
+* **Edit** &mdash; `G3dFile.writeBlockU8/U16` for byte-valid in-place edits (e.g. `NSBMA` color/alpha keyframes,
+  `TextureSet.setPaletteColor` recolor incl. the embedded `TEX0`).
 
 Likely future supported formats
 --------------------------------

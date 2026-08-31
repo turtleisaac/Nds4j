@@ -20,6 +20,7 @@
 package io.github.turtleisaac.nds4j.sound;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -30,7 +31,7 @@ import java.util.List;
  * Timing matches {@link SequenceMidi} / {@link SequencePlayer}: 48 ticks per quarter, note-wait
  * honoured, counted loops unrolled (once, for a finite pass), infinite jumps ({@code 0x94}) stop
  * the track so the result is one play-through up to the loop point. Track-open / jump / call
- * offsets are file-absolute (GBATEK).
+ * offsets are indices into the event stream ({@link Sequence#getEventData()}), same as the player.
  */
 public final class SequenceNotes
 {
@@ -64,19 +65,26 @@ public final class SequenceNotes
         public final int ticks;
         public final int tempo;
         public final int trackCount;
+        /** Tick the {@code 0x94} jump returns to, or -1 if the sequence has no loop. */
+        public final int loopStartTick;
+        /** Tick of the first playthrough's {@code 0x94} jump, or -1 if none. */
+        public final int loopEndTick;
 
-        public Result(List<Note> notes, int ticks, int tempo, int trackCount)
+        public Result(List<Note> notes, int ticks, int tempo, int trackCount,
+                      int loopStartTick, int loopEndTick)
         {
             this.notes = notes;
             this.ticks = ticks;
             this.tempo = tempo;
             this.trackCount = trackCount;
+            this.loopStartTick = loopStartTick;
+            this.loopEndTick = loopEndTick;
         }
     }
 
     public static Result extract(Sequence sequence)
     {
-        Sim sim = new Sim(sequence.getRaw(), sequence.getEventDataOffset());
+        Sim sim = new Sim(sequence.getEventData());
         sim.run();
         return sim.result();
     }
@@ -102,13 +110,16 @@ public final class SequenceNotes
         int tempo = 120;
         int tick;
         int lastNoteTick;
+        int loopStartTick = -1;
+        int loopEndTick = -1;
+        final HashMap<Integer, Integer> firstTickAtPc = new HashMap<Integer, Integer>();
 
-        Sim(byte[] ev, int eventOff)
+        Sim(byte[] ev)
         {
             this.ev = ev;
             for (int i = 0; i < 16; i++) tracks[i] = new TrackVM();
             tracks[0].active = true;
-            tracks[0].pc = eventOff;
+            tracks[0].pc = 0;
         }
 
         Result result()
@@ -119,7 +130,10 @@ public final class SequenceNotes
             boolean[] saw = new boolean[16];
             for (int i = 0; i < notes.size(); i++) saw[notes.get(i).track] = true;
             for (int i = 0; i < 16; i++) if (saw[i] && i + 1 > used) used = i + 1;
-            return new Result(notes, Math.max(lastNoteTick, tick), tempo, used);
+            int end = Math.max(lastNoteTick, tick);
+            int ls = loopStartTick, le = loopEndTick;
+            if (le >= 0 && le <= ls) { ls = -1; le = -1; }
+            return new Result(notes, end, tempo, used, ls, le);
         }
 
         void run()
@@ -149,6 +163,8 @@ public final class SequenceNotes
         void exec(int id, TrackVM tr)
         {
             if (tr.pc < 0 || tr.pc >= ev.length) { tr.active = false; return; }
+            if (!firstTickAtPc.containsKey(Integer.valueOf(tr.pc)))
+                firstTickAtPc.put(Integer.valueOf(tr.pc), Integer.valueOf(tick));
             int op = ev[tr.pc++] & 0xFF;
             if (op < 0x80)
             {
@@ -179,10 +195,15 @@ public final class SequenceNotes
                     break;
                 }
                 case 0x94:
-                    // infinite whole-track loop: stop so the pass is finite (one play-through)
-                    readU24(tr);
-                    tr.active = false;
+                {
+                    int off = readU24(tr);
+                    Integer start = firstTickAtPc.get(Integer.valueOf(off));
+                    int sf = start != null ? start.intValue() : 0;
+                    if (loopStartTick < 0 || sf < loopStartTick) loopStartTick = sf;
+                    if (tick > loopEndTick) loopEndTick = tick;
+                    tr.active = false; // one play-through; the player wraps using loopStart/loopEnd
                     break;
+                }
                 case 0x95:
                 {
                     int off = readU24(tr);

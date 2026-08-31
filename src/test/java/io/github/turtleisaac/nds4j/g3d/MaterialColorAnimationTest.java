@@ -33,12 +33,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for {@link MaterialColorAnimationSet} (NSBMA / {@code BMA0}, material-colour animation). Like the
+ * Tests for {@link MaterialColorAnimationSet} (NSBMA / {@code BMA0}, material-color animation). Like the
  * other {@code NSB*} formats it must round-trip byte-for-byte over every matching file in the retail
- * ROMs, and its five colour tracks per material must decode and sample &mdash; validated both broadly
+ * ROMs, and its five color tracks per material must decode and sample &mdash; validated both broadly
  * (all files) and on a known effect ({@code demo_kusari}, whose alpha fades in from 0 to full).
  */
-@DisplayName("NSBMA (material-colour animation)")
+@DisplayName("NSBMA (material-color animation)")
 public class MaterialColorAnimationTest
 {
     private static String magic(byte[] d)
@@ -86,7 +86,7 @@ public class MaterialColorAnimationTest
                     int last = anim.getFrameCount() - 1;
                     for (MaterialColorAnimationSet.MaterialColor m : anim.getMaterials())
                     {
-                        // each colour track yields an in-range 24-bit RGB at both ends
+                        // each color track yields an in-range 24-bit RGB at both ends
                         for (MaterialColorAnimationSet.ColorChannel ch : new MaterialColorAnimationSet.ColorChannel[]{
                                 m.getDiffuse(), m.getAmbient(), m.getSpecular(), m.getEmission()})
                         {
@@ -106,7 +106,7 @@ public class MaterialColorAnimationTest
     }
 
     @Test
-    @DisplayName("demo_kusari: constant colours + a fading alpha ramp decode correctly")
+    @DisplayName("demo_kusari: constant colors + a fading alpha ramp decode correctly")
     void demoKusariAlphaFade()
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
@@ -121,7 +121,7 @@ public class MaterialColorAnimationTest
         assertThat(anim.getFrameCount()).isEqualTo(201);
 
         MaterialColorAnimationSet.MaterialColor mat = anim.getMaterials().get(0);
-        // the four colours are constant in this clip; alpha is an animated pulse: it fades in from 0 to
+        // the four colors are constant in this clip; alpha is an animated pulse: it fades in from 0 to
         // full (31), holds, then fades back out to 0 — a glowing chain.
         assertThat(mat.getDiffuse().isConstant()).isTrue();
         assertThat(mat.getAlpha().isConstant()).isFalse();

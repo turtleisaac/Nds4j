@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("NSCR back-write (applyImage)")
 public class ScreenBackWriteTest
 {
-    // A 32-colour palette split into two 16-colour sub-palettes; colours are distinct by red channel
+    // A 32-color palette split into two 16-color sub-palettes; colors are distinct by red channel
     // (0,8,16,… for indices 0..31), so a cell's sub-palette is unambiguous and matches are exact.
     private static Palette palette()
     {
@@ -65,7 +65,7 @@ public class ScreenBackWriteTest
         return t;
     }
 
-    // Paint an 8x8 cell into img at (px,py): pixel value v is drawn as palette colour subPal*16 + v.
+    // Paint an 8x8 cell into img at (px,py): pixel value v is drawn as palette color subPal*16 + v.
     private static void paintCell(BufferedImage img, Color[] colors, int px, int py, int[][] tile, int subPal, boolean hFlip, boolean vFlip)
     {
         for (int y = 0; y < 8; y++)
@@ -134,7 +134,7 @@ public class ScreenBackWriteTest
                 assertThat(rendered.getRGB(x, y) & 0xFFFFFF).isEqualTo(img.getRGB(x, y) & 0xFFFFFF);
     }
 
-    // Fill an 8x8 cell at (px,py) so all 16 of the given colours are used (each 4 times).
+    // Fill an 8x8 cell at (px,py) so all 16 of the given colors are used (each 4 times).
     private static void paintCell16(BufferedImage img, Color[] sub16, int px, int py)
     {
         for (int y = 0; y < 8; y++)
@@ -146,7 +146,7 @@ public class ScreenBackWriteTest
     @DisplayName("rebuilds a NEW multi-sub-palette NCLR (4bpp) and returns it, round-tripping exactly")
     void rebuildsMultiSubPalette()
     {
-        // Cell 0 uses 16 reds, cell 1 uses 16 greens — 32 distinct colours needing two 16-colour sub-palettes.
+        // Cell 0 uses 16 reds, cell 1 uses 16 greens — 32 distinct colors needing two 16-color sub-palettes.
         Color[] reds = new Color[16];
         Color[] greens = new Color[16];
         for (int i = 0; i < 16; i++)
@@ -164,7 +164,7 @@ public class ScreenBackWriteTest
         Screen.ImportResult result = screen.applyImageRebuildingPalette(img, template, 2, true);
 
         assertThat(result.palette.getNumColors()).isEqualTo(32); // two sub-palettes built
-        assertThat(result.unmatchedPixels).isEqualTo(0);         // exact fit, no colour loss
+        assertThat(result.unmatchedPixels).isEqualTo(0);         // exact fit, no color loss
         assertThat(screen.getPaletteIndex(0)).isEqualTo(0);      // cell 0 -> sub-palette 0 (reds)
         assertThat(screen.getPaletteIndex(1)).isEqualTo(1);      // cell 1 -> sub-palette 1 (greens)
 
@@ -177,10 +177,10 @@ public class ScreenBackWriteTest
     }
 
     @Test
-    @DisplayName("rebuilds a single 256-colour NCLR for 8bpp and round-trips exactly")
+    @DisplayName("rebuilds a single 256-color NCLR for 8bpp and round-trips exactly")
     void rebuilds8bppPalette()
     {
-        // 24 distinct colours across three cells — comfortably under 256.
+        // 24 distinct colors across three cells — comfortably under 256.
         BufferedImage img = new BufferedImage(24, 8, BufferedImage.TYPE_INT_RGB);
         for (int cell = 0; cell < 3; cell++)
             for (int y = 0; y < 8; y++)

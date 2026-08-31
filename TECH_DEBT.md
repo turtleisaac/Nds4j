@@ -20,7 +20,7 @@ textures and NCGR share one type.
 
 An adversarial review concluded **do not do this yet**, for concrete reasons:
 
-- Only 3 of 7 NSBTX formats are palette-indexed; alpha (A3I5/A5I3), direct-colour, and 4x4-compressed
+- Only 3 of 7 NSBTX formats are palette-indexed; alpha (A3I5/A5I3), direct-color, and 4x4-compressed
   can't be a paletted raster at all — their real common denominator is `BufferedImage`, which both
   formats already share.
 - Making `IndexedImage` stop `extends GenericNtrFile` is a **binary-breaking change** for a published
@@ -47,7 +47,7 @@ The formats that are pleasant to use expose a *domain* abstraction plus standard
 not just a 1:1 mirror of the byte layout:
 
 - NCGR -> `IndexedImage` (pixels, palette, `getImage()`, indexed-PNG in/out)
-- NCLR -> `Palette` (colours, PNG)
+- NCLR -> `Palette` (colors, PNG)
 - NSCR -> `Screen` (tile grid with flip/sub-palette accessors, composited `getImage()`)
 - NCER -> `CellBank` (assembled cell images, write-back to the NCGR)
 - NANR -> `CellAnimation` (frames/durations/transforms, rendered through NCER->NCGR)

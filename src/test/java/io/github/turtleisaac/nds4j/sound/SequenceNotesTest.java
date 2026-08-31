@@ -19,8 +19,13 @@
 
 package io.github.turtleisaac.nds4j.sound;
 
+import io.github.turtleisaac.nds4j.NintendoDsRom;
+import io.github.turtleisaac.nds4j.TestRoms;
+import io.github.turtleisaac.nds4j.sound.SoundArchive.RecordType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -65,6 +70,85 @@ public class SequenceNotesTest
         assertThat(r.notes.get(0).tick).isEqualTo(0);
         assertThat(r.notes.get(1).tick).isEqualTo(24);
         assertThat(r.notes.get(1).key).isEqualTo(62);
+    }
+
+    @Test
+    @DisplayName("0x93 track offsets are event-data indices, not file offsets")
+    void spawnedTrackUsesEventOffset()
+    {
+        // alloc t0+t1, open t1 at the byte after track 0's end, each track plays one note
+        byte[] ev = new byte[] {
+                (byte) 0xFE, 0x03, 0x00,
+                (byte) 0x93, 0x01, 16, 0, 0,
+                (byte) 0xC7, 0x00,
+                0x3C, 0x7F, 24,
+                (byte) 0x80, 24,
+                (byte) 0xFF,
+                (byte) 0xC7, 0x00,
+                0x40, 0x7F, 24,
+                (byte) 0x80, 24,
+                (byte) 0xFF
+        };
+        SequenceNotes.Result r = SequenceNotes.extract(sseq(ev));
+        assertThat(r.notes).hasSize(2);
+        assertThat(r.notes.get(0).track).isEqualTo(0);
+        assertThat(r.notes.get(0).key).isEqualTo(60);
+        assertThat(r.notes.get(1).track).isEqualTo(1);
+        assertThat(r.notes.get(1).key).isEqualTo(64);
+        assertThat(r.trackCount).isGreaterThanOrEqualTo(2);
+        assertThat(r.loopStartTick).isEqualTo(-1);
+    }
+
+    @Test
+    @DisplayName("0x94 records loop start/end ticks")
+    void loopJumpTicks()
+    {
+        byte[] ev = new byte[] {
+                (byte) 0xC7, 0x00,
+                0x3C, 0x7F, 24,
+                (byte) 0x80, 24,
+                (byte) 0x94, 2, 0, 0
+        };
+        SequenceNotes.Result r = SequenceNotes.extract(sseq(ev));
+        assertThat(r.loopStartTick).isEqualTo(0); // jump target is the note at tick 0
+        assertThat(r.loopEndTick).isEqualTo(24); // rest 24, then 0x94 (note-wait off)
+    }
+
+    @Test
+    @DisplayName("a multi-track retail SSEQ has notes on several tracks (HeartGold)")
+    void retailSongUsesSpawnedTracks()
+    {
+        NintendoDsRom rom = TestRoms.require("HeartGold.nds");
+        SoundArchive sdat = null;
+        for (int i = 0; i < rom.getNumFiles(); i++)
+        {
+            byte[] f = rom.getFile(i);
+            if (f.length >= 4 && new String(f, 0, 4, StandardCharsets.US_ASCII).equals("SDAT"))
+            {
+                sdat = SoundArchive.fromBytes(f);
+                break;
+            }
+        }
+        assertThat(sdat).isNotNull();
+        boolean found = false;
+        for (int i = 0; i < sdat.getRecordCount(RecordType.SEQUENCE); i++)
+        {
+            byte[] f = sdat.getFileFor(RecordType.SEQUENCE, i);
+            if (f == null || f.length < 200) continue;
+            SequenceNotes.Result r = SequenceNotes.extract(Sequence.fromBytes(f));
+            int[] per = new int[16];
+            for (int n = 0; n < r.notes.size(); n++) per[r.notes.get(n).track]++;
+            int tracksWithNotes = 0;
+            for (int t = 0; t < 16; t++) if (per[t] > 0) tracksWithNotes++;
+            if (tracksWithNotes >= 4 && r.notes.size() > 80)
+            {
+                assertThat(per[0]).as("track 0 still has notes").isGreaterThan(0);
+                assertThat(tracksWithNotes).as("spawned tracks must sound").isGreaterThanOrEqualTo(4);
+                found = true;
+                break;
+            }
+        }
+        assertThat(found).as("found a dense multi-track sequence").isTrue();
     }
 
     private static Sequence sseq(byte[] ev)

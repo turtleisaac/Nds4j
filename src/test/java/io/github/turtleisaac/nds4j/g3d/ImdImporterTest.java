@@ -90,7 +90,7 @@ public class ImdImporterTest
     void rockMatchesG3dcvtr() { assertByteExact("rock"); }
 
     @Test
-    @DisplayName("a non-billboard, vertex-coloured textured model matches g3dcvtr byte-for-byte")
+    @DisplayName("a non-billboard, vertex-colored textured model matches g3dcvtr byte-for-byte")
     void bookMatchesG3dcvtr() { assertByteExact("book"); }
 
     @Test

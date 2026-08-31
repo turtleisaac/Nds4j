@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests for {@link SoftwareRenderer}: the headless preview must actually draw a textured model &mdash;
- * produce an image with saturated, model-coloured pixels over the grey background.
+ * produce an image with saturated, model-colored pixels over the grey background.
  */
 @DisplayName("software renderer (headless preview)")
 public class SoftwareRendererTest
@@ -107,7 +107,7 @@ public class SoftwareRendererTest
                 if (sat > 40)
                     saturated++;
             }
-        assertThat(saturated).as("the rendered model should cover a meaningful, colourful area")
+        assertThat(saturated).as("the rendered model should cover a meaningful, colorful area")
                 .isGreaterThan(1000);
     }
 

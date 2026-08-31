@@ -95,7 +95,7 @@ public class AnimationWriterTest
     }
 
     @Test
-    @DisplayName("every retail NSBMA (material colour) re-encodes byte-for-byte")
+    @DisplayName("every retail NSBMA (material color) re-encodes byte-for-byte")
     void materialColorRoundTrip()
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");

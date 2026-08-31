@@ -43,7 +43,7 @@ import java.util.regex.Pattern;
  * {@code -eboth} ({@link #toNsbmdWithTextures()}) and {@code -etex} ({@link #toNsbtx()}). Coverage: multi-node
  * trees with full node local transforms (translation, non-uniform scale, and rotation &mdash; pivot-compressed
  * for principal axes, full 3&times;3 otherwise), multiple materials (grouped by shared texture/palette) and
- * multiple shapes, textured or vertex-coloured, billboard or not. The SBC render stream is a general node-tree
+ * multiple shapes, textured or vertex-colored, billboard or not. The SBC render stream is a general node-tree
  * walk with a matrix-stack store/restore allocator and a material stack, validated byte-for-byte against every
  * retail single- and two-node model and the great majority of deeper trees (the residual are complex skeletal
  * chains and a matrix-slot-numbering edge). The geometry, resource dictionaries and container are produced by
@@ -261,7 +261,7 @@ public final class ImdImporter
             texel[i] = (byte) word;
             texel[i + 1] = (byte) (word >> 8);
         }
-        // palette: each 4-hex-digit token is a BGR555 colour, stored little-endian
+        // palette: each 4-hex-digit token is a BGR555 color, stored little-endian
         String[] palTok = tagContent(imd, "tex_palette").trim().split("\\s+");
         byte[] palette = new byte[palTok.length * 2];
         for (int i = 0; i < palTok.length; i++)

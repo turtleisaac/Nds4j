@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests {@link CellBank#applyImage} — writing an edited assembled-cell image back into the NCGR (NCER
  * back-write). Renders a real cell, feeds the render straight back, and asserts a re-render is
- * pixel-identical (so the composition and its inverse agree, colours and sub-palettes included).
+ * pixel-identical (so the composition and its inverse agree, colors and sub-palettes included).
  */
 @DisplayName("NCER back-write (CellBank.applyImage)")
 public class CellBankBackWriteTest
@@ -154,7 +154,7 @@ public class CellBankBackWriteTest
             if (cellIndex < 0) continue;
 
             // Transparent render: index-0 pixels are transparent, so the rebuild (which reserves slot 0)
-            // round-trips exactly — opaque colours come back, transparent pixels stay transparent.
+            // round-trips exactly — opaque colors come back, transparent pixels stay transparent.
             BufferedImage rendered = bank.getTransparentNcerImage(cellIndex);
             CellBank.ImportResult res = bank.applyImageRebuildingPalette(cellIndex, rendered, ncgr, palette);
             assertThat(res.unmatchedPixels).isEqualTo(0);
@@ -167,7 +167,7 @@ public class CellBankBackWriteTest
                     int a = rendered.getRGB(x, y), b = again.getRGB(x, y);
                     boolean aT = (a >>> 24) == 0, bT = (b >>> 24) == 0;
                     if (aT || bT) assertThat(bT).as("transparency at (%d,%d)", x, y).isEqualTo(aT);
-                    else assertThat(b & 0xFFFFFF).as("colour at (%d,%d)", x, y).isEqualTo(a & 0xFFFFFF);
+                    else assertThat(b & 0xFFFFFF).as("color at (%d,%d)", x, y).isEqualTo(a & 0xFFFFFF);
                 }
             exercised = true;
         }

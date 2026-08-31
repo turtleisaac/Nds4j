@@ -37,7 +37,7 @@ import java.util.Objects;
  * An NSCR ("RCSN") is a background layer: a grid of 8x8 tile cells laid out left-to-right,
  * top-to-bottom. Each cell is a 16-bit entry that names a tile in a companion {@link IndexedImage}
  * (NCGR), the palette to draw it with, and whether to flip it. The screen is meaningless without
- * that NCGR and an {@link Palette} (NCLR) to supply the colours.
+ * that NCGR and an {@link Palette} (NCLR) to supply the colors.
  * <p>
  * Entries are exposed as a raw {@code short[]}; the bitfields of an individual entry can be read and
  * written with {@link #getTileIndex(int)}, {@link #getPaletteIndex(int)},
@@ -48,7 +48,7 @@ public class Screen extends GenericNtrFile
     private int width;
     private int height;
 
-    // The 32-bit word following the dimensions in the NRCS block. It selects the screen's colour mode
+    // The 32-bit word following the dimensions in the NRCS block. It selects the screen's color mode
     // and format (retail files use a handful of distinct values); nothing here needs to interpret it,
     // so it is preserved raw to keep an unedited screen byte-for-byte identical.
     private long screenFormat;
@@ -57,7 +57,7 @@ public class Screen extends GenericNtrFile
     //   bits 0-9   tile index into the companion NCGR
     //   bit 10     horizontal flip
     //   bit 11     vertical flip
-    //   bits 12-15 palette index (16-colour sub-palette)
+    //   bits 12-15 palette index (16-color sub-palette)
     private short[] entries;
 
     private static final int TILE_INDEX_MASK = 0x03FF;
@@ -108,7 +108,7 @@ public class Screen extends GenericNtrFile
      * {@link #applyImage} without an existing NSCR to start from.
      * @param width the screen width in pixels (a multiple of 8)
      * @param height the screen height in pixels (a multiple of 8)
-     * @param screenFormat the raw 32-bit colour-mode/format word to store (see {@link #getScreenFormat()})
+     * @param screenFormat the raw 32-bit color-mode/format word to store (see {@link #getScreenFormat()})
      */
     public Screen(int width, int height, long screenFormat)
     {
@@ -226,7 +226,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Gets the raw 32-bit screen format/colour-mode word.
+     * Gets the raw 32-bit screen format/color-mode word.
      * @return a <code>long</code>
      */
     public long getScreenFormat()
@@ -235,7 +235,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Sets the raw 32-bit screen format/colour-mode word.
+     * Sets the raw 32-bit screen format/color-mode word.
      * @param screenFormat a <code>long</code>
      */
     public void setScreenFormat(long screenFormat)
@@ -271,7 +271,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Gets the palette index (16-colour sub-palette) used by the entry at position <code>i</code>.
+     * Gets the palette index (16-color sub-palette) used by the entry at position <code>i</code>.
      * @param i an <code>int</code>
      * @return an <code>int</code>
      */
@@ -281,7 +281,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Sets the palette index (16-colour sub-palette) used by the entry at position <code>i</code>.
+     * Sets the palette index (16-color sub-palette) used by the entry at position <code>i</code>.
      * @param i an <code>int</code>
      * @param paletteIndex an <code>int</code>
      */
@@ -336,13 +336,13 @@ public class Screen extends GenericNtrFile
      * Assembles this screen into a visible image, drawing each tile from the supplied graphics.
      * <p>
      * A screen only names tiles; the pixels come from a companion NCGR ({@link IndexedImage}) and the
-     * colours from a companion NCLR ({@link Palette}). Each 8x8 entry is looked up in the NCGR by its
-     * tile index, mirrored per its flip flags, and coloured through the entry's 16-colour sub-palette
-     * (for 4bpp graphics) or the palette directly (for 8bpp). Colour index 0 is drawn opaque here; use
+     * colors from a companion NCLR ({@link Palette}). Each 8x8 entry is looked up in the NCGR by its
+     * tile index, mirrored per its flip flags, and colored through the entry's 16-color sub-palette
+     * (for 4bpp graphics) or the palette directly (for 8bpp). Color index 0 is drawn opaque here; use
      * {@link #getTransparentImage(IndexedImage, Palette)} to treat it as transparent.
      *
      * @param ncgr the tile graphics this screen indexes into, loaded with the default 1-tile chunking
-     * @param palette the colours to draw the tiles with
+     * @param palette the colors to draw the tiles with
      * @return a <code>BufferedImage</code> the size of the screen
      */
     public BufferedImage getImage(IndexedImage ncgr, Palette palette)
@@ -351,10 +351,10 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Same as {@link #getImage(IndexedImage, Palette)}, but colour index 0 of each tile is left
+     * Same as {@link #getImage(IndexedImage, Palette)}, but color index 0 of each tile is left
      * transparent, as the DS 2D engine treats it.
      * @param ncgr the tile graphics this screen indexes into
-     * @param palette the colours to draw the tiles with
+     * @param palette the colors to draw the tiles with
      * @return a <code>BufferedImage</code> the size of the screen, with an alpha channel
      */
     public BufferedImage getTransparentImage(IndexedImage ncgr, Palette palette)
@@ -363,9 +363,9 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Renders a single 8x8 tile entry (transparent on colour index 0), as it appears on the screen.
+     * Renders a single 8x8 tile entry (transparent on color index 0), as it appears on the screen.
      * @param ncgr the tile graphics this screen indexes into
-     * @param palette the colours to draw the tile with
+     * @param palette the colors to draw the tile with
      * @param entryIndex the index of the entry, in row-major order
      * @return an 8x8 <code>BufferedImage</code> with an alpha channel
      */
@@ -430,7 +430,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Writes a colour index into the NCGR tile that backs a given screen pixel, mirroring the entry's
+     * Writes a color index into the NCGR tile that backs a given screen pixel, mirroring the entry's
      * flip flags so the edit lands on the correct source pixel. Because several entries can name the
      * same tile, editing one changes every entry that shares that tile — the NCGR is the single source
      * of pixels. Persist the change by saving the NCGR.
@@ -438,7 +438,7 @@ public class Screen extends GenericNtrFile
      * @param ncgr the tile graphics this screen indexes into
      * @param screenX the x coordinate on the assembled screen, in pixels
      * @param screenY the y coordinate on the assembled screen, in pixels
-     * @param value the colour index to write (0-15 for 4bpp, 0-255 for 8bpp; the raw tile value, not
+     * @param value the color index to write (0-15 for 4bpp, 0-255 for 8bpp; the raw tile value, not
      *              offset by the entry's sub-palette)
      */
     public void setSourcePixel(IndexedImage ncgr, int screenX, int screenY, int value)
@@ -472,7 +472,7 @@ public class Screen extends GenericNtrFile
         public final Palette palette;
         /** How many distinct tiles the image reduced to (equals the NCGR's tile count). */
         public final int uniqueTiles;
-        /** Pixels whose colour wasn't an exact match in the chosen (sub-)palette (0 = perfect fit). */
+        /** Pixels whose color wasn't an exact match in the chosen (sub-)palette (0 = perfect fit). */
         public final int unmatchedPixels;
 
         private ImportResult(IndexedImage ncgr, Palette palette, int uniqueTiles, int unmatchedPixels)
@@ -492,18 +492,18 @@ public class Screen extends GenericNtrFile
      * The classic "import a background PNG" write-back that a screen editor needs.
      * <p>
      * How it works: the image is cut into 8x8 cells (both dimensions must be multiples of 8). Each cell
-     * is matched to the palette — for 4bpp graphics the 16-colour sub-palette that fits the cell best is
+     * is matched to the palette — for 4bpp graphics the 16-color sub-palette that fits the cell best is
      * chosen, for 8bpp the whole palette — and reduced to raw tile values (fully-transparent pixels map
-     * to colour index 0, as the DS treats it). Identical tiles are shared, and (when {@code dedupFlips})
+     * to color index 0, as the DS treats it). Identical tiles are shared, and (when {@code dedupFlips})
      * a cell that is the horizontal/vertical mirror of an existing tile reuses it with the matching flip
-     * flags, exactly as the DS 2D engine would. Colours are matched to the EXISTING palette (nearest
-     * colour when not exact); {@link ImportResult#unmatchedPixels} reports the fit, and the caller can
+     * flags, exactly as the DS 2D engine would. Colors are matched to the EXISTING palette (nearest
+     * color when not exact); {@link ImportResult#unmatchedPixels} reports the fit, and the caller can
      * rebuild the NCLR separately if it's poor.
      *
      * @param image       the assembled background image to import (width and height multiples of 8)
      * @param templateNcgr an existing NCGR supplying the bit depth and the tileset's storage width
      *                     (tiles-per-row) for the rebuilt tileset
-     * @param palette     the NCLR to match colours against (unchanged)
+     * @param palette     the NCLR to match colors against (unchanged)
      * @param dedupFlips  whether to share tiles across horizontal/vertical mirrors (smaller tileset)
      * @return the rebuilt tileset and the decomposition stats ({@link ImportResult#palette} is {@code palette})
      */
@@ -515,14 +515,14 @@ public class Screen extends GenericNtrFile
     /**
      * Like {@link #applyImage}, but BUILDS a new palette from the image instead of matching an existing
      * one — the NSCR analog of {@code importPng}'s "rebuild palette" mode. For 4bpp it assigns each 8x8
-     * cell to one of {@code numSubPalettes} 16-colour sub-palettes (greedy: a cell joins a sub-palette it
+     * cell to one of {@code numSubPalettes} 16-color sub-palettes (greedy: a cell joins a sub-palette it
      * fits within, else opens a new one, else the closest is quantised down) so tiles keep their
      * one-sub-palette-per-tile constraint; for 8bpp it median-cuts the whole image into a single palette.
      * The new palette is returned as {@link ImportResult#palette} — write it back to the NCLR.
      *
      * @param image          the assembled background image to import (dimensions multiples of 8)
      * @param templateNcgr   an existing NCGR supplying the bit depth and tileset storage width
-     * @param numSubPalettes how many 16-colour sub-palettes the new NCLR may use (4bpp; ignored for 8bpp)
+     * @param numSubPalettes how many 16-color sub-palettes the new NCLR may use (4bpp; ignored for 8bpp)
      * @param dedupFlips     whether to share tiles across horizontal/vertical mirrors
      * @return the rebuilt tileset, the NEW palette, and the decomposition stats
      */
@@ -564,7 +564,7 @@ public class Screen extends GenericNtrFile
                     for (int x = 0; x < 8; x++)
                         argb[y * 8 + x] = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
 
-                // Pick the sub-palette that fits this cell best (least total nearest-colour error).
+                // Pick the sub-palette that fits this cell best (least total nearest-color error).
                 int bestSub = 0;
                 int[] bestVals = null;
                 long bestErr = Long.MAX_VALUE;
@@ -651,7 +651,7 @@ public class Screen extends GenericNtrFile
     }
 
     // Builds a palette that fits the image, for applyImageRebuildingPalette. 8bpp: one median-cut palette
-    // of up to 256 colours. 4bpp: greedily pack each cell's colours into up to numSubPalettes 16-colour
+    // of up to 256 colors. 4bpp: greedily pack each cell's colors into up to numSubPalettes 16-color
     // sub-palettes (a cell must fit one sub-palette, mirroring the DS constraint), quantising a sub-palette
     // down with median-cut only if it overflows. The sub-palettes are concatenated into one Palette.
     private static Palette buildPalette(BufferedImage image, int bitDepth, int numSubPalettes)
@@ -679,7 +679,7 @@ public class Screen extends GenericNtrFile
             return new Palette(colors);
         }
 
-        // 4bpp: one colour set per sub-palette bucket (packed 0xRRGGBB, so equal colours collapse).
+        // 4bpp: one color set per sub-palette bucket (packed 0xRRGGBB, so equal colors collapse).
         int columns = w / 8, rows = h / 8;
         List<java.util.LinkedHashSet<Integer>> buckets = new ArrayList<>();
         for (int cellRow = 0; cellRow < rows; cellRow++)
@@ -691,12 +691,12 @@ public class Screen extends GenericNtrFile
                     for (int x = 0; x < 8; x++)
                     {
                         int argb = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
-                        if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette colour
+                        if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette color
                         cell.add(argb & 0xFFFFFF);
                     }
                 if (cell.isEmpty()) continue;
 
-                // Join the first bucket this cell fits within 16 colours; else open a new bucket; else the
+                // Join the first bucket this cell fits within 16 colors; else open a new bucket; else the
                 // bucket whose union is smallest (it may overflow 16 and get quantised at the end).
                 int fit = -1, best = -1, bestUnion = Integer.MAX_VALUE;
                 for (int b = 0; b < buckets.size(); b++)

@@ -831,7 +831,7 @@ public class NintendoDsRom
     /**
      * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
      */
-    private NintendoDsRom()
+    NintendoDsRom()
     {
         title = "";
         gameCode = "####";
@@ -905,7 +905,7 @@ public class NintendoDsRom
     }
 
     /**
-     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk (ndstool/Nds4j or ds-rom extract).
      * @param dir a <code>String</code> containing the path to an unpacked ROM on disk
      * @return a <code>NintendoDsRom</code>
      */
@@ -915,7 +915,22 @@ public class NintendoDsRom
     }
 
     /**
-     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * Whether {@code dir} looks like an unpacked NDS ROM: the ndstool/Nds4j layout
+     * ({@code header.bin}) or a <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a> extract
+     * ({@code config.yaml} / {@code header.yaml}).
+     */
+    public static boolean looksLikeUnpackedRom(File dir)
+    {
+        if (dir == null || !dir.isDirectory()) return false;
+        if (new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile()) return true;
+        return DsRomUnpacked.isLayout(dir);
+    }
+
+    /**
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk.
+     * Accepts the ndstool/Nds4j layout ({@code header.bin}, {@code data/}, {@code overlay/}) and a
+     * <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a> extract ({@code config.yaml},
+     * {@code header.yaml}, {@code files/}, {@code arm9/arm9.bin}).
      * @param dir a <code>File</code> containing the path to an unpacked ROM on disk
      * @return a <code>NintendoDsRom</code>
      */
@@ -925,6 +940,9 @@ public class NintendoDsRom
         {
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" does not exist");
         }
+
+        if (DsRomUnpacked.isLayout(dir) && !new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile())
+            return DsRomUnpacked.load(dir);
 
         NintendoDsRom rom = new NintendoDsRom();
         byte[] header = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name));
@@ -968,6 +986,13 @@ public class NintendoDsRom
 
         if (rom.files.contains(null))
             throw new RuntimeException("Internal file table not properly filled");
+
+        // fromUnpacked fills `filenames` from the data/ tree but never serialises an FNT. Consumers
+        // that walk the filesystem via getFnt() (NitroViewer listTree, exportFolderZip) would NPE or
+        // see an empty tree. Rebuild the table from the folder we just loaded so both paths work.
+        MemBuf fntBuf = Fnt.save(rom.filenames);
+        rom.fnt = fntBuf.reader().getBuffer();
+        rom.fntLength = rom.fnt.length;
 
         return rom;
     }

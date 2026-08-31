@@ -88,7 +88,7 @@ public final class ModelBuilder
 
     /**
      * Authors a <b>textured</b> NSBMD around a triangle mesh: a single node, single shape, one material
-     * bound to a single direct-colour texture embedded as a {@code TEX0} block in the same file (as most
+     * bound to a single direct-color texture embedded as a {@code TEX0} block in the same file (as most
      * retail models do). The production {@link ModelSet} decodes it and {@link ModelSet#getEmbeddedTextures}
      * returns the texture; the mesh's material resolves to it by name.
      * @param modelName the model's dictionary name
@@ -351,7 +351,7 @@ public final class ModelBuilder
         return mdl0;
     }
 
-    // Builds a TEX0 block holding one direct-colour (BGR555) texture, named `name`.
+    // Builds a TEX0 block holding one direct-color (BGR555) texture, named `name`.
     private static byte[] buildDirectTex0(String name, BufferedImage img)
     {
         int w = img.getWidth(), h = img.getHeight();
@@ -393,7 +393,7 @@ public final class ModelBuilder
         return block;
     }
 
-    // Builds a TEX0 block holding N direct-colour textures, packed sequentially into the texture data
+    // Builds a TEX0 block holding N direct-color textures, packed sequentially into the texture data
     // section; each texture's texImageParam data-offset points at its texels (in 8-byte units).
     private static byte[] buildMultiDirectTex0(List<String> names, List<BufferedImage> imgs)
     {

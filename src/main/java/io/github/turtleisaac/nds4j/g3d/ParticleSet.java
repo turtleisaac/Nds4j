@@ -72,7 +72,7 @@ public class ParticleSet
         int texSectionOffset = (int) u32(0x18);
 
         // Walk the emitter block (starts right after the 0x20-byte header). Each emitter is an 0x58-byte
-        // fixed body followed by flag-gated optional blocks (scale/colour/alpha/tex anim, child, six field
+        // fixed body followed by flag-gated optional blocks (scale/color/alpha/tex anim, child, six field
         // modifiers); there is no per-emitter size field, so every width must be exact — the walk is
         // validated by landing precisely on the texture section over all five retail ROMs.
         int e = 0x20;
@@ -99,7 +99,7 @@ public class ParticleSet
     public String getVersion() { return version; }
     /** @return the number of particle emitters declared in the header */
     public int getEmitterCount() { return emitterCount; }
-    /** @return the decoded particle emitters (behaviour parameters: spawn, velocity, life, colour, fields) */
+    /** @return the decoded particle emitters (behaviour parameters: spawn, velocity, life, color, fields) */
     public List<Emitter> getEmitters() { return emitters; }
     /**
      * @return the byte offset just past the last decoded emitter. For a correctly-decoded archive this
@@ -141,7 +141,7 @@ public class ParticleSet
 
     /**
      * One particle emitter: the behaviour that spawns and animates a cloud of particles (spawn shape/rate,
-     * velocity, lifetime, colour/scale/alpha-over-life curves, and optional force fields). The bytes are
+     * velocity, lifetime, color/scale/alpha-over-life curves, and optional force fields). The bytes are
      * preserved verbatim by the container; this is a decoded read-only view over them, reverse-engineered
      * from the retail files and cross-checked against the independent HaroohiePals SPL reader (the emitter
      * walk lands byte-exactly on the texture section over all 3144 retail archives).
@@ -257,14 +257,14 @@ public class ParticleSet
         /** @return base particle scale */ public double getParticleBaseScale() { return particleBaseScale; }
         /** @return particle width/height aspect ratio */ public double getAspectRatio() { return aspectRatio; }
         /** @return per-frame air resistance factor (~0.75..1.25, 1 = none) */ public double getAirResistance() { return airResistance; }
-        /** @return base particle colour as packed 0xRRGGBB */ public int getColorRgb() { return color; }
+        /** @return base particle color as packed 0xRRGGBB */ public int getColorRgb() { return color; }
         /** @return base particle alpha, 0..31 */ public int getParticleAlpha() { return particleAlpha; }
         /** @return index into the archive's texture list for this emitter's sprite */ public int getTextureId() { return textureId; }
         /** @return randomness applied to per-particle initial speed (0..~1) */ public double getVeloMagRandomness() { return veloMagRandomness; }
         /** @return randomness applied to per-particle scale (0..~1) */ public double getScaleRandomness() { return scaleRandomness; }
         /** @return randomness applied to per-particle lifetime (0..~1) */ public double getLifetimeRandomness() { return lifetimeRandomness; }
         /** @return the scale-over-life curve, or {@code null} if the emitter has none */ public ScaleAnim getScaleAnim() { return scaleAnim; }
-        /** @return the colour-over-life curve, or {@code null} if the emitter has none */ public ColorAnim getColorAnim() { return colorAnim; }
+        /** @return the color-over-life curve, or {@code null} if the emitter has none */ public ColorAnim getColorAnim() { return colorAnim; }
         /** @return the alpha-over-life curve, or {@code null} if the emitter has none */ public AlphaAnim getAlphaAnim() { return alphaAnim; }
         /** @return the gravity field, or {@code null} if the emitter has none */ public Gravity getGravity() { return gravity; }
         /** @return the flip-book texture-id sequence, or {@code null} if there is no texture animation */ public int[] getTexAnimFrames() { return texAnimFrames; }
@@ -294,7 +294,7 @@ public class ParticleSet
         /** @return normalised life-fraction at which the ramp-out starts (0..1) */ public double getOutStartTime() { return outStart; }
     }
 
-    /** Colour-over-life curve: interpolates {@code initial → ending} (both BGR555 → 0xRRGGBB). */
+    /** Color-over-life curve: interpolates {@code initial → ending} (both BGR555 → 0xRRGGBB). */
     public final class ColorAnim
     {
         private final int initial, ending;
@@ -307,10 +307,10 @@ public class ParticleSet
             outStart = (data[c + 6] & 0xFF) / 256.0;
             interpolate = (u16(c + 8) >> 2 & 1) == 1;
         }
-        /** @return colour at spawn as 0xRRGGBB */ public int getInitial() { return initial; }
-        /** @return colour at death as 0xRRGGBB */ public int getEnding() { return ending; }
-        /** @return normalised life-fraction at which the colour reaches its peak (0..1) */ public double getPeakTime() { return peak; }
-        /** @return whether the colour interpolates smoothly (vs steps) */ public boolean isInterpolate() { return interpolate; }
+        /** @return color at spawn as 0xRRGGBB */ public int getInitial() { return initial; }
+        /** @return color at death as 0xRRGGBB */ public int getEnding() { return ending; }
+        /** @return normalised life-fraction at which the color reaches its peak (0..1) */ public double getPeakTime() { return peak; }
+        /** @return whether the color interpolates smoothly (vs steps) */ public boolean isInterpolate() { return interpolate; }
     }
 
     /** Alpha-over-life curve: 5-bit {@code initial → peak → ending} alpha across the particle's life. */

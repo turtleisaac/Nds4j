@@ -11,11 +11,11 @@ hard-won lessons and traps so the next agent doesn't repeat them.
 > **glTF 2.0** exporter (`GltfExporter`, now with **animation**) and a pure-JVM **`SoftwareRenderer`**
 > (now **animated** — all four tracks) both work. **Seven** NSB* formats are byte-exact and decoded:
 > NSBMD, NSBTX, **NSBCA** (skeletal, `Model.pose()`), **NSBTA** (texture-SRT), **NSBTP** (pattern),
-> **NSBVA** (visibility), and **NSBMA** (material-colour, RE'd from files — not in the jar).
+> **NSBVA** (visibility), and **NSBMA** (material-color, RE'd from files — not in the jar).
 > `NitroAnimation` composes the four playable tracks per frame; `AnimatedGif` writes looping previews;
 > `ModelViewer` is a headless-capable Swing/Java2D viewer (orbit, scrub, play, inspect, texture browser).
 > The **writer foundation** (`G3dFile.writeBlockU8/U16`) supports byte-valid in-place edits — NSBMA
-> colour/alpha keyframes and NSBTX palette recolour (incl. embedded TEX0, so `ModelSet.save()` re-emits
+> color/alpha keyframes and NSBTX palette recolor (incl. embedded TEX0, so `ModelSet.save()` re-emits
 > a valid repainted model). Camera-facing **BB/BBY billboards** render. The **encoder** is real: NNS
 > Patricia dictionary builder (`G3dDictionary.build`, 5388 dicts 100% functional) + container assembler +
 > **geometry encoder** (`DisplayList`, geometry-exact over 400 meshes) + **texture encoder**
@@ -81,7 +81,7 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `TextureSrtAnimationSet` (NSBTA) | BTA0/SRT0 → per-material texture-matrix (scale/rot/trans) tracks; byte-exact | done |
 | `TexturePatternAnimationSet` (NSBTP) | BTP0/PAT0 → per-material flip-book keyframes (frame→texture/palette); byte-exact | done |
 | `VisibilityAnimationSet` (NSBVA) | BVA0/VIS0 → per-node on/off bit stream; byte-exact | done |
-| `ParticleSet` (SPA/SPL) | " APS" particle archive → **fully-decoded emitters** (`Emitter`: spawn/velocity/life/colour+scale+alpha curves/fields) + " TPS" sprite textures; byte-exact | done |
+| `ParticleSet` (SPA/SPL) | " APS" particle archive → **fully-decoded emitters** (`Emitter`: spawn/velocity/life/color+scale+alpha curves/fields) + " TPS" sprite textures; byte-exact | done |
 | `ParticleRenderer` | headless pure-JVM previewer that **plays** an SPA move effect (simulate emitters → additive sprite composite → deterministic clip) | done |
 | `ObjImporter` | Wavefront OBJ (v/vt/f, polygons, negative indices) → flat vertex/uv/triangle arrays | done |
 | `ImdImporter` | native **`.imd`→NSB\*** translator, **byte-identical to g3dcvtr** (`-emdl`/`-eboth`/`-etex`); multi-node + full node transforms + multi-material/shape; enriched class API → `ModelSet`/`TextureSet` | done |
@@ -89,8 +89,8 @@ All in `src/main/java/io/github/turtleisaac/nds4j/g3d/`:
 | `AnimationBuilder` | author **NSBTA** (texture-SRT) from scratch (constant/keyframe channels) — the animation-writer recipe | done |
 | Animation **writers** (`encode()`) | byte-exact **NSBVA/NSBTP/NSBTA/NSBMA/NSBCA** re-encoders (the animation half of g3dcvtr), each round-trip-validated over the whole retail corpus (see §9c) | done |
 | `NitroLz` (framework) | general **Nitro LZ10/LZ11** codec: decompress + compress, round-trip-exact; feeds the 3D pipeline (compressed NSBMD) | done |
-| `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material colour/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
-| `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA colour/alpha, NSBTX `setPaletteColor`) | done |
+| `MaterialColorAnimationSet` (NSBMA) | BMA0/MAT0 → per-material color/alpha tracks (RE'd from files); byte-exact; **in-place editable** | done |
+| `G3dFile` writer | `writeBlockU8/U16` → same-size in-place edits (NSBMA color/alpha, NSBTX `setPaletteColor`) | done |
 
 **Numbers (all five ROMs, current `9c057b2`):**
 - Container byte-exact: NSBMD **5482/5482**, NSBCA **825/825**, NSBTA **548/548**, NSBTP **506/506**,
@@ -355,7 +355,7 @@ NSB* animation formats, MTX_SCALE, billboard oracle handling, and the preview ra
 Every item below is delivered. Rendered checkpoints in `g3d_out/` (see each entry).
 
 1. **SPA emitter decode + particle previewer ✅** (`ParticleSet.Emitter` + `ParticleRenderer`). The full
-   SPL emitter struct is RE'd (0x58 body + flag-gated scale/colour/alpha/tex anim, child, six field
+   SPL emitter struct is RE'd (0x58 body + flag-gated scale/color/alpha/tex anim, child, six field
    modifiers), cross-checked against the independent HaroohiePals SPL reader; the emitter walk lands
    byte-exactly on the texture section over **all 3144 archives / 9290 emitters** (the self-checking
    oracle — no per-emitter size field, so any wrong width desyncs). `ParticleRenderer` simulates and
@@ -408,7 +408,7 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   with the fixed structs kept verbatim — and reproduces the file byte-for-byte. This is the byte-exact
   re-encode path that survives edits (the pieces that change on a geometry/resource edit are exactly the
   ones rebuilt from semantics).
-- **In-place edits** (colour/palette/alpha) — byte-exact (`G3dFile.writeBlockU8/U16`).
+- **In-place edits** (color/palette/alpha) — byte-exact (`G3dFile.writeBlockU8/U16`).
 - **Authoring parity — the `.imd` &rarr; NSBMD translator (`ImdImporter`), byte-identical to g3dcvtr.** The
   key realisation: the `.imd` intermediate already carries every optimiser decision the Maya exporter made
   (`pos_s` full vs `pos_xy`/`pos_xz`/`pos_yz` deltas, strip/quad grouping, node transforms, material state),
@@ -424,7 +424,7 @@ The goal beyond byte-*valid* authoring is byte-*identical* output (matching g3dc
   - **All three g3dcvtr output modes are byte-exact:** `-emdl` (`toNsbmd`), `-eboth` (`toNsbmdWithTextures`,
     embedded TEX0) *and* `-etex` (`toNsbtx`, a standalone NSBTX = BTX0-wrapped TEX0). Coverage: **multi-node
     trees with full node local transforms**, **multi-material / multi-shape** textured models —
-    billboard/non-billboard, hardware-lit/vertex-coloured. Material state is **derived** from the `.imd`
+    billboard/non-billboard, hardware-lit/vertex-colored. Material state is **derived** from the `.imd`
     (`polygon_attr` = lights | mode<<4 | face-cull | alpha<<16; `teximage_param` wrap/flip from `tex_tiling`);
     `polygon_attr_mask`=`0x3f1ff8ff` and material `misc`=`0x1fce` are constant (verified across variants). The
     shape set is N structs + N DLs; the material set groups materials by shared texture/palette (dict entries
@@ -486,7 +486,7 @@ block-verbatim `G3dFile.save()`), and `AnimationWriterTest` re-encodes every ret
 | **NSBVA** visibility | `VisibilityAnimationSet.encode()`/`author()` | **15/15** | tag `V\0AV`; the +8 "unused" u16 is the animation size `12 + ceil(frames·nodes/32)·4`; frame-major node-minor bit stream |
 | **NSBTP** pattern | `TexturePatternAnimationSet.encode()`/`author()` | **506/506** | tag `M\0PT`; material record ratio = `numKeyframes·4096/numFrames`; header→matdict→keyframes→tex/plt name tables; name-table order retained |
 | **NSBTA** texture-SRT | `TextureSrtAnimationSet.encode()` | **548/548** | tag `M\0AT`; per material a pool of the leading const values, then from the first variable channel on **every** channel is stored (variable→array padded to 4; const→value, fx16 masked to 16 bits) |
-| **NSBMA** material colour | `MaterialColorAnimationSet.encode()` | **160/160** | all colour arrays (u16/frame) first, region padded to 4, then all alpha arrays (u8/frame); array length = header frame count; source-offset sharing preserved, arrays in ascending-offset order |
+| **NSBMA** material color | `MaterialColorAnimationSet.encode()` | **160/160** | all color arrays (u16/frame) first, region padded to 4, then all alpha arrays (u8/frame); array length = header frame count; source-offset sharing preserved, arrays in ascending-offset order |
 | **NSBCA** skeletal | `SkeletalAnimationSet.encode()` | **825/825** | header · node-offset table · node blocks · rot3 pool · rot5 pool · keyframe arrays; arrays grouped by section (R→T→S), each group 4-aligned and its members element-aligned; pools kept verbatim (index-, not offset-referenced) |
 
 **NSBCA (skeletal) — the layout that made it byte-exact.** Its payload is the hardest of the five: two
@@ -553,7 +553,7 @@ PNG + a glTF Blender-bridge is the editable-source path; the byte-exact primitiv
 - **Crack bitfields by correlating a field against a size/count you already trust.** The SPT `texParam`
   didn't decode as a standard `texImageParam`; dumping `param` vs `texelSize` across ~16 blocks showed
   `format=p&7`, `w=8<<((p>>4)&7)`, `h=8<<((p>>8)&7)` (each candidate width×height×bpp had to equal the
-  texel size). Same trick fixed NSBMA's colour-vs-alpha strides (adjacent materials' offset spacing =
+  texel size). Same trick fixed NSBMA's color-vs-alpha strides (adjacent materials' offset spacing =
   `frames×stride`).
 - **Byte-exact round-trip is nearly free and is the real correctness bar** (§0): keep the raw bytes,
   return them from `save()`. Decode is a read-only *view* on top; a partial decode still ships a correct,
@@ -574,7 +574,7 @@ PNG + a glTF Blender-bridge is the editable-source path; the byte-exact primitiv
 - **DS display-list encoding trick:** emit **one command per 4-byte word, NOP-padded** (`[op,0,0,0]` then
   params). NOP consumes no operands, so the decoder stays in sync — far simpler than packing 4 real
   opcodes/word, and geometry-exact (`DisplayList`).
-- Rendered checkpoints for every milestone are in **`g3d_out/`** (walk/scroll/flip-book/recolour/billboard/
+- Rendered checkpoints for every milestone are in **`g3d_out/`** (walk/scroll/flip-book/recolor/billboard/
   particle sheets + GIFs, animated `.gltf`, authored `.nsbtx`/`.nsbmd`). `g3d_out/` is outside the repo,
   not committed.
 
@@ -615,8 +615,8 @@ posed pivot for a skinned billboard would be the only refinement.
 
 ### F3 — Remaining read formats ✅ DONE (NSBMA + SPA)
 `MaterialColorAnimationSet` (NSBMA / `BMA0`, **absent from the jar**, RE'd from files): per material, five
-u32 channels (diffuse/ambient/specular/emission = 15-bit colour, alpha = 5-bit); bit `0x20` = constant,
-else low 16 bits are an offset (from anim start) to a per-frame array (u16/frame colour, u8/frame alpha).
+u32 channels (diffuse/ambient/specular/emission = 15-bit color, alpha = 5-bit); bit `0x20` = constant,
+else low 16 bits are an offset (from anim start) to a per-frame array (u16/frame color, u8/frame alpha).
 Byte-exact over all 160 BMA0 in the five ROMs; demo_kusari's alpha decodes as a 0→31→0 glow. Commit
 `93f6e00`.
 
@@ -636,7 +636,7 @@ the emitter→texture playback (a particle previewer). The 2D companions / Nitro
 - **Editing round-trip ✅.** `G3dFile.writeBlockU8/U16` make same-size in-place edits (unedited → byte-exact,
   edited → byte-valid; offset table untouched). Concrete: NSBMA `ColorChannel.setRaw/setRgb` +
   `ScalarChannel.set`; NSBTX `TextureSet.setPaletteColor` (incl. embedded TEX0 → `ModelSet.save()` re-emits
-  a valid repainted model). Verified minimal/reversible + a visible manene recolour. Commit `0b8d6ad`.
+  a valid repainted model). Verified minimal/reversible + a visible manene recolor. Commit `0b8d6ad`.
 - **Full conversion (the g3dcvtr replacement) — DONE end-to-end for NSBTX and NSBMD.** Every keystone
   below is tested library code; they compose into authoring both formats from scratch (`AuthorNsbtx/NsbmdTest`):
   - **`G3dDictionary.build(names, records, elemSize)`** constructs the NNS Patricia tree from scratch
@@ -654,7 +654,7 @@ the emitter→texture playback (a particle previewer). The 2D companions / Nitro
     codec (raw fx16 verts + 1.11.4 texcoords, separate triangles, one NOP-padded command per word).
     Geometry-exact: `decode(encode(mesh))` reproduces the triangles over 400 retail meshes / 17360 tris.
   - **Texture encoder DONE** (`d8f15e4`): `TextureSet.encodeTextureData` (PLTT4/16/256 index-mapping +
-    colour-0 transparency; DIRECT BGR555 via `>>3`, the exact inverse of decode) + `getRawTextureData` /
+    color-0 transparency; DIRECT BGR555 via `>>3`, the exact inverse of decode) + `getRawTextureData` /
     `overwriteRawTextureData`. Over 600 retail textures: 100% pixel-exact, 95% byte-exact.
   - **End-to-end NSBTX authoring DONE** (`954309c`): `AuthorNsbtxTest` builds a complete valid NSBTX from
     an image with nothing pre-parsed (encode texels → `G3dDictionary.build` the tex/pltt dicts → lay out
@@ -684,7 +684,7 @@ the emitter→texture playback (a particle previewer). The 2D companions / Nitro
 jar — RE straight from the retail files, cross-checking offset spacing to fix element strides); validate
 the lossy decode value-by-value in a throwaway probe; **triangulate** (no single source is infallible —
 §5.8, §6 caveat); bucket/measure, keep the split oracle floors, commit checkpoints, keep the tree clean.
-Rendered checkpoints live in `g3d_out/` (walk/scroll/flip-book/recolour GIFs+PNGs, animated `.gltf`).
+Rendered checkpoints live in `g3d_out/` (walk/scroll/flip-book/recolor GIFs+PNGs, animated `.gltf`).
 
 ---
 
@@ -716,14 +716,14 @@ call into a *compile* error; Nds4j itself is not guarded — keep this rule in m
   pixel-identical incl. multi-sub-palette + 8bpp rebuild, save/reload).
 - **NCER/NANR — `CellBank`.** `applyImage(cellIndex, image, ncgr, palette)` and
   `applyImageRebuildingPalette(cellIndex, image, ncgr, templatePalette)` invert `renderCell`: for each OAM,
-  extract its region of the edited cell image, colour-match to that OAM's sub-palette, and reuse the existing
+  extract its region of the edited cell image, color-match to that OAM's sub-palette, and reuse the existing
   **`Cell.OAM.OamImage.setPixels()+save()`** primitive (which already splices into the NCGR at the OAM's
   `tileOffset`). Rebuild synthesises a new NCLR per sub-palette from the OAMs that use it, **slot 0 reserved
-  for transparency**, median-cut only on >15-colour overflow. `ImportResult{unmatchedPixels, palette}`. Test:
+  for transparency**, median-cut only on >15-color overflow. `ImportResult{unmatchedPixels, palette}`. Test:
   `CellBankBackWriteTest`. NANR back-write = the same, on the cell a frame references (`frame.getCellIndex()`).
   - **Renderer bug fixed here:** `OamImage.generateImageData` now sets `oamImage.paletteIdx` from `oam.palette`,
-    so a 4bpp OAM draws through **its own** 16-colour sub-palette instead of always sub-palette 0 (which
-    mis-coloured any sprite whose OAMs use `palette != 0`). This both corrects the viewer and makes the
+    so a 4bpp OAM draws through **its own** 16-color sub-palette instead of always sub-palette 0 (which
+    mis-colored any sprite whose OAMs use `palette != 0`). This both corrects the viewer and makes the
     back-write round-trip exact.
 - **NCGR / palette.** The existing headless quantisers `IndexedImage.applyImageMatched` /
   `applyImageQuantized` (PNG→NCGR, no JPanel); `IndexedImage.medianCut` widened `private`→**package-private**

@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests the writer-side foundation: the <b>editing round-trip</b>. Mutating a decoded {@code NSB*} object
  * and re-serialising must produce a valid file &mdash; byte-exact when nothing was edited, and a precise,
  * minimal, reversible diff when it was. Demonstrated on {@link MaterialColorAnimationSet} (NSBMA), whose
- * constant colours and per-frame alpha are edited in place; the same {@link G3dFile} block primitive
+ * constant colors and per-frame alpha are edited in place; the same {@link G3dFile} block primitive
  * underlies every format.
  */
 @DisplayName("NSB* editing round-trip (writer foundation)")
@@ -72,7 +72,7 @@ public class NsbEditingTest
     }
 
     @Test
-    @DisplayName("editing a constant colour and an alpha keyframe writes a valid, minimal, reversible diff")
+    @DisplayName("editing a constant color and an alpha keyframe writes a valid, minimal, reversible diff")
     void editIsMinimalValidAndReversible()
     {
         byte[] original = demoKusari();
@@ -80,16 +80,16 @@ public class NsbEditingTest
 
         MaterialColorAnimationSet set = new MaterialColorAnimationSet(original);
         MaterialColorAnimationSet.MaterialColor mat = set.getAnimations().get(0).getMaterials().get(0);
-        int origColour = mat.getDiffuse().rawAt(0);
+        int origColor = mat.getDiffuse().rawAt(0);
         int origAlpha = mat.getAlpha().at(40);
 
-        // edit a constant colour (2 bytes) and one animated alpha frame (1 byte)
+        // edit a constant color (2 bytes) and one animated alpha frame (1 byte)
         mat.getDiffuse().setRgb(0, 0xFF0000);      // red
         mat.getAlpha().set(40, 7);
         byte[] edited = set.save();
 
         assertThat(edited.length).as("same-size edit keeps the file length").isEqualTo(original.length);
-        assertThat(diffCount(original, edited)).as("only the touched bytes change (2 colour + 1 alpha)").isEqualTo(3);
+        assertThat(diffCount(original, edited)).as("only the touched bytes change (2 color + 1 alpha)").isEqualTo(3);
 
         // re-reading the edited bytes yields the edited values, everything else intact
         MaterialColorAnimationSet reread = new MaterialColorAnimationSet(edited);
@@ -100,14 +100,14 @@ public class NsbEditingTest
         assertThat(rmat.getAmbient().rawAt(0)).isEqualTo(mat.getAmbient().rawAt(0)); // untouched channel unchanged
 
         // reverting the exact edits restores the original file byte-for-byte
-        rmat.getDiffuse().setRaw(0, origColour);
+        rmat.getDiffuse().setRaw(0, origColor);
         rmat.getAlpha().set(40, origAlpha);
         assertThat(reread.save()).as("reverting edits restores the original bytes").isEqualTo(original);
     }
 
     @Test
-    @DisplayName("recolouring an embedded palette re-saves a valid NSBMD and changes the render")
-    void paletteRecolourEditsModelSet()
+    @DisplayName("recoloring an embedded palette re-saves a valid NSBMD and changes the render")
+    void paletteRecolorEditsModelSet()
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         Narc narc;
@@ -126,7 +126,7 @@ public class NsbEditingTest
         TextureSet.Palette pal = null;
         for (TextureSet.Palette p : tex.getPalettes())
             if (p.getName().contains("blue")) { pal = p; break; }
-        Assumptions.assumeTrue(pal != null, "need a blue palette to recolour");
+        Assumptions.assumeTrue(pal != null, "need a blue palette to recolor");
         for (int i = 0; i < 4; i++)
             tex.setPaletteColor(pal, i, 0x00FF00); // paint it green
         int greenQuantised = tex.getPaletteColor(pal, 0); // 0xFF -> 5-bit -> 0xF8
@@ -135,7 +135,7 @@ public class NsbEditingTest
         assertThat(edited.length).isEqualTo(original.length);
         assertThat(diffCount(original, edited)).as("only palette bytes change").isGreaterThan(0).isLessThan(64);
 
-        // reload the edited NSBMD and confirm the colour took and the render differs
+        // reload the edited NSBMD and confirm the color took and the render differs
         ModelSet ms2 = new ModelSet(edited);
         TextureSet tex2 = ms2.getEmbeddedTextures();
         TextureSet.Palette pal2 = null;
@@ -150,6 +150,6 @@ public class NsbEditingTest
         for (int y = 0; y < 128; y++)
             for (int x = 0; x < 128; x++)
                 if (before.getRGB(x, y) != after.getRGB(x, y)) changed++;
-        assertThat(changed).as("recolouring should visibly change the render").isGreaterThan(200);
+        assertThat(changed).as("recoloring should visibly change the render").isGreaterThan(200);
     }
 }

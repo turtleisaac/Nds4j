@@ -43,7 +43,7 @@ public class AuthorNsbtxTest
     void authorAndReadBack()
     {
         int w = 8, h = 8;
-        // an image whose colours are already 5-bit-aligned per channel, so BGR555 is lossless
+        // an image whose colors are already 5-bit-aligned per channel, so BGR555 is lossless
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -75,7 +75,7 @@ public class AuthorNsbtxTest
         assertThat(set.save()).isEqualTo(file);
     }
 
-    // Assembles a TEX0 block holding one direct-colour texture: header, the tex/pltt dictionaries built
+    // Assembles a TEX0 block holding one direct-color texture: header, the tex/pltt dictionaries built
     // by G3dDictionary.build, and the encoded texel data.
     private static byte[] buildDirectTex0(String name, BufferedImage img)
     {

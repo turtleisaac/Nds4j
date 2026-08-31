@@ -183,7 +183,7 @@ public class ObjImportTest
         assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
         assertThat(m.getVertexCount()).isEqualTo(3 * 6); // 3 quads * 2 tris * 3 verts
 
-        // each shape binds its own material -> its own texture, and each texture is the authored solid colour
+        // each shape binds its own material -> its own texture, and each texture is the authored solid color
         for (int i = 0; i < 3; i++)
         {
             Model.Mesh mesh = m.getMeshes().get(i);
@@ -191,7 +191,7 @@ public class ObjImportTest
             String texName = mesh.getMaterial().getTextureName();
             assertThat(texName).isNotNull();
             assertThat(ms.getEmbeddedTextures().getImage(texName).getRGB(0, 0) & 0xFFFFFF)
-                    .as("shape %s samples its own texture colour", mesh.getName())
+                    .as("shape %s samples its own texture color", mesh.getName())
                     .isEqualTo(colors[Integer.parseInt(mesh.getName().substring(mesh.getName().length() - 1))]);
         }
 

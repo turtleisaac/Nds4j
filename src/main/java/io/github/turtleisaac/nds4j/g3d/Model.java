@@ -1001,7 +1001,7 @@ public class Model
     /**
      * A material bound to one or more shapes: the names of the texture and palette it samples (looked up
      * in the model's embedded or a sibling {@code TEX0}) plus the texture's texel size and wrap/flip
-     * flags. Colour/lighting/polygon attributes are present in the file but not exposed until they are
+     * flags. Color/lighting/polygon attributes are present in the file but not exposed until they are
      * needed. Names are {@code null} when the material draws untextured.
      */
     public static class Material

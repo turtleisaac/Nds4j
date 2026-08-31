@@ -50,7 +50,7 @@ public class ParticleRenderer
 
     /** Sets the RNG seed (playback is deterministic for a given seed). @return this */
     public ParticleRenderer seed(long seed) { this.seed = seed; return this; }
-    /** Sets the background colour (0xRRGGBB) the additive glow is composited over. @return this */
+    /** Sets the background color (0xRRGGBB) the additive glow is composited over. @return this */
     public ParticleRenderer background(int rgb) { this.background = rgb; return this; }
 
     /** A single live particle in the simulation. */

@@ -487,7 +487,7 @@ public class CellBank extends GenericNtrFile
     }
 
     /**
-     * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM colour index 0 is
+     * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM color index 0 is
      * left transparent) so the assembled cell can be composited &mdash; for instance under an
      * animation transform supplied by a {@link CellAnimation}.
      * @param i the index of the cell
@@ -555,7 +555,7 @@ public class CellBank extends GenericNtrFile
     /** The outcome of {@link #applyImage}/{@link #applyImageRebuildingPalette}. */
     public static final class ImportResult
     {
-        /** Pixels whose colour wasn't an exact match in the OAM's (sub-)palette (0 = a perfect fit). */
+        /** Pixels whose color wasn't an exact match in the OAM's (sub-)palette (0 = a perfect fit). */
         public final int unmatchedPixels;
         /** The palette the pixels were indexed against — the input NCLR, or the freshly-built one after a
          *  rebuild. Write it back to the NCLR when it changed. */
@@ -570,8 +570,8 @@ public class CellBank extends GenericNtrFile
 
     /**
      * Writes an edited assembled-cell image back into the NCGR — the inverse of {@link #getNcerImage(int)}.
-     * The cell's OAM layout is unchanged: each OAM's region of the image is colour-matched to that OAM's
-     * sub-palette and written into the NCGR tiles it references (via each {@link Cell.OAM.OamImage}). Colours
+     * The cell's OAM layout is unchanged: each OAM's region of the image is color-matched to that OAM's
+     * sub-palette and written into the NCGR tiles it references (via each {@link Cell.OAM.OamImage}). Colors
      * are matched to the EXISTING palette; {@link ImportResult#unmatchedPixels} reports the fit. Because OAMs
      * (and other cells) can share tiles, editing one region changes every OAM that references those tiles —
      * the NCGR is the single source of pixels. Persist by saving {@code ncgr}.
@@ -579,7 +579,7 @@ public class CellBank extends GenericNtrFile
      * @param cellIndex the cell whose composed image {@code image} is
      * @param image the edited assembled-cell image (must be the cell's bounds size)
      * @param ncgr the NCGR whose tiles back this cell (mutated in place)
-     * @param palette the NCLR to match colours against
+     * @param palette the NCLR to match colors against
      * @return the decomposition stats
      */
     public ImportResult applyImage(int cellIndex, BufferedImage image, IndexedImage ncgr, Palette palette)
@@ -639,10 +639,10 @@ public class CellBank extends GenericNtrFile
 
     /**
      * Like {@link #applyImage}, but BUILDS a new palette from the image instead of matching an existing one
-     * — the NCER analog of {@code importPng}'s "rebuild palette" mode. Each 16-colour sub-palette (4bpp) is
-     * rebuilt from the opaque colours of the OAMs that use it (grouped by {@code oam.palette}), reserving
+     * — the NCER analog of {@code importPng}'s "rebuild palette" mode. Each 16-color sub-palette (4bpp) is
+     * rebuilt from the opaque colors of the OAMs that use it (grouped by {@code oam.palette}), reserving
      * slot 0 for transparency (the DS sprite convention) and median-cutting down only if a sub-palette
-     * overflows 15 colours; 8bpp rebuilds the single 256-colour palette. Sub-palettes this cell doesn't use
+     * overflows 15 colors; 8bpp rebuilds the single 256-color palette. Sub-palettes this cell doesn't use
      * are preserved from {@code templatePalette}. Returns the new palette via {@link ImportResult#palette} —
      * write it back to the NCLR. The NCGR is still mutated (call {@code ncgr.save()}).
      *
@@ -666,7 +666,7 @@ public class CellBank extends GenericNtrFile
         Color[] tmpl = templatePalette.getColors();
         int subCount = Math.max(1, tmpl.length / subSize);
 
-        // Gather each sub-palette's opaque colours from the OAMs that draw with it.
+        // Gather each sub-palette's opaque colors from the OAMs that draw with it.
         java.util.List<java.util.LinkedHashSet<Integer>> perSub = new java.util.ArrayList<>();
         for (int i = 0; i < subCount; i++) perSub.add(new java.util.LinkedHashSet<Integer>());
         for (Cell.OAM oam : cell.oams)
@@ -680,13 +680,13 @@ public class CellBank extends GenericNtrFile
                     int sx = dx + x, sy = dy + y;
                     if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) continue;
                     int argb = image.getRGB(sx, sy);
-                    if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette colour
+                    if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette color
                     perSub.get(sub).add(argb & 0xFFFFFF);
                 }
         }
 
         // Build the new palette: keep unused sub-palettes; for used ones, slot 0 = transparent marker and
-        // the opaque colours fill slots 1..subSize-1 (median-cut if they overflow).
+        // the opaque colors fill slots 1..subSize-1 (median-cut if they overflow).
         Color[] colors = java.util.Arrays.copyOf(tmpl, tmpl.length);
         int cap = subSize - 1; // slot 0 reserved
         for (int p = 0; p < subCount; p++)
@@ -1054,9 +1054,9 @@ public class CellBank extends GenericNtrFile
             /** @param tileOffset the tile offset into the NCGR this OAM draws from */
             public void setTileOffset(int tileOffset) { this.tileOffset = tileOffset; }
 
-            /** @return the 16-colour sub-palette index this OAM uses */
+            /** @return the 16-color sub-palette index this OAM uses */
             public int getPalette() { return palette; }
-            /** @param palette the 16-colour sub-palette index this OAM uses */
+            /** @param palette the 16-color sub-palette index this OAM uses */
             public void setPalette(int palette) { this.palette = palette; }
 
             /** @return this OAM's priority (0-3) */
@@ -1074,9 +1074,9 @@ public class CellBank extends GenericNtrFile
             /** @param mosaic whether this OAM uses mosaic */
             public void setMosaic(boolean mosaic) { this.mosaic = mosaic; }
 
-            /** @return the colour count of this OAM's tiles (16 or 256) */
+            /** @return the color count of this OAM's tiles (16 or 256) */
             public int getColors() { return colors; }
-            /** @param colors the colour count of this OAM's tiles (16 or 256) */
+            /** @param colors the color count of this OAM's tiles (16 or 256) */
             public void setColors(int colors) { this.colors = colors; }
 
             /** @return whether this OAM is affine (rotation/scaling) rather than a plain sprite */
@@ -1142,9 +1142,9 @@ public class CellBank extends GenericNtrFile
                         oamImage = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
                     }
 
-                    // Colour this OAM through its own 16-colour sub-palette (4bpp): the OAM's `palette`
+                    // Color this OAM through its own 16-color sub-palette (4bpp): the OAM's `palette`
                     // field selects which block of the NCLR to draw with. Without this every OAM would
-                    // draw with sub-palette 0, mis-colouring any sprite whose OAMs use palette != 0.
+                    // draw with sub-palette 0, mis-coloring any sprite whose OAMs use palette != 0.
                     int subCount = Math.max(1, image.getPalette().getNumColors() / 16);
                     oamImage.setPaletteIdx(image.getBitDepth() == 4 && palette >= 0 && palette < subCount ? palette : 0);
 

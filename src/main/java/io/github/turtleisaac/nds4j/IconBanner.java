@@ -32,7 +32,7 @@ import java.util.Map;
  * shown on the DS home menu (the {@code iconTitle} region an NDS header points at via offset {@code 0x68}).
  * <p>
  * This wraps the raw banner bytes with a friendly view: the icon decodes to a {@link BufferedImage} (a
- * 16-colour, 4bpp, 4&times;4-tiled bitmap over a {@code BGR555} palette, colour&nbsp;0 rendered transparent),
+ * 16-color, 4bpp, 4&times;4-tiled bitmap over a {@code BGR555} palette, color&nbsp;0 rendered transparent),
  * and each title is UTF-16LE text of up to three {@code '\n'}-separated lines. The banner comes in versions
  * that add languages: {@code 0x0001} carries Japanese, English, French, German, Italian and Spanish;
  * {@code 0x0002} adds Chinese; {@code 0x0003} adds Korean; {@code 0x0103} additionally holds a DSi animated
@@ -51,7 +51,7 @@ public class IconBanner
     }
 
     private static final int ICON_BITMAP_OFFSET = 0x20;   // 512 bytes: 32x32, 4bpp, 4x4 tiles of 8x8
-    private static final int ICON_PALETTE_OFFSET = 0x220; // 32 bytes: 16 colours, BGR555
+    private static final int ICON_PALETTE_OFFSET = 0x220; // 32 bytes: 16 colors, BGR555
     private static final int TITLES_OFFSET = 0x240;       // 0x100 bytes per title, one per language
     private static final int TITLE_LENGTH = 0x100;        // 128 UTF-16 code units
 
@@ -96,10 +96,10 @@ public class IconBanner
 
     /**
      * Replaces the icon from a 32&times;32 image. Palette index&nbsp;0 is reserved for transparency (as the DS
-     * menu always renders it), so fully-transparent pixels map to index&nbsp;0 and the distinct opaque colours
+     * menu always renders it), so fully-transparent pixels map to index&nbsp;0 and the distinct opaque colors
      * fill entries 1&hellip;15.
-     * @param image a 32&times;32 image using at most 15 distinct opaque colours (plus transparency)
-     * @throws IllegalArgumentException if the image is not 32&times;32 or uses more than 15 opaque colours
+     * @param image a 32&times;32 image using at most 15 distinct opaque colors (plus transparency)
+     * @throws IllegalArgumentException if the image is not 32&times;32 or uses more than 15 opaque colors
      */
     public void setIcon(BufferedImage image)
     {
@@ -119,7 +119,7 @@ public class IconBanner
                 {
                     idx = colorToIndex.size() + 1;
                     if (idx > 15)
-                        throw new IllegalArgumentException("icon uses more than 15 distinct opaque colours; index 0 is reserved for transparency");
+                        throw new IllegalArgumentException("icon uses more than 15 distinct opaque colors; index 0 is reserved for transparency");
                     colorToIndex.put(rgb, idx);
                 }
                 indices[y][x] = idx;
@@ -231,7 +231,7 @@ public class IconBanner
     }
 
     // 5-bit BGR555 <-> 8-bit RGB using bit replication ((c<<3)|(c>>2)), so a decode/encode round-trip is
-    // exact: an unedited colour re-encodes to its original 5-bit value.
+    // exact: an unedited color re-encodes to its original 5-bit value.
     private static int bgr555ToRgb(int v)
     {
         int r = expand5(v & 0x1F), g = expand5((v >> 5) & 0x1F), b = expand5((v >> 10) & 0x1F);

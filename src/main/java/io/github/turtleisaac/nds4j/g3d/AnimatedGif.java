@@ -38,7 +38,7 @@ import java.util.List;
  * {@link SoftwareRenderer} preview: a single looping file that shows a model's walk cycle, water scroll,
  * blinking pattern or visibility toggle actually playing.
  * <p>
- * GIF is a 256-colour format, so the JDK's GIF writer quantises each frame; that is acceptable for a
+ * GIF is a 256-color format, so the JDK's GIF writer quantises each frame; that is acceptable for a
  * preview (the lossless, viewer-grade path is {@link GltfExporter}). The per-frame delay and an infinite
  * loop are written into the standard GIF control/application extension blocks.
  */

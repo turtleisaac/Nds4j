@@ -42,6 +42,20 @@ public class SequencePlayer
     private int playerVolume = 127;
     /** Debug/AB knob: multiplies the effective tempo (1.0 = the sequence's own tempo). */
     public double tempoScale = 1.0;
+    /**
+     * When true, each track takes its {@code 0x94} loop <em>twice</em> then stops: intro + body +
+     * one extra body. The extra body is a seamless loop cycle (voice state matches at both ends);
+     * {@link #loopStartFrame} is the first jump, {@link #loopEndFrame} the second.
+     */
+    public boolean stopAtLoop = false;
+    /**
+     * After {@link #renderStereo}, start of the repeating cycle in output frames (the first
+     * {@code 0x94}), or -1 if the song has no loop.
+     */
+    public int loopStartFrame = -1;
+    /** End of that cycle (the second {@code 0x94}), or -1 if none. */
+    public int loopEndFrame = -1;
+    private int renderFrame;
     /** Debug: per-track enable. A muted track still runs (keeps timing) but produces no voices. */
     public final boolean[] trackEnabled = {
         true, true, true, true, true, true, true, true,
@@ -121,6 +135,9 @@ public class SequencePlayer
         boolean noteWait = true;  // note-ons block the track for their duration
         boolean tie;
         boolean waitingForNote;   // note-wait + duration 0: hold until the voice is gone
+        int loopJumps;            // 0x94 count; stopAtLoop stops on the second
+        int firstJumpFrame = -1;
+        int secondJumpFrame = -1;
         int attackOv = 0xFF, decayOv = 0xFF, sustainOv = 0xFF, releaseOv = 0xFF; // 0xFF = use instrument
         // Gota/hardware: one 3-deep stack shared by call and loop
         final int[] callStack = new int[3];
@@ -184,10 +201,15 @@ public class SequencePlayer
         playerVolume = 127;
         tempo = 120;
         allocSerial = 0;
+        loopStartFrame = loopEndFrame = -1;
+        renderFrame = 0;
         for (int i = 0; i < MAX_VOICES; i++) channels[i] = null;
 
         int maxFrames = (int) (outRate * maxSeconds);
-        short[] out = new short[maxFrames * 2];
+        if (maxFrames < 1) maxFrames = 1;
+        // Grow from a short buffer so a 2-second SFX doesn't allocate a multi-minute song cap.
+        int capacity = maxFrames < outRate * 16 ? maxFrames : outRate * 16;
+        short[] out = new short[capacity * 2];
 
         // Gota Player.Tick: sequence ticks, then ChannelTick, then 341 mixer samples at 65456 Hz.
         // At another output rate we emit 341 * outRate / 65456 samples per driver frame (remainder
@@ -201,6 +223,7 @@ public class SequencePlayer
 
         while (frame < maxFrames)
         {
+            renderFrame = frame;
             while (tempoStack >= 240)
             {
                 tempoStack -= 240;
@@ -218,6 +241,16 @@ public class SequencePlayer
             boolean done = false;
             for (int s = 0; s < n && frame < maxFrames; s++, frame++)
             {
+                if (frame >= capacity)
+                {
+                    int nc = capacity * 2;
+                    if (nc > maxFrames) nc = maxFrames;
+                    if (nc <= capacity) { done = true; break; }
+                    short[] grown = new short[nc * 2];
+                    System.arraycopy(out, 0, grown, 0, out.length);
+                    out = grown;
+                    capacity = nc;
+                }
                 mixerIncAcc += (long) DsSynth.MIX_RATE << 8;
                 int mixerInc = (int) (mixerIncAcc / renderRate);
                 mixerIncAcc %= renderRate;
@@ -237,6 +270,7 @@ public class SequencePlayer
                     left += l * (-pan + 0x40) / 0x80;
                     right += r * (pan + 0x40) / 0x80;
                 }
+                renderFrame = frame;
                 out[frame * 2]     = clip16(left);
                 out[frame * 2 + 1] = clip16(right);
 
@@ -255,6 +289,7 @@ public class SequencePlayer
             if (done || (allTracksDone() && liveVoices() == 0))
                 break;
         }
+        finishLoopPoints();
         if (frame < maxFrames)
         {
             short[] trimmed = new short[frame * 2];
@@ -434,6 +469,31 @@ public class SequencePlayer
         return true;
     }
 
+    /** Prefer the longest 2-jump cycle so the loop region is one full body with matching voice state. */
+    private void finishLoopPoints()
+    {
+        int bestStart = -1, bestEnd = -1, bestPeriod = -1;
+        for (int i = 0; i < MAX_TRACKS; i++)
+        {
+            Track t = tracks[i];
+            if (t == null || t.firstJumpFrame < 0 || t.secondJumpFrame <= t.firstJumpFrame) continue;
+            int p = t.secondJumpFrame - t.firstJumpFrame;
+            if (p > bestPeriod)
+            {
+                bestPeriod = p;
+                bestStart = t.firstJumpFrame;
+                bestEnd = t.secondJumpFrame;
+            }
+        }
+        if (bestPeriod > 0)
+        {
+            loopStartFrame = bestStart;
+            loopEndFrame = bestEnd;
+        }
+        else
+            loopStartFrame = loopEndFrame = -1;
+    }
+
     /** Execute one command on a track. Sets {@code tr.wait} (>0) when the command consumes time. */
     private void execOne(int trackId, Track tr)
     {
@@ -471,7 +531,16 @@ public class SequencePlayer
                 }
                 break;
             }
-            case 0x94: tr.pc = readU24(tr); break;                    // jump
+            case 0x94: {                                             // jump (BGM loop)
+                int off = readU24(tr);
+                tr.loopJumps++;
+                if (tr.loopJumps == 1) tr.firstJumpFrame = renderFrame;
+                else if (tr.loopJumps == 2) tr.secondJumpFrame = renderFrame;
+                // Seamless cycle = first jump .. second jump (second pass of the body, intro tails gone).
+                if (stopAtLoop && tr.loopJumps >= 2) tr.stopped = true;
+                else tr.pc = off;
+                break;
+            }
             case 0x95: {                                             // call (ignored if the 3-deep stack is full)
                 int off = readU24(tr);
                 if (tr.callDepth < 3)
@@ -535,6 +604,11 @@ public class SequencePlayer
                 if (tr.callDepth != 0)
                 {
                     int count = tr.callStackLoops[tr.callDepth - 1] & 0xFF;
+                    if (count == 0 && stopAtLoop)
+                    {
+                        tr.callDepth--; // infinite: body already played once
+                        break;
+                    }
                     if (count != 0)
                     {
                         count--;

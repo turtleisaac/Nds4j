@@ -88,11 +88,11 @@ public class IconBannerTest
     }
 
     @Test
-    @DisplayName("more than 15 distinct opaque icon colours is rejected (index 0 is transparency)")
-    void tooManyColoursRejected()
+    @DisplayName("more than 15 distinct opaque icon colors is rejected (index 0 is transparency)")
+    void tooManyColorsRejected()
     {
         BufferedImage img = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
-        for (int i = 0; i < 16; i++) img.setRGB(i, 0, 0xFF000000 | (i * 0x101010 + 0x010101)); // 16 distinct colours
+        for (int i = 0; i < 16; i++) img.setRGB(i, 0, 0xFF000000 | (i * 0x101010 + 0x010101)); // 16 distinct colors
         try { blankV1().setIcon(img); org.junit.jupiter.api.Assertions.fail("expected rejection"); }
         catch (IllegalArgumentException expected) { assertThat(expected.getMessage()).contains("15"); }
     }

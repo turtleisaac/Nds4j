@@ -105,7 +105,7 @@ public class PaletteTest
     void writtenNclrRoundTripsByteExactAcrossRom()
     {
         // The equals()-based tests above don't compare the raw bytes, so they missed several NCLR
-        // header/section quirks (the 256-colour cap, the 0x1C word, a trailing PMCP block, and the
+        // header/section quirks (the 256-color cap, the 0x1C word, a trailing PMCP block, and the
         // over-/under-declared palette-length word). A byte-level round-trip over the whole ROM is
         // what actually pins them down.
         java.util.List<byte[]> nclrFiles = NtrFixtures.collect(rom, "RLCN");

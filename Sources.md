@@ -169,16 +169,16 @@ byte-level second opinion.
 * Retail Generation IV Pokémon ROMs.
 
 ## NSBMA
-The `BMA0`/`MAT0` material-colour animation block has **no third-party reader**, so it was worked out entirely
-from the retail files: per material, five u32 channels (diffuse/ambient/specular/emission = 15-bit colour,
+The `BMA0`/`MAT0` material-color animation block has **no third-party reader**, so it was worked out entirely
+from the retail files: per material, five u32 channels (diffuse/ambient/specular/emission = 15-bit color,
 alpha = 5-bit); bit `0x20` marks a constant, otherwise the low 16 bits are an offset to a per-frame array
-(u16/frame colour, u8/frame alpha). Element strides were cracked by correlating adjacent materials' offset
+(u16/frame color, u8/frame alpha). Element strides were cracked by correlating adjacent materials' offset
 spacing (`frames × stride`). Byte-exact round-trip confirmed against all 160 BMA0 files in the five titles.
 * Retail Generation IV Pokémon ROMs.
 
 ## SPA / SPL (particles)
 The `SPA ` particle archive (stored byte-reversed on disk as `" APS"`) &mdash; the archive header, the full
-per-emitter behaviour struct (0x58-byte body: spawn shape/rate, velocity, lifetime, colour/scale/alpha
+per-emitter behaviour struct (0x58-byte body: spawn shape/rate, velocity, lifetime, color/scale/alpha
 over-life curves, plus flag-gated child-particle and six field-modifier blocks), and the embedded `" TPS"`
 (`"SPT "`) sprite textures &mdash; was reverse-engineered from the retail files and cross-checked against an
 **independent, actively-maintained** open-source SPL reader. The emitter walk lands byte-exactly on the

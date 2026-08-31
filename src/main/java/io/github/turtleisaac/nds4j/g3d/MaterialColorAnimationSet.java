@@ -29,13 +29,13 @@ import java.util.List;
 import java.util.TreeMap;
 
 /**
- * An object representation of an NSBMA file (a Nitro 3D <b>material-colour animation</b> set, magic
+ * An object representation of an NSBMA file (a Nitro 3D <b>material-color animation</b> set, magic
  * {@code BMA0}).
  * <p>
  * An NSBMA holds a {@code MAT0} block naming one or more {@link Animation}s; each animation drives a
- * material's lighting colours over time &mdash; the four 15-bit colours (<em>diffuse</em>,
+ * material's lighting colors over time &mdash; the four 15-bit colors (<em>diffuse</em>,
  * <em>ambient</em>, <em>specular</em>, <em>emission</em>) and the 5-bit <em>alpha</em>. Applying it to a
- * {@link Model} means, at frame <em>f</em>, replacing that material's colours with the sampled values
+ * {@link Model} means, at frame <em>f</em>, replacing that material's colors with the sampled values
  * (pulsing/glowing effects, the flashing chain in {@code demo_kusari}, fade-ins, and so on).
  * <p>
  * The container round-trips byte-for-byte (the {@code MAT0} block is preserved verbatim by
@@ -44,7 +44,7 @@ import java.util.TreeMap;
  * per material a 20-byte record of five {@code u32} channels, each {@code value|offset (bits 0-15) |
  * frameCount (bits 16-23) | flags (bits 24-31)}; flag bit {@code 0x20} marks a <em>constant</em> channel
  * (the value is inline), otherwise the low 16 bits are an offset (from the animation start) to a
- * per-frame array &mdash; {@code u16} per frame for the colours, {@code u8} per frame for alpha.
+ * per-frame array &mdash; {@code u16} per frame for the colors, {@code u8} per frame for alpha.
  */
 public class MaterialColorAnimationSet extends G3dFile
 {
@@ -138,7 +138,7 @@ public class MaterialColorAnimationSet extends G3dFile
         return String.format("MaterialColorAnimationSet[%d animations]", animations.size());
     }
 
-    /** A single named material-colour animation: a frame count and one {@link MaterialColor} per material. */
+    /** A single named material-color animation: a frame count and one {@link MaterialColor} per material. */
     public static class Animation
     {
         private final String name;
@@ -186,7 +186,7 @@ public class MaterialColorAnimationSet extends G3dFile
         }
 
         // rebuild this animation's data block byte-exactly: header, material dict (records with recomputed
-        // variable-channel offsets), then the per-frame arrays — all colour arrays first (u16/frame), the
+        // variable-channel offsets), then the per-frame arrays — all color arrays first (u16/frame), the
         // region padded to 4 bytes, then all alpha arrays (u8/frame). Channels sharing a source array keep
         // sharing it; the arrays are emitted in ascending original-offset order.
         byte[] encodeBlob()
@@ -196,7 +196,7 @@ public class MaterialColorAnimationSet extends G3dFile
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 20), 20)).length;
             int base = 8 + dictSize;
 
-            // gather unique source offsets for colour and alpha channels, mapping each to its raw bytes
+            // gather unique source offsets for color and alpha channels, mapping each to its raw bytes
             TreeMap<Integer, byte[]> colorArrays = new TreeMap<>(), alphaArrays = new TreeMap<>();
             for (MaterialColor m : materials)
                 for (int k = 0; k < 5; k++)
@@ -236,7 +236,7 @@ public class MaterialColorAnimationSet extends G3dFile
         public String getName() { return name; }
         /** @return the number of frames */
         public int getFrameCount() { return frameCount; }
-        /** @return the per-material colour tracks */
+        /** @return the per-material color tracks */
         public List<MaterialColor> getMaterials() { return materials; }
 
         @Override
@@ -246,7 +246,7 @@ public class MaterialColorAnimationSet extends G3dFile
         }
     }
 
-    // A 15-bit colour channel: constant (value inline in the record) or a per-frame u16 array at
+    // A 15-bit color channel: constant (value inline in the record) or a per-frame u16 array at
     // animStart+offset. fieldOffset is the channel's u32 in the block (for editing a constant); when
     // animated, the array's block offset is retained instead.
     private static ColorChannel colorChannel(byte[] d, int animStart, long ch, int fieldOffset, BlockWriter writer)
@@ -278,7 +278,7 @@ public class MaterialColorAnimationSet extends G3dFile
         return new ScalarChannel(keys, writer, p, false);
     }
 
-    /** One material's five colour tracks; sample each at a frame to drive the material's lighting. */
+    /** One material's five color tracks; sample each at a frame to drive the material's lighting. */
     public static class MaterialColor
     {
         private final String name;
@@ -297,22 +297,22 @@ public class MaterialColorAnimationSet extends G3dFile
 
         /** @return the material's name */
         public String getName() { return name; }
-        /** @return the diffuse-colour track */
+        /** @return the diffuse-color track */
         public ColorChannel getDiffuse() { return diffuse; }
-        /** @return the ambient-colour track */
+        /** @return the ambient-color track */
         public ColorChannel getAmbient() { return ambient; }
-        /** @return the specular-colour track */
+        /** @return the specular-color track */
         public ColorChannel getSpecular() { return specular; }
-        /** @return the emission-colour track */
+        /** @return the emission-color track */
         public ColorChannel getEmission() { return emission; }
         /** @return the alpha (0&ndash;31) track */
         public ScalarChannel getAlpha() { return alpha; }
     }
 
-    /** A 15-bit ({@code BGR555}) colour channel, constant or keyed per frame. Editable in place. */
+    /** A 15-bit ({@code BGR555}) color channel, constant or keyed per frame. Editable in place. */
     public static final class ColorChannel
     {
-        private final int[] keys; // one 15-bit colour per frame, or a single constant
+        private final int[] keys; // one 15-bit color per frame, or a single constant
         private final BlockWriter writer;
         private final int offset;  // constant: the channel's u32 field; animated: the array's block offset
         private final boolean constant;
@@ -322,27 +322,27 @@ public class MaterialColorAnimationSet extends G3dFile
             this.keys = keys; this.writer = writer; this.offset = offset; this.constant = constant;
         }
 
-        /** @return true if this channel holds one constant colour */
+        /** @return true if this channel holds one constant color */
         public boolean isConstant() { return constant; }
 
-        /** @param frame a frame index @return the raw 15-bit {@code BGR555} colour at that frame */
+        /** @param frame a frame index @return the raw 15-bit {@code BGR555} color at that frame */
         public int rawAt(int frame)
         {
             return keys[Math.min(Math.max(frame, 0), keys.length - 1)];
         }
 
-        /** @param frame a frame index @return the colour at that frame as {@code 0xRRGGBB} (8-bit per channel) */
+        /** @param frame a frame index @return the color at that frame as {@code 0xRRGGBB} (8-bit per channel) */
         public int rgbAt(int frame)
         {
             return toRgb(rawAt(frame));
         }
 
         /**
-         * Sets the raw 15-bit {@code BGR555} colour at {@code frame}, writing it back into the file so
+         * Sets the raw 15-bit {@code BGR555} color at {@code frame}, writing it back into the file so
          * {@link #save()} emits a valid, edited NSBMA (a constant channel ignores {@code frame}). The
          * edit is same-size and in place.
          * @param frame the frame to set (ignored for a constant channel)
-         * @param raw15 the 15-bit colour
+         * @param raw15 the 15-bit color
          */
         public void setRaw(int frame, int raw15)
         {
@@ -360,7 +360,7 @@ public class MaterialColorAnimationSet extends G3dFile
             }
         }
 
-        /** Sets the colour from {@code 0xRRGGBB}, quantised to 15-bit. @param frame the frame @param rgb the colour */
+        /** Sets the color from {@code 0xRRGGBB}, quantised to 15-bit. @param frame the frame @param rgb the color */
         public void setRgb(int frame, int rgb)
         {
             int r = ((rgb >> 16) & 0xFF) * 31 / 255;

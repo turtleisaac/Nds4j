@@ -11,15 +11,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Regression coverage for BGR555 bit-15 preservation on the file round-trip. NDS BGR555 only uses 15 bits,
  * but retail palettes set the unused bit 15; java.awt.Color cannot carry it, so a naive load/save clears it
- * (0xFFFF -> 0x7FFF). Palette keeps the raw source values and restores bit 15 for unedited colours. These
+ * (0xFFFF -> 0x7FFF). Palette keeps the raw source values and restores bit 15 for unedited colors. These
  * tests build a real NCLR byte stream (so the source-value path is actually exercised) and check the byte.
  */
 class PaletteBit15PreservationTest
 {
-    // Colours in a saved NCLR begin at 0x10 (NTR header) + 0x18 (TTLP header) = 0x28, two bytes each, little-endian.
+    // Colors in a saved NCLR begin at 0x10 (NTR header) + 0x18 (TTLP header) = 0x28, two bytes each, little-endian.
     private static final int COLOR_DATA_START = 0x28;
 
-    /** Builds a valid NCLR whose colour 0 has bit 15 set (0xFFFF); every other colour is 0x0000. */
+    /** Builds a valid NCLR whose color 0 has bit 15 set (0xFFFF); every other color is 0x0000. */
     private static byte[] nclrWithBit15OnColor0(int numColors)
     {
         Color[] cols = new Color[numColors];
@@ -27,7 +27,7 @@ class PaletteBit15PreservationTest
         cols[0] = new Color(248, 248, 248);
         for (int i = 1; i < numColors; i++) cols[i] = Color.BLACK;
         byte[] bytes = new Palette(cols).save();
-        // set the unused high bit on colour 0 -> 0xFFFF
+        // set the unused high bit on color 0 -> 0xFFFF
         bytes[COLOR_DATA_START + 1] |= (byte) 0x80;
         return bytes;
     }
@@ -38,11 +38,11 @@ class PaletteBit15PreservationTest
     }
 
     @Test
-    @DisplayName("plain load/save preserves bit 15 of an unedited colour")
+    @DisplayName("plain load/save preserves bit 15 of an unedited color")
     void roundTripPreservesBit15()
     {
         Palette p = new Palette(nclrWithBit15OnColor0(16), 0);
-        assertEquals(0xFFFF, color(p.save(), 0), "unedited colour must round-trip byte-for-byte");
+        assertEquals(0xFFFF, color(p.save(), 0), "unedited color must round-trip byte-for-byte");
         assertEquals(0x0000, color(p.save(), 1));
     }
 
@@ -55,11 +55,11 @@ class PaletteBit15PreservationTest
     }
 
     @Test
-    @DisplayName("editing a colour clears its bit 15, even to a visually-identical colour (DEFECT 2)")
+    @DisplayName("editing a color clears its bit 15, even to a visually-identical color (DEFECT 2)")
     void editClearsBit15()
     {
         Palette p = new Palette(nclrWithBit15OnColor0(16), 0);
-        p.setColor(0, new Color(248, 248, 248)); // same quantised colour, but an explicit edit
+        p.setColor(0, new Color(248, 248, 248)); // same quantised color, but an explicit edit
         assertEquals(0x7FFF, color(p.save(), 0), "an edited slot must pack fresh (bit 15 = 0)");
     }
 
@@ -71,7 +71,7 @@ class PaletteBit15PreservationTest
         Color[] replacement = new Color[16];
         for (int i = 0; i < 16; i++) replacement[i] = new Color(248, 248, 248);
         p.setColors(replacement);
-        assertEquals(0x7FFF, color(p.save(), 0), "replaced colours have no source, so no bit 15");
+        assertEquals(0x7FFF, color(p.save(), 0), "replaced colors have no source, so no bit 15");
     }
 
     @Test
@@ -81,7 +81,7 @@ class PaletteBit15PreservationTest
         Palette p = new Palette(nclrWithBit15OnColor0(16), 0);
         p.setNumColors(32); // grow
         byte[] saved = p.save();
-        assertEquals(0xFFFF, color(saved, 0), "surviving colour keeps its bit 15");
+        assertEquals(0xFFFF, color(saved, 0), "surviving color keeps its bit 15");
         assertEquals(0x0000, color(saved, 16), "newly-added slot is black with no bit 15");
     }
 

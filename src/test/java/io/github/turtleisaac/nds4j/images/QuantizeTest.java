@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Headless coverage for {@link IndexedImage#applyImageMatched} / {@link IndexedImage#applyImageQuantized}
- * — the clean PNG-import path that replaced the deprecated 80x80 / 16-colour / JPanel constructor. No
+ * — the clean PNG-import path that replaced the deprecated 80x80 / 16-color / JPanel constructor. No
  * ROM or display required.
  */
 @DisplayName("IndexedImage headless PNG quantizers")
@@ -34,10 +34,10 @@ class QuantizeTest
     }
 
     @Test
-    @DisplayName("applyImageMatched maps exact palette colours to their indices with zero mismatches")
+    @DisplayName("applyImageMatched maps exact palette colors to their indices with zero mismatches")
     void matchedExact()
     {
-        // index 0 = transparent slot colour, 1 = red, 2 = green
+        // index 0 = transparent slot color, 1 = red, 2 = green
         Palette pal = pal16(Color.MAGENTA, Color.RED, Color.GREEN);
         IndexedImage img = new IndexedImage(8, 8, 4, pal);
 
@@ -89,7 +89,7 @@ class QuantizeTest
     {
         IndexedImage img = new IndexedImage(8, 8, 4, pal16()); // all-black start
         BufferedImage src = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
-        // a handful of distinct opaque colours + a transparent corner
+        // a handful of distinct opaque colors + a transparent corner
         Color[] hues = { Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW };
         for (int y = 0; y < 8; y++)
             for (int x = 0; x < 8; x++)

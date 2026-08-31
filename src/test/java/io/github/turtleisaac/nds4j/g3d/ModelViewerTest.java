@@ -79,7 +79,7 @@ public class ModelViewerTest
             }
         assertThat(saturated).as("the viewport should draw a textured model").isGreaterThan(500);
 
-        // sidebar (right) is a solid dark panel: many pixels share the panel colour
+        // sidebar (right) is a solid dark panel: many pixels share the panel color
         int panelPixels = 0;
         for (int y = 40; y < h - 40; y++)
             for (int x = viewportW + 20; x < w - 5; x++)

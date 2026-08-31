@@ -875,20 +875,20 @@ public class IndexedImage extends GenericNtrFile
 
     // --- Headless PNG import ------------------------------------------------------------------------
     // Clean replacements for the deprecated IndexedImage(Image, JPanel) / indexSelf(JPanel) path, which
-    // was a half-finished port from PokEditor: it hardcoded 80x80, capped at 16 exact-match colours,
+    // was a half-finished port from PokEditor: it hardcoded 80x80, capped at 16 exact-match colors,
     // padded with magenta, took a Swing JPanel it never used (only fed commented-out JOptionPane
     // dialogs), and left the palette assignment commented out ("//todo fix and uncomment"). These
     // operate on an existing image so its geometry (dimensions, bit depth, tiling) is preserved and the
     // result re-encodes cleanly with save(); they are headless (no Swing) and support any size + 4/8bpp.
 
     /**
-     * Overwrite this image's pixels by matching every pixel of {@code src} to the nearest colour in
+     * Overwrite this image's pixels by matching every pixel of {@code src} to the nearest color in
      * this image's current palette (squared-RGB distance). Fully transparent pixels (alpha &lt; 128)
      * map to palette index 0, the DS transparent slot. This image's dimensions, bit depth and tiling
      * are unchanged, so the result re-encodes with {@link #save()}.
      *
      * @param src an image whose dimensions equal this image's
-     * @return the number of pixels whose nearest palette colour was not an exact match (a measure of
+     * @return the number of pixels whose nearest palette color was not an exact match (a measure of
      *         how well the image fits the existing palette)
      * @throws RuntimeException if {@code src}'s dimensions differ, or this image has no palette
      */
@@ -898,7 +898,7 @@ public class IndexedImage extends GenericNtrFile
         if (palette == null)
             throw new RuntimeException("This image has no palette to match against.");
         Color[] pal = palette.getColors();
-        // A 4bpp NCGR indexes into a single 16-colour sub-palette; never emit an index past 15.
+        // A 4bpp NCGR indexes into a single 16-color sub-palette; never emit an index past 15.
         int limit = (bitDepth == 4) ? Math.min(16, pal.length) : pal.length;
         if (limit < 1)
             throw new RuntimeException("The palette is empty.");
@@ -952,7 +952,7 @@ public class IndexedImage extends GenericNtrFile
             }
         }
 
-        // Slot 0 is transparent; median-cut the opaque colours into the remaining slots.
+        // Slot 0 is transparent; median-cut the opaque colors into the remaining slots.
         java.util.List<Color> boxed = medianCut(opaque, maxColors - 1);
         Color[] colors = new Color[maxColors];
         colors[0] = Color.MAGENTA; // rendered transparent when index-0 transparency is enabled
@@ -995,7 +995,7 @@ public class IndexedImage extends GenericNtrFile
     }
 
     /**
-     * Median-cut {@code colors} (each an {@code int[]{r,g,b}}) into {@code count} representative colours
+     * Median-cut {@code colors} (each an {@code int[]{r,g,b}}) into {@code count} representative colors
      * (the average of each final box). Splits the box with the widest single-channel range each step.
      * <p>Package-private so {@link Screen#applyImageRebuildingPalette} can reuse it when quantising a
      * background's sub-palettes.
