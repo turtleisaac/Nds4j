@@ -102,13 +102,15 @@ import NintendoDsRom;
 import BinaryWriter;
 import Endianness;
 import MemBuf;
+import javax.imageio.ImageIO;
+import java.io.File;
 
 public class Example
 {
     /**
      * Extract a file from inside of a provided ROM file and write it to disk
      */
-    public static void example1(NintendoDsRom rom)
+    public static void example1(NintendoDsRom rom) throws java.io.IOException
     {
         BinaryWriter.writeFile("a012.narc", rom.getFileByName("a/0/1/2"));
     }
@@ -137,7 +139,7 @@ public class Example
     /**
      * Unpack the entire ROM to disk (similar to how ndstool functions)
      */
-    public static void example3(NintendoDsRom rom)
+    public static void example3(NintendoDsRom rom) throws java.io.IOException
     {
         rom.unpack("hg_unpacked"); //creates a folder named "hg_unpacked" in the current working directory
     }
@@ -145,7 +147,7 @@ public class Example
     /**
      * Let's say you've modified the unpacked folder from example3 and want to load it back into Nds4j
      */
-    public static void example4()
+    public static void example4() throws java.io.IOException
     {
         NintendoDsRom rom = NintendoDsRom.fromUnpacked("hg_unpacked");
         rom.saveToFile("HeartGold_Modified_2.nds", false);
@@ -155,7 +157,7 @@ public class Example
      * Let's say you want to unpack a narc to disk (same functionality as knarc or Narctowl)
      * And of course after some edits, you can load it back in
      */
-    public static void example5()
+    public static void example5() throws java.io.IOException
     {
         NintendoDsRom rom = NintendoDsRom.fromFile("HeartGold.nds");
         Narc narc = new Narc(rom.getFileByName("a/0/5/6"));
@@ -168,8 +170,16 @@ public class Example
         // from here you can put it back into a ROM or whatever
     }
 
+    /**
+     * Export the ROM's own icon (the one shown on the DS home menu) as a PNG
+     */
+    public static void example6(NintendoDsRom rom) throws java.io.IOException
+    {
+        ImageIO.write(rom.getBanner().getIcon(), "png", new File("icon.png"));
+    }
 
-    public static void main(String[] args)
+
+    public static void main(String[] args) throws java.io.IOException
     {
         NintendoDsRom rom = NintendoDsRom.fromFile("HeartGold.nds");
         example1(rom);
@@ -180,6 +190,7 @@ public class Example
 
         example4();
         example5();
+        example6(rom);
     }
 }
 ```
