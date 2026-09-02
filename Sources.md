@@ -20,6 +20,9 @@ These sources will be denoted as <sup>unused</sup>.
 * [NCER](#ncer)
 * [NANR](#nanr)
 * [NSCR](#nscr)
+* [NMCR](#nmcr)
+* [NMAR](#nmar)
+* [NFTR](#nftr)
 * [NSBTX](#nsbtx)
 * [NSBMD](#nsbmd)
 * [NSBCA](#nsbca)
@@ -29,6 +32,9 @@ These sources will be denoted as <sup>unused</sup>.
 * [NSBMA](#nsbma)
 * [SPA / SPL (particles)](#spa--spl-particles)
 * [Nitro LZ compression (LZ10 / LZ11)](#nitro-lz-compression-lz10--lz11)
+* [BLZ (backward LZ) & ARM9/ARM7](#blz-backward-lz--arm9arm7)
+* [NDS Audio (SDAT / SWAV / SWAR / SBNK / SSEQ / SSAR / STRM)](#nds-audio-sdat--swav--swar--sbnk--sseq--ssar--strm)
+* [Banner / Icon](#banner--icon)
 * [G3D resource dictionary & g3dcvtr](#g3d-resource-dictionary--g3dcvtr)
 
 ---------------
@@ -88,6 +94,20 @@ These sources will be denoted as <sup>unused</sup>.
 * [lowlines' Documents Page](http://llref.emutalk.net/docs/)
   * [Nitro Cell Resource (NCER)](http://llref.emutalk.net/docs/?file=xml/ncer.xml#xml-doc)
 
+**OAM composition against a `LINE_BUFFER` (bitmap-sheet) NCGR** &mdash; a Gen V "pokegra" battle-sprite
+sheet's OAMs are affine with the hardware **double-size** flag set, and their tile index names a
+rectangular crop of the sheet's own tile grid rather than a run of consecutive tiles (the ordinary-sprite
+assumption). The double-size/disable bit semantics are standard GBA/NDS OBJ hardware behavior, not a
+Nitro-specific format detail:
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [LCD OBJ - OAM Attributes](http://problemkaputt.de/gbatek-lcd-obj-oam-attributes.htm) &mdash; the
+    affine/double-size and (non-affine) OBJ-disable bit meanings
+* [Tonc &mdash; Affine sprites](https://gbadev.net/tonc/affobj.html) <sup>unused</sup> &mdash; a more
+  approachable explanation of the same double-size behavior
+* Retail **White2** (Generation V) `a/0/0/4` (pokegra) &mdash; the rectangular-crop tile addressing was
+  reverse-engineered from these files directly (no third-party reader implements this path); validated
+  against a known part (Bulbasaur's head cell renders to an exact known-correct size/ink-count/pixel).
+
 ## NANR
 * The existing NCER implementation in this library (`images.CellBank`), which shares the same
   generic NTR header and the LBAL/UEXT label/extension section layout that an NANR reuses.
@@ -105,6 +125,52 @@ These sources will be denoted as <sup>unused</sup>.
   * [Nintendo Screen Resource (NSCR/RCSN)](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm#NSCR) <sup>unused</sup>
 * [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>
   * [Nitro Screen Resource (NSCR)](http://llref.emutalk.net/docs/?file=xml/nscr.xml#xml-doc) <sup>unused</sup>
+
+## NMCR
+The Pokémon Generation IV ROMs don't use NMCR, so it has no established third-party decoder; the
+`KBCM` multi-cell bank block (multicell descriptors + a flat cell-info array of `{cellIndex→NCER,
+s16 x, s16 y, attr}` records) was reverse-engineered entirely from the retail Generation V files,
+with every structural invariant (the cell-info offsets, the two section offsets, the `0xBEEF`
+marker) verified across the whole corpus.
+* Retail **White2** (Generation V), the only fixture ROM in the workspace that ships NMCR &mdash;
+  3181 `RCMN` files, byte-exact round-trip confirmed against all of them.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm) <sup>unused</sup>
+  * [DS Files - 2D Video](https://problemkaputt.de/gbatek-ds-files-2d-video.htm) <sup>unused</sup>,
+    "Nitro Unknown Files (NMAR/NMCR)" section &mdash; GBATEK's own page marks the format
+    unsolved/speculative (an 8-byte-entry guess); this library's structure was derived independently
+    from the retail bytes rather than from this page.
+
+## NMAR
+Byte-for-byte the same `KNBA` animation-bank layout as NANR (see above), but with `numBlocks == 2`
+(no `UEXT` section) and a frame's pooled result naming a multicell index into an NMCR rather than an
+NCER cell index &mdash; reverse-engineered from the retail files by diffing its block structure
+against the already-solved NANR.
+* The existing NANR implementation in this library (`images.CellAnimation`), whose `KNBA` layout
+  NMAR reuses almost exactly.
+* Retail **White2** (Generation V) &mdash; 3181 `RAMN` files, byte-exact round-trip confirmed
+  against all of them, each pairing 1:1 with an NMCR in the same NARC.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm) <sup>unused</sup>
+  * [DS Files - 2D Video](https://problemkaputt.de/gbatek-ds-files-2d-video.htm) <sup>unused</sup>,
+    "Nitro Unknown Files (NMAR/NMCR)" section
+
+## NFTR
+The `FINF`/`CGLP`/`CWDH`/`CMAP` bitmap-font blocks were cross-checked between GBATEK's prose spec
+(which turned out imprecise on the `CWDH` header) and an independent, actively-maintained C++
+parser, reconciling the two against the actual retail byte layout. Glyph bitmaps are decoded to
+`BufferedImage`s and a `CMAP`+`CWDH`-driven text renderer (`renderString`) is included.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [Nitro Font Resource Format](https://problemkaputt.de/gbatek-ds-cartridge-nitro-font-resource-format.htm)
+* [hadashisora/NintyFont](https://github.com/hadashisora/NintyFont) &mdash; independent C++ NFTR
+  reader/writer (used by NitroStudio2-adjacent tooling); the authoritative field order (in
+  particular `FINF`'s `defaultCharIndex`/`CharWidths` layout and `CWDH`'s `indexBegin`/`indexEnd`/
+  `ptrNext` header) came from this parser
+  * [formats/NFTR/finf.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/finf.cpp),
+    [cglp.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/cglp.cpp),
+    [CWDH/cwdh.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/CWDH/cwdh.cpp),
+    [CWDH/charwidths.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/CWDH/charwidths.cpp),
+    [CMAP/cmap.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/CMAP/cmap.cpp)
+* Retail **White2** (Generation V), which ships 5 `RTFN` fonts (NARC `a/0/2/3`) &mdash; the Pokémon
+  Generation IV ROMs don't use NFTR. Byte-exact round-trip confirmed against all 5.
 
 ## NSBTX
 The `TEX0` block layout (the texture/palette info headers and the shared `NNS_G3dResDict`
@@ -202,6 +268,59 @@ inputs.
 * [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
   * [BIOS Decompression Functions (LZ77UnCompReadNormalWrite)](https://problemkaputt.de/gbatek.htm#biosdecompressionfunctions)
 * Retail Generation IV Pokémon ROMs.
+
+## BLZ (backward LZ) & ARM9/ARM7
+`binaries.MainCodeFile` wraps the ROM's main-code (ARM9/ARM7) regions, whose overlay files are commonly
+BLZ-compressed &mdash; a *backward*-processed LZSS variant (decompression starts at the end of the buffer
+and works toward the front), distinct from the forward `LZ10`/`LZ11` codec above. `framework.BLZCoder`/
+`CodeCompression` implement it.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [BIOS Decompression Functions](https://problemkaputt.de/gbatek.htm#biosdecompressionfunctions) (the
+    general LZSS token format the backward variant reuses)
+* Retail Generation IV Pokémon ROMs, and their ARM9/overlay files specifically.
+
+## NDS Audio (SDAT / SWAV / SWAR / SBNK / SSEQ / SSAR / STRM)
+The `sound.*` package brings the SDAT container and its embedded formats to the same byte-exact-round-trip
+bar as the rest of the library: `SoundArchive` (SYMB/INFO/FAT/FILE container), `Wave`/`WaveArchive`
+(PCM8/PCM16/IMA-ADPCM &rarr; 16-bit PCM), `Stream` (block-interleaved multi-channel STRM), `InstrumentBank`
+(single/drum-set/key-split instrument records), and `Sequence`/`SequenceArchive` (MIDI-like SSEQ bytecode).
+Beyond decode, `SequencePlayer` is a from-scratch software synthesizer (SSEQ+SBNK+SWAR &rarr; stereo PCM)
+whose envelope and per-note synthesis math (LFO vibrato, pitch sweep/portamento, PSG square + noise
+channels) were reverse-engineered from an independent C# sequence player to be hardware-faithful (a
+from-first-principles linear envelope sounded audibly wrong); `SoundFontExporter` maps an `SBNK` to a
+standard SoundFont 2 (`.sf2`) importable into any DAW sampler, and `SequenceMidi`/`MidiSequence` convert
+`SSEQ` to/from standard MIDI (used to validate the sequence decode independent of the synth).
+* [RoadrunnerWMC/ndspy](https://github.com/RoadrunnerWMC/ndspy/tree/master) &mdash; the SDAT/SWAR/SBNK/SSEQ
+  container layouts
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [DS Files - Sound (SDAT etc.)](https://problemkaputt.de/gbatek-ds-files-sound-sdat-etc.htm)
+  * [DS Sound Files - SDAT (Sound Data Archive)](http://problemkaputt.de/gbatek-ds-sound-files-sdat-sound-data-archive.htm)
+  * [DS Sound Files - SBNK (Sound Bank)](http://problemkaputt.de/gbatek-ds-sound-files-sbnk-sound-bank.htm)
+  * [DS Sound Files - SSEQ (Sound Sequence)](https://problemkaputt.de/gbatek-ds-sound-files-sseq-sound-sequence.htm)
+* [lowlines' Documents Page](http://llref.emutalk.net/docs/) &mdash; SDAT/SBNK/SSEQ struct notes
+* [vgmtrans/vgmtrans](https://github.com/vgmtrans/vgmtrans) &mdash; used to re-evaluate decode fidelity;
+  the real gap found was this library's own envelope math, not the container/event decode
+  * [src/main/formats/NDS/NDSInstrSet.cpp](https://github.com/vgmtrans/vgmtrans/blob/master/src/main/formats/NDS/NDSInstrSet.cpp),
+    [NDSInstrSet.h](https://github.com/vgmtrans/vgmtrans/blob/master/src/main/formats/NDS/NDSInstrSet.h),
+    [NDSSeq.cpp](https://github.com/vgmtrans/vgmtrans/blob/master/src/main/formats/NDS/NDSSeq.cpp)
+* [Gota7/GotaSequenceLib](https://github.com/Gota7/GotaSequenceLib) &mdash; an independent C# DS sequence
+  player (used by NitroStudio2); the source for the exact hardware synthesis math (192&nbsp;Hz driver
+  rate, LFO sine table, pitch-sweep/portamento, PSG square + noise channel generation, the logarithmic
+  volume envelope) that made `SequencePlayer`/`DsEnvelope`/`DsSynth` hardware-faithful
+  * [Playback/Track.cs](https://github.com/Gota7/GotaSequenceLib/blob/master/Playback/Track.cs),
+    [Channel.cs](https://github.com/Gota7/GotaSequenceLib/blob/master/Playback/Channel.cs),
+    [Player.cs](https://github.com/Gota7/GotaSequenceLib/blob/master/Playback/Player.cs),
+    [TimeBarrier.cs](https://github.com/Gota7/GotaSequenceLib/blob/master/Playback/TimeBarrier.cs)
+* Retail Generation IV Pokémon ROMs + **White2**'s SDAT (title theme, battle tower BGM).
+
+## Banner / Icon
+`IconBanner` decodes/encodes the NDS cartridge header's icon/title banner: the 32&times;32, 4bpp, 4&times;4-tiled
+icon bitmap over a 16-color BGR555 palette, and the per-language UTF-16LE titles, with the version's CRC16
+checksum(s) recomputed on write.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [DS Cartridge Icon/Title](http://problemkaputt.de/gbatek-ds-cartridge-icon-title.htm)
+* Retail Generation IV Pokémon ROMs + **White2**, used to validate byte-exact re-serialisation of every
+  retail banner.
 
 ## G3D resource dictionary & g3dcvtr
 Every `NSB*` block indexes its resources through a shared `NNS_G3dResDict` Patricia (crit-bit) dictionary.
