@@ -72,6 +72,14 @@ public class CellBank extends GenericNtrFile
     // The parsed per-cell partition and TACU values are still exposed for reading.
     private byte[] auxiliaryData = new byte[0];
 
+    // Bytes, if any, left over after every declared section (KBEC, and LBAL/TXEU when present) is
+    // accounted for. Retail NCER files are occasionally a couple of bytes longer than their own header
+    // declares -- e.g. a 256-byte file whose NTR header fileSize field says 254 -- with no section
+    // claiming the remainder. Cause unconfirmed (possibly a packer quirk unrelated to this format's own
+    // structure); preserved verbatim rather than chased further, per the project's policy of not chasing
+    // byte-exactness on a single anomalous class of file (found across ~60% of one third-party ROM's NCERs).
+    private byte[] trailingPadding = new byte[0];
+
     private Cell[] cells;
     private IndexedImage image;
 
@@ -242,7 +250,10 @@ public class CellBank extends GenericNtrFile
         auxiliaryData = reader.readBytes(cellBankSectionEnd - cellDataEnd);
 
         if (!labelEnabled)
+        {
+            trailingPadding = reader.readBytes(fileSize - reader.getPosition());
             return;
+        }
 
         reader.setPosition(NTR_HEADER_SIZE + cellBankSectionSize);
 
@@ -298,6 +309,8 @@ public class CellBank extends GenericNtrFile
 
         int uextSectionSize = reader.readInt();
         uextReserved = reader.readInt();
+
+        trailingPadding = reader.readBytes(fileSize - reader.getPosition());
     }
 
 
@@ -355,10 +368,17 @@ public class CellBank extends GenericNtrFile
             writer.writeInt(uextReserved);
         }
 
+        // bytes, if any, beyond what every declared section accounts for -- see trailingPadding's field doc
+        writer.write(trailingPadding);
+
         int storedPos = writer.getPosition();
         writer.setPosition(0); //total file size
 
-        writeGenericNtrHeader(writer, storedPos, numBlocks);
+        // The outer NTR header's fileSize field is decorative (see Palette's identical fix): retail files
+        // occasionally declare a value short of their real physical length, with the remainder captured as
+        // trailingPadding above. Re-emit the originally parsed value so an unedited file round-trips
+        // exactly; a from-scratch bank (fileSize never parsed, still 0) falls back to the real computed size.
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : storedPos, numBlocks);
 
         writer.setPosition(storedPos);
 

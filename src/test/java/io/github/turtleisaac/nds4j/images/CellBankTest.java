@@ -68,6 +68,28 @@ public class CellBankTest
     }
 
     @Test
+    @DisplayName("save() reproduces every RECN file in Phantom Hourglass byte-for-byte")
+    void writtenNcerRoundTripsByteExactAcrossPhantomHourglass()
+    {
+        // Found a fourth writer defect this way, against a third-party (non-Pokemon) title: 137/228 of
+        // this ROM's NCER files are a couple of bytes physically longer than their own NTR header
+        // declares (e.g. a 256-byte file whose header fileSize field says 254), with the remainder
+        // outside every declared section -- not VRAM-partition/TACU data, not label data. Now captured
+        // as trailingPadding and re-emitted; the header's own fileSize field is preserved from the parse
+        // (like Palette's identical fix) rather than recomputed, since it legitimately differs from the
+        // physical length.
+        NintendoDsRom rom = TestRoms.require("Legend of Zelda, The - Phantom Hourglass.nds");
+        List<byte[]> files = NtrFixtures.collect(rom, "RECN");
+        Assumptions.assumeFalse(files.isEmpty(), "no RECN files found in the test ROM");
+        for (int i = 0; i < files.size(); i++)
+        {
+            byte[] original = files.get(i);
+            byte[] written = new CellBank(original).save();
+            assertThat(written).as("RECN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
+
+    @Test
     @DisplayName("a saved NCER re-reads equal to the original object")
     void writtenNcerEqualsOriginalObject()
     {
