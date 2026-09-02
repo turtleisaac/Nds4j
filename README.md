@@ -107,10 +107,15 @@ import java.io.File;
 import g3d.ModelSet;
 import g3d.Model;
 import g3d.GltfExporter;
+import g3d.SoftwareRenderer;
 import images.IndexedImage;
 import images.Palette;
 import images.CellBank;
 import images.CellAnimation;
+import sound.SoundArchive;
+import sound.SoundArchive.RecordType;
+import sound.SequencePlayer;
+import sound.WavFile;
 
 public class Example
 {
@@ -186,7 +191,7 @@ public class Example
     }
 
     /**
-     * Load a 3D model (NSBMD) out of a NARC and export it as an OBJ and a glTF
+     * Load a 3D model (NSBMD) out of a NARC, export it as an OBJ and a glTF, and render a quick preview
      */
     public static void example7() throws java.io.IOException
     {
@@ -197,6 +202,10 @@ public class Example
 
         BinaryWriter.writeFile("model.obj", model.toObj().getBytes());
         BinaryWriter.writeFile("model.gltf", GltfExporter.toGltf(model, models.getEmbeddedTextures()).getBytes());
+
+        // a dependency-free preview -- no GPU/native renderer needed
+        ImageIO.write(SoftwareRenderer.render(model, models.getEmbeddedTextures(), 400, 400, 200, -5),
+                "png", new File("model_preview.png"));
     }
 
     /**
@@ -221,6 +230,52 @@ public class Example
         ImageIO.write(nanr.getFrameImage(firstFrame), "png", new File("sprite_frame.png"));
     }
 
+    /**
+     * Find a game's SDAT, render one of its sequences (SSEQ, through its SBNK instrument bank and SWAR
+     * waveforms) straight to PCM with the built-in software synthesizer, and export it as a WAV
+     */
+    public static void example9(NintendoDsRom rom) throws java.io.IOException
+    {
+        SoundArchive sdat = null;
+        for (int i = 0; i < rom.getNumFiles() && sdat == null; i++)
+        {
+            byte[] f = rom.getFile(i);
+            if (f != null && f.length >= 4 && new String(f, 0, 4).equals("SDAT"))
+                sdat = SoundArchive.fromBytes(f);
+        }
+
+        SequencePlayer player = SequencePlayer.forSequence(sdat, 1008); // SEQ_GS_POKEMON_THEME, HeartGold
+        short[] pcm = player.renderStereo(32000, 8.0); // interleaved L,R, capped at 8 seconds
+        BinaryWriter.writeFile("theme.wav", WavFile.pcm16(pcm, 2, 32000));
+    }
+
+    /**
+     * Paint on an assembled cell image and write the edit back down through the NCER into the NCGR's
+     * tiles -- the same write-back path an image editor's "save" would drive
+     */
+    public static void example10() throws java.io.IOException
+    {
+        NintendoDsRom rom = NintendoDsRom.fromFile("HeartGold.nds");
+        Narc narc = new Narc(rom.getFile(174));
+
+        IndexedImage ncgr = new IndexedImage(narc.getFile(0), 0, 0, 1, 1, true);
+        Palette palette = new Palette(narc.getFile(1), 0);
+        ncgr.setPalette(palette);
+
+        CellBank ncer = new CellBank(narc.getFile(5));
+        ncer.setParentImage(ncgr);
+
+        java.awt.image.BufferedImage cellImage = ncer.getNcerImage(0); // the assembled pose
+        java.awt.Graphics2D g = cellImage.createGraphics();
+        g.setColor(java.awt.Color.BLUE);
+        g.fillRect(cellImage.getWidth() / 2 - 6, 2, 12, 12); // paint a patch on the hat
+        g.dispose();
+
+        // decomposes the edited image back into the NCGR's tiles, colors matched against the palette
+        ncer.applyImage(0, cellImage, ncgr, palette);
+        BinaryWriter.writeFile("edited.ncgr", ncgr.save()); // the edit now lives in the NCGR file itself
+    }
+
 
     public static void main(String[] args) throws java.io.IOException
     {
@@ -236,9 +291,18 @@ public class Example
         example6(rom);
         example7();
         example8(rom);
+        example9(rom);
+        example10();
     }
 }
 ```
+
+What a few of those examples actually produce (every image below came out of the code above, unedited):
+
+| | | |
+|:---:|:---:|:---:|
+| ![The ROM's own icon](docs/readme-examples/icon.png)<br>`example6` &mdash; the ROM's own icon | ![manene, rendered from its NSBMD](docs/readme-examples/manene_model.png)<br>`example7` &mdash; an NSBMD, rendered | ![The assembled NCGR+NCLR+NCER+NANR stack](docs/readme-examples/sprite_frame.png)<br>`example8` &mdash; NCGR+NCLR+NCER+NANR, assembled |
+| ![Waveform of the rendered SSEQ](docs/readme-examples/theme_waveform.png)<br>`example9` &mdash; an SSEQ, rendered to PCM (waveform shown; it's actually audio) | ![Before the write-back edit](docs/readme-examples/cell_before.png) ![After the write-back edit](docs/readme-examples/cell_after.png)<br>`example10` &mdash; before/after the write-back edit | |
 
 
 Misconceptions
