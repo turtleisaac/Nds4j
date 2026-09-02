@@ -179,6 +179,9 @@ public class MaterialColorAnimationSet extends G3dFile
                     long ch = mat.rawCh[k];
                     if ((((ch >> 24) & 0xFF) & CONST) != 0) continue;      // constant → value is inline
                     int off = (int) (ch & 0xFFFF), len = frameCount * (k < 4 ? 2 : 1);
+                    // copyOfRange never throws for a too-large "to" (it zero-pads), only for a "from"
+                    // outside the buffer, so this stays safe even for the unrecognized-encoding channels
+                    // colorChannel/alphaChannel clamp around below.
                     mat.rawArr[k] = Arrays.copyOfRange(d, animStart + off, animStart + off + len);
                 }
                 materials.add(mat);
@@ -257,8 +260,8 @@ public class MaterialColorAnimationSet extends G3dFile
         if ((flags & CONST) != 0)
             return new ColorChannel(new int[]{value}, writer, fieldOffset, true);
         int p = animStart + value;
-        int[] keys = new int[Math.max(1, frames)];
-        for (int i = 0; i < keys.length; i++)
+        int[] keys = new int[clampFrameCount(d.length, p, Math.max(1, frames), 2)];
+        for (int i = 0; i < keys.length && p + i * 2 + 1 < d.length; i++)
             keys[i] = readU16(d, p + i * 2);
         return new ColorChannel(keys, writer, p, false);
     }
@@ -272,10 +275,23 @@ public class MaterialColorAnimationSet extends G3dFile
         if ((flags & CONST) != 0)
             return new ScalarChannel(new int[]{value & 0x1F}, writer, fieldOffset, true);
         int p = animStart + value;
-        int[] keys = new int[Math.max(1, frames)];
-        for (int i = 0; i < keys.length; i++)
+        int[] keys = new int[clampFrameCount(d.length, p, Math.max(1, frames), 1)];
+        for (int i = 0; i < keys.length && p + i < d.length; i++)
             keys[i] = d[p + i] & 0xFF;
         return new ScalarChannel(keys, writer, p, false);
+    }
+
+    // Some non-Pokemon titles (first seen in Animal Crossing: Wild World and Phantom Hourglass) carry a
+    // flags byte (observed 0x40/0x41) this reverse-engineered format doesn't recognize -- neither the
+    // documented 0x20 constant bit nor a frame count consistent with a plain per-frame array, since the
+    // declared frame count reads past the end of the block. Rather than guess at an undocumented curve
+    // encoding (risking a wrong-but-plausible decode), clamp to what the buffer actually holds: the file
+    // still round-trips byte-exact regardless (save() re-emits the MAT0 block verbatim), only this one
+    // channel's *decoded* values for the truncated tail are unavailable.
+    private static int clampFrameCount(int dataLen, int p, int frames, int stride)
+    {
+        int available = (dataLen - p) / stride;
+        return Math.max(1, Math.min(frames, available));
     }
 
     /** One material's five color tracks; sample each at a frame to drive the material's lighting. */

@@ -50,6 +50,16 @@ public class AnimationWriterTest
         for (int i = 0; i < rom.getNumFiles(); i++)
         {
             byte[] f = rom.getFile(i);
+            // Not every title wraps these in a NARC -- e.g. 4 of Animal Crossing: Wild World's 5 BMA0
+            // files are loose top-level ROM files.
+            if (magic(f).equals(blockMagic))
+            {
+                assertThat(reencode.apply(f))
+                        .as("%s top-level file %d re-encodes byte-for-byte", blockMagic, i)
+                        .isEqualTo(f);
+                checked++;
+                continue;
+            }
             if (!magic(f).equals("NARC")) continue;
             Narc narc;
             try { narc = new Narc(f); }
@@ -101,6 +111,28 @@ public class AnimationWriterTest
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         int n = roundTrip(rom, "BMA0", bf -> new MaterialColorAnimationSet(bf).encode());
         Assumptions.assumeTrue(n > 0, "no NSBMA files found");
+    }
+
+    @Test
+    @DisplayName("NSBMA parses without throwing and save() round-trips across Animal Crossing and Phantom Hourglass")
+    void materialColorParsesAndSavesAcrossOtherRoms()
+    {
+        // Found a sixth reader defect this way, against two non-Pokemon titles: some of their NSBMA
+        // channels carry a flags byte (0x40/0x41) this reverse-engineered format doesn't recognize --
+        // neither the documented 0x20 constant bit nor a frame count consistent with a plain per-frame
+        // array (the declared count read past the end of the block). The constructor now clamps such a
+        // channel's decoded keys to what the buffer holds instead of crashing (see
+        // MaterialColorAnimationSet.clampFrameCount); save() -- block-verbatim per G3dFile -- still
+        // reproduces the file exactly regardless, since the underlying bytes are never touched. encode()
+        // (the byte-exact re-encode path) is a known gap for these particular files: it can't yet
+        // reproduce the unrecognized channels' true layout, only save() is guaranteed here.
+        for (String romName : new String[] {"Animal Crossing - Wild World.nds",
+                "Legend of Zelda, The - Phantom Hourglass.nds"})
+        {
+            NintendoDsRom rom = TestRoms.require(romName);
+            int n = roundTrip(rom, "BMA0", bf -> new MaterialColorAnimationSet(bf).save());
+            Assumptions.assumeTrue(n > 0, "no NSBMA files found in " + romName);
+        }
     }
 
     @Test
