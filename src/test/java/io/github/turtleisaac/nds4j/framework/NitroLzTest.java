@@ -70,6 +70,69 @@ public class NitroLzTest
     }
 
     @Test
+    @DisplayName("a \"LZ77\"-tagged stream is detected and decompresses transparently")
+    void lz77TaggedVariant()
+    {
+        // Some titles (first found live-driving NitroViewer against Animal Crossing: Wild World's loose
+        // top-level .nsbtx files) wrap the ordinary [type][u24 size]... stream in a 4-byte ASCII "LZ77"
+        // tag. Before this, isCompressed() never recognised it (it only looked at offset 0), so every such
+        // file was invisible -- in ACWW alone, 6348 top-level files, 2503 of them valid BTX0 texture sets.
+        byte[] data = "some moderately repetitive test payload, repetitive test payload, test payload"
+                .getBytes(StandardCharsets.US_ASCII);
+        byte[] lz10Tagged = NitroLz.compressLz77Tagged(data);
+        byte[] lz11Tagged = NitroLz.compressLz11Lz77Tagged(data);
+
+        assertThat(magic(lz10Tagged)).isEqualTo("LZ77");
+        assertThat(lz10Tagged[4] & 0xFF).isEqualTo(0x10);
+        assertThat(magic(lz11Tagged)).isEqualTo("LZ77");
+        assertThat(lz11Tagged[4] & 0xFF).isEqualTo(0x11);
+
+        assertThat(NitroLz.isCompressed(lz10Tagged)).as("tagged LZ10 is recognised").isTrue();
+        assertThat(NitroLz.isCompressed(lz11Tagged)).as("tagged LZ11 is recognised").isTrue();
+        assertThat(NitroLz.decompress(lz10Tagged)).isEqualTo(data);
+        assertThat(NitroLz.decompress(lz11Tagged)).isEqualTo(data);
+
+        // an untagged bare stream must still work exactly as before (no regression)
+        byte[] bare = NitroLz.compress(data);
+        assertThat(NitroLz.isCompressed(bare)).isTrue();
+        assertThat(NitroLz.decompress(bare)).isEqualTo(data);
+    }
+
+    @Test
+    @DisplayName("real \"LZ77\"-tagged files in Animal Crossing: Wild World decompress to recognisable formats")
+    void decodesLz77TaggedRetailFiles()
+    {
+        NintendoDsRom rom;
+        try { rom = TestRoms.require("Animal Crossing - Wild World.nds"); }
+        catch (RuntimeException e) { Assumptions.assumeTrue(false, "Animal Crossing not available"); return; }
+
+        int tagged = 0, knownMagic = 0, reRoundTrip = 0;
+        for (int i = 0; i < rom.getNumFiles(); i++)
+        {
+            byte[] raw = rom.getFile(i);
+            if (raw == null || raw.length < 8 || !magic(raw).equals("LZ77") || !NitroLz.isCompressed(raw))
+                continue;
+            byte[] dec;
+            try { dec = NitroLz.decompress(raw); }
+            catch (RuntimeException e) { continue; }
+            tagged++;
+            String m = magic(dec);
+            if (m.equals("BMD0") || m.equals("BTX0") || m.equals("BCA0") || m.equals("BTP0")
+                    || m.equals("BTA0") || m.equals("BVA0") || m.equals("BMA0"))
+                knownMagic++;
+            if (java.util.Arrays.equals(NitroLz.decompress(NitroLz.compressLz77Tagged(dec)), dec))
+                reRoundTrip++;
+        }
+        Assumptions.assumeTrue(tagged > 50, "not enough LZ77-tagged files found");
+        System.out.printf("NitroLz: %d \"LZ77\"-tagged files, %d with a known Nitro magic, %d re-round-tripped%n",
+                tagged, knownMagic, reRoundTrip);
+        assertThat(knownMagic).as("real LZ77-tagged files decompress to recognisable formats")
+                .isGreaterThan(tagged / 2);
+        assertThat(reRoundTrip).as("every decoded file re-compresses/decompresses back identically")
+                .isEqualTo(tagged);
+    }
+
+    @Test
     @DisplayName("compressible data actually shrinks")
     void compresses()
     {

@@ -28,10 +28,18 @@ import java.io.ByteArrayOutputStream;
  * {@link CodeCompression}, which is the ARM9's <em>backward</em> BLZ variant; here the standard forward
  * header is {@code [type][u24 decompressedSize]} followed by flag-driven literal/back-reference blocks.
  * <p>
- * {@link #decompress} reads both types; {@link #compress}/{@link #compressLz11} produce byte-valid streams
- * that decode back identically ({@code decompress(compress(x)).equals(x)}). Nintendo's exact match
- * heuristics are not reproduced, so a re-compressed file is <em>valid</em>, not byte-identical to the
- * original &mdash; the correctness bar is the round-trip, matching the rest of the library's editing model.
+ * Some titles (first seen in Animal Crossing: Wild World's loose top-level {@code .nsbtx} files) wrap that
+ * same header/stream in a 4-byte ASCII {@code "LZ77"} tag rather than emitting it bare at offset 0 &mdash;
+ * i.e. {@code "LZ77"} followed by the ordinary {@code [type][u24 size]...} stream, unrelated to the
+ * standalone {@code CompressLZ77.exe}-style tooling convention it's named after. {@link #isCompressed} and
+ * {@link #decompress} detect and transparently skip this tag; {@link #compressLz77Tagged} /
+ * {@link #compressLz11Lz77Tagged} re-emit it for a caller that needs to preserve the wrapper on write-back.
+ * <p>
+ * {@link #decompress} reads both types (tagged or not); {@link #compress}/{@link #compressLz11} produce
+ * byte-valid streams that decode back identically ({@code decompress(compress(x)).equals(x)}). Nintendo's
+ * exact match heuristics are not reproduced, so a re-compressed file is <em>valid</em>, not byte-identical
+ * to the original &mdash; the correctness bar is the round-trip, matching the rest of the library's
+ * editing model.
  */
 public final class NitroLz
 {
@@ -39,31 +47,56 @@ public final class NitroLz
 
     private static final int MIN_MATCH = 3;
     private static final int WINDOW = 0x1000;   // 4 KiB back-reference window (12-bit displacement)
+    private static final byte[] LZ77_TAG = {'L', 'Z', '7', '7'};
 
-    /** @return true if {@code data} carries a Nitro LZ10/LZ11 header with a plausible decompressed size. */
-    public static boolean isCompressed(byte[] data)
+    private static boolean hasLz77Tag(byte[] data)
     {
-        if (data == null || data.length < 4) return false;
-        int type = data[0] & 0xFF;
+        if (data.length < LZ77_TAG.length) return false;
+        for (int i = 0; i < LZ77_TAG.length; i++)
+            if (data[i] != LZ77_TAG[i]) return false;
+        return true;
+    }
+
+    private static boolean isNitroLzHeader(byte[] data, int off)
+    {
+        if (data.length < off + 4) return false;
+        int type = data[off] & 0xFF;
         if (type != 0x10 && type != 0x11) return false;
-        long size = (data[1] & 0xFF) | ((data[2] & 0xFF) << 8) | ((data[3] & 0xFF) << 16);
+        long size = (data[off + 1] & 0xFF) | ((data[off + 2] & 0xFF) << 8) | ((data[off + 3] & 0xFF) << 16);
         return size > 0;
     }
 
     /**
-     * Decompresses a Nitro LZ10 or LZ11 stream.
-     * @param data the compressed bytes (starting with the {@code [type][u24 size]} header)
+     * @return true if {@code data} carries a Nitro LZ10/LZ11 header (optionally behind a {@code "LZ77"}
+     * tag) with a plausible decompressed size.
+     */
+    public static boolean isCompressed(byte[] data)
+    {
+        if (data == null || data.length < 4) return false;
+        if (hasLz77Tag(data)) return isNitroLzHeader(data, LZ77_TAG.length);
+        return isNitroLzHeader(data, 0);
+    }
+
+    /**
+     * Decompresses a Nitro LZ10 or LZ11 stream, optionally behind a {@code "LZ77"} tag (see the class doc).
+     * @param data the compressed bytes: {@code [type][u24 size]...}, or {@code "LZ77"[type][u24 size]...}
      * @return the decompressed bytes
      * @throws IllegalArgumentException if the header is not a supported LZ type
      */
     public static byte[] decompress(byte[] data)
     {
-        int type = data[0] & 0xFF;
+        return decompressAt(data, hasLz77Tag(data) ? LZ77_TAG.length : 0);
+    }
+
+    private static byte[] decompressAt(byte[] data, int headerOffset)
+    {
+        int type = data[headerOffset] & 0xFF;
         if (type != 0x10 && type != 0x11)
             throw new IllegalArgumentException(String.format("not a Nitro LZ stream (type 0x%02X)", type));
-        int size = (data[1] & 0xFF) | ((data[2] & 0xFF) << 8) | ((data[3] & 0xFF) << 16);
+        int size = (data[headerOffset + 1] & 0xFF) | ((data[headerOffset + 2] & 0xFF) << 8)
+                | ((data[headerOffset + 3] & 0xFF) << 16);
         byte[] out = new byte[size];
-        int op = 0, ip = 4;
+        int op = 0, ip = headerOffset + 4;
         while (op < size)
         {
             int flags = data[ip++] & 0xFF;
@@ -116,6 +149,24 @@ public final class NitroLz
 
     /** Compresses with LZ11 (type {@code 0x11}). @param data the raw bytes @return the compressed stream. */
     public static byte[] compressLz11(byte[] data) { return encode(data, true); }
+
+    /**
+     * Compresses with LZ10, wrapped in the {@code "LZ77"} tag (see the class doc) &mdash; for writing back
+     * over a file whose original bytes carried that tag, so the wrapper is preserved rather than dropped.
+     * @param data the raw bytes @return the tagged, compressed stream.
+     */
+    public static byte[] compressLz77Tagged(byte[] data) { return tagged(encode(data, false)); }
+
+    /** {@code "LZ77"}-tagged counterpart of {@link #compressLz11}. @param data the raw bytes @return the tagged, compressed stream. */
+    public static byte[] compressLz11Lz77Tagged(byte[] data) { return tagged(encode(data, true)); }
+
+    private static byte[] tagged(byte[] body)
+    {
+        byte[] out = new byte[LZ77_TAG.length + body.length];
+        System.arraycopy(LZ77_TAG, 0, out, 0, LZ77_TAG.length);
+        System.arraycopy(body, 0, out, LZ77_TAG.length, body.length);
+        return out;
+    }
 
     // Greedy longest-match encoder for both types. Produces a valid stream (round-trips through decompress);
     // it does not reproduce Nintendo's exact match choices, so it is not byte-identical to a retail file.
