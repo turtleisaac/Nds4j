@@ -459,12 +459,14 @@ public class CellBank extends GenericNtrFile
     public void setParentImage(IndexedImage image)
     {
         // The OAM composition addresses the parent as TILED character data (convertToTiles + tile
-        // offsets). A scanned (bitmap) NCGR is laid out linearly, so its OAM offsets don't map onto a
-        // re-tiled grid — composing it produces scrambled output. Bitmap-OBJ composition isn't
-        // implemented yet, so refuse rather than emit garbage. Note: the scanned NCGR's own pixels are
-        // a correct bitmap, so callers can still render it directly (e.g. DPPt trbgra.narc trainer
-        // sprites are viewable as the raw NCGR). See IndexedImage#isScanned().
-        if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED)
+        // offsets) unless the parent is a LINE_BUFFER (plain linear-raster) NCGR — e.g. a Gen V "pokegra"
+        // battle-sprite sheet — in which case OamImage.generateImageData takes a separate rectangular-crop
+        // path (a tile index there names a position in the sheet's own tile grid, not a re-tiled block;
+        // see that method). Any other scanned (LCG-encrypted) mode is genuinely unimplemented — composing
+        // it would scramble the output — so refuse rather than emit garbage. The scanned NCGR's own pixels
+        // are still a correct bitmap on their own, so callers can render it directly. See IndexedImage#isScanned().
+        if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED
+                && image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
             throw new RuntimeException("Can't use a scanned image with an NCER");
         this.image = image;
     }
@@ -511,12 +513,19 @@ public class CellBank extends GenericNtrFile
                 transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
         Graphics2D g = output.createGraphics();
 
+        // Retail draw order is the reverse of OAM index: OAM 0 is topmost, so painting from the last
+        // index down to 0 makes index 0 the last (and therefore topmost) thing drawn.
         Cell.OAM.OamImage[] images = cell.getImages();
-        for (int x = 0; x < images.length; x++)
+        for (int x = images.length - 1; x >= 0; x--)
         {
             Cell.OAM oam = cell.oams[x];
+            if (isOamDisabled(oam))
+                continue;
+            int[] physical = getOamSize(oam);
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - physical[0]) / 2, offY = (footprint[1] - physical[1]) / 2;
             BufferedImage oamImage = transparent ? images[x].getTransparentImage() : images[x].getImage();
-            g.drawImage(oamImage, oam.xCoord - bounds.x, oam.yCoord - bounds.y, null);
+            g.drawImage(oamImage, oam.xCoord + offX - bounds.x, oam.yCoord + offY - bounds.y, null);
         }
         g.dispose();
 
@@ -541,14 +550,20 @@ public class CellBank extends GenericNtrFile
             return new Rectangle(0, 0, 0, 0);
 
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+        boolean any = false;
         for (Cell.OAM oam : cell.oams)
         {
-            int[] size = getOamSize(oam); // {width, height}
+            if (isOamDisabled(oam))
+                continue;
+            int[] footprint = getOamFootprint(oam); // {width, height}, doubled for affine double-size
+            any = true;
             minX = Math.min(minX, oam.xCoord);
             minY = Math.min(minY, oam.yCoord);
-            maxX = Math.max(maxX, oam.xCoord + size[0]);
-            maxY = Math.max(maxY, oam.yCoord + size[1]);
+            maxX = Math.max(maxX, oam.xCoord + footprint[0]);
+            maxY = Math.max(maxY, oam.yCoord + footprint[1]);
         }
+        if (!any)
+            return new Rectangle(0, 0, 0, 0);
         return new Rectangle(minX, minY, maxX - minX, maxY - minY);
     }
 
@@ -602,9 +617,13 @@ public class CellBank extends GenericNtrFile
         for (int k = 0; k < cell.oams.length; k++)
         {
             Cell.OAM oam = cell.oams[k];
+            if (isOamDisabled(oam))
+                continue;
             int[] sz = getOamSize(oam);
             int w = sz[0], h = sz[1];
-            int dx = oam.xCoord - bounds.x, dy = oam.yCoord - bounds.y;
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - w) / 2, offY = (footprint[1] - h) / 2;
+            int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
             int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
             int base = sub * subSize;
 
@@ -671,8 +690,12 @@ public class CellBank extends GenericNtrFile
         for (int i = 0; i < subCount; i++) perSub.add(new java.util.LinkedHashSet<Integer>());
         for (Cell.OAM oam : cell.oams)
         {
+            if (isOamDisabled(oam))
+                continue;
             int[] sz = getOamSize(oam);
-            int dx = oam.xCoord - bounds.x, dy = oam.yCoord - bounds.y;
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - sz[0]) / 2, offY = (footprint[1] - sz[1]) / 2;
+            int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
             int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
             for (int y = 0; y < sz[1]; y++)
                 for (int x = 0; x < sz[0]; x++)
@@ -1148,22 +1171,48 @@ public class CellBank extends GenericNtrFile
                     int subCount = Math.max(1, image.getPalette().getNumColors() / 16);
                     oamImage.setPaletteIdx(image.getBitDepth() == 4 && palette >= 0 && palette < subCount ? palette : 0);
 
-                    int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
-                    byte[] imageData;
-
-                    switch (oamImage.getBitDepth())
+                    if (image.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
                     {
-                        case 4:
-                            imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
-                            IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, oamImage, startByte);
-                            break;
-                        case 8:
-                            imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
-                            IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, oamImage, startByte);
-                            break;
+                        // The parent NCGR is a plain linear-raster sheet (a Gen V "pokegra" battle-sprite
+                        // sheet), not a bank of independently-addressable tile blocks. A tile index here
+                        // names a position in the sheet's own tile grid — tileOffset % sheetTilesWide,
+                        // tileOffset / sheetTilesWide — and the OAM is a rectangular crop of that grid
+                        // starting there, not a run of consecutive tiles. (Verified against a real part:
+                        // the crop this produces for a Bulbasaur head OAM is pixel-exact.)
+                        int sheetTilesWide = Math.max(1, image.getWidth() / 8);
+                        int srcX = (tileOffset % sheetTilesWide) * 8;
+                        int srcY = (tileOffset / sheetTilesWide) * 8;
+                        for (int row = 0; row < storedHeight; row++)
+                        {
+                            int sy = srcY + row;
+                            if (sy >= image.getHeight())
+                                break;
+                            for (int col = 0; col < storedWidth; col++)
+                            {
+                                int sx = srcX + col;
+                                if (sx >= image.getWidth())
+                                    break;
+                                oamImage.setPixelValue(col, row, image.getPixelValue(sx, sy));
+                            }
+                        }
                     }
-//                    IndexedImage.NcgrUtils.convertOffsetToCoordinate(imageData, startByte, cell.getWidth() * cell.getHeight(), image, image.getNumTiles(), (image.getWidth() / 8) / image.getColsPerChunk(), image.getColsPerChunk(), image.getRowsPerChunk(), cell);
-//                    IndexedImage.NcgrUtils.convertFromTiles4BppAlternate(imageData, cell, startByte);
+                    else
+                    {
+                        int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
+                        byte[] imageData;
+
+                        switch (oamImage.getBitDepth())
+                        {
+                            case 4:
+                                imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
+                                IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, oamImage, startByte);
+                                break;
+                            case 8:
+                                imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
+                                IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, oamImage, startByte);
+                                break;
+                        }
+                    }
                     update = false;
                 }
 
@@ -1174,6 +1223,13 @@ public class CellBank extends GenericNtrFile
                  */
                 public void save()
                 {
+                    // Write-back for a LINE_BUFFER (bitmap-sheet) parent isn't implemented: the read side
+                    // above takes a rectangular-crop path with no matching tile-address math to splice
+                    // edited pixels back into the sheet. Refuse rather than silently write through the
+                    // (wrong, tiled) addressing below.
+                    if (image.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
+                        throw new RuntimeException("Editing a LINE_BUFFER (bitmap-sheet) NCGR's OAMs isn't supported yet");
+
                     oamImage.setBitDepth(image.getBitDepth());
 
                     byte[] cellData = new byte[0];
@@ -1426,5 +1482,33 @@ public class CellBank extends GenericNtrFile
     public static int[] getOamSize(Cell.OAM oam)
     {
         return oamSize[oam.shape][oam.size];
+    }
+
+    /**
+     * Gets an OAM's on-screen bounding footprint: its {@link #getOamSize} doubled when the OAM is affine
+     * (rotation/scaling) with the double-size flag set — hardware behavior where the physical sprite
+     * pixels stay the base size but are centered within a box twice as large, so rotation/scaling never
+     * clips the content. A plain (non-affine) OAM's footprint equals its physical size.
+     * @param oam a {@link Cell.OAM}
+     * @return {width, height} of the OAM's bounding footprint
+     */
+    public static int[] getOamFootprint(Cell.OAM oam)
+    {
+        int[] base = getOamSize(oam);
+        if (oam.rotation && oam.sizeDisable)
+            return new int[]{base[0] * 2, base[1] * 2};
+        return base;
+    }
+
+    /**
+     * For a non-affine OAM, the double-size bit (attr0 bit 9) instead means "OBJ disable": the OAM is
+     * defined but not rendered at all. Affine OAMs use the same bit for double-size, so this only fires
+     * for a plain sprite.
+     * @param oam a {@link Cell.OAM}
+     * @return whether the OAM is disabled and should be skipped entirely
+     */
+    public static boolean isOamDisabled(Cell.OAM oam)
+    {
+        return !oam.rotation && oam.sizeDisable;
     }
 }

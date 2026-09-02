@@ -746,7 +746,7 @@ decompressing every LZ member before matching:
 |:--|:--|:--:|:--|
 | NMCR (multi-cell resource) | `RCMN` | **3181** | stored **raw** (uncompressed) inside NARCs |
 | NMAR (multi-cell animation) | `RAMN` | **3181** | raw; pairs 1:1 with the NMCR in the same NARC |
-| NFTR (font) | `RTFN` | 10 | raw; **not yet implemented** (example now exists) |
+| NFTR (font) | `RTFN` | 10 | raw; **implemented 2026-09-01** (`NitroFont`) — byte-exact + glyph/CMAP/CWDH decode, see §11f |
 | NTFT/NTFP/NTFI (raw texel/pal/index) | *(headerless)* | 0 identifiable | no magic; Pokémon keeps texture data in `TEX0`/NSBTX — **still blocked on an example** |
 
 NMCR/NMAR always co-locate with the **NCER/NANR** they build on: e.g. White2 `romFile#351` NARC members
@@ -824,8 +824,38 @@ rendering for any DS game:**
 > CHAR grid, but SOPC height is often 2× (sometimes 4×/8×) the CHAR height — the original values are now captured
 > and re-emitted verbatim. Tests: `LineBufferNcgrTest` (byte-exact over every White2 LINE_BUFFER NCGR;
 > classification; a plain-raster coherence check). Full suite **334 green**. The Gen IV `char_type=1 + SOPC`
-> outlier group (~120/ROM) routes here too — byte-exact but pixel-correctness unverified. **Item 2 (CellBank OBJ
-> rendering: rectangular-crop / affine double-size / draw-order) is still open.**
+> outlier group (~120/ROM) routes here too — byte-exact but pixel-correctness unverified.
+>
+> **Item 2 is DONE (2026-09-01).** `CellBank` now renders a `LINE_BUFFER`-backed NCER correctly. Full suite
+> **348 green** (+7, `BitmapSheetCellRenderingTest`). Fix, in `images/CellBank.java`:
+> - **`setParentImage`** now accepts `LINE_BUFFER` alongside `NOT_SCANNED` (only genuinely-encrypted scan
+>   modes are still refused).
+> - **`OAM.OamImage.generateImageData()`** branches on `image.getScanMode() == LINE_BUFFER`: instead of the
+>   tiled `convertToTiles4Bpp`/`convertFromTiles4Bpp` addressing (which assumes an OAM's tiles are stored
+>   consecutively — true for ordinary sprites, false for a sheet), it computes `tileX = tileOffset %
+>   sheetTilesWide, tileY = tileOffset / sheetTilesWide` and copies a **rectangular crop** of the sheet
+>   starting at `(tileX*8, tileY*8)` directly via `getPixelValue`/`setPixelValue` (clipped, not thrown, if a
+>   crop runs past the sheet edge). `OamImage.save()` now explicitly refuses to edit a `LINE_BUFFER`-backed
+>   OAM (the write-back math isn't implemented) rather than silently writing through the wrong addressing.
+> - **`getOamFootprint(oam)`** (new, alongside `getOamSize`): doubles the OAM's `oamSize` table entry when
+>   `oam.rotation && oam.sizeDisable` (the hardware double-size flag — content stays physical size, centered
+>   in a 2× box). **`isOamDisabled(oam)`** (new): the same bit means "OBJ disabled" for a *non-affine* OAM,
+>   not double-size — such an OAM is now skipped entirely (bounds, render, write-back) instead of drawn.
+> - **`cellBounds`** uses the footprint (not the physical size) for the min/max box, and skips disabled OAMs.
+> - **`renderCell`** draws OAMs **highest index first, index 0 last** (retail draw order — index 0 is
+>   topmost, the reverse of the old ascending-index paint order) and offsets each draw by
+>   `(footprint−physical)/2` to center the physical content in its double-size box.
+> - **`applyImage`/`applyImageRebuildingPalette`** (the write-back path) apply the same centering offset to
+>   their source-pixel sampling coordinates, so editing an affine double-size OAM's region still lands on
+>   the right pixels, and skip disabled OAMs.
+>
+> **Validated against real retail data** (White2 `a/0/0/4`, front sprites, species #1–7): Bulbasaur cell 0
+> (the head) renders to the exact expected size (64×37), ink count (397 opaque pixels), and a golden center
+> pixel; every cell of species #1–7 renders without throwing and draws real ink. Screenshot:
+> `g3d_out/pokegra_cellbank_fix_montage.png` (each species' head/cell-0 part, pixel-clean). **Reminder: a
+> full assembled Pokémon still needs the NANR puppet orchestration (§11d bullet above) — this fix is "a
+> single cell/part renders correctly," which is exactly Nds4j's scope boundary, not "a full Pokémon
+> assembles."** Tests: `BitmapSheetCellRenderingTest`.
 
 1. ~~Teach `IndexedImage` the **bitmap NCGR format**~~ *(done — see the note above)* — a plain linear-raster decode/encode, distinct from the
    two paths it has today (tiled, and `convertFromScanned` which **LCG-decrypts** then rasters). The bug: BW2
@@ -855,21 +885,63 @@ rendering for any DS game:**
    truncated to 0 bytes (SOPC-start == EOF). Note the RGCN round-trip test won't catch a pixel-decode regression
    — it re-encrypts on save. Keep `save()` byte-exact. (Census aside: SOPC height is usually 2× — sometimes
    4×/8× — CHAR height, i.e. a multi-frame full extent, NOT the "power-of-2 pad" the format docs guess.)
-2. Fix **`CellBank.OamImage`** OBJ rendering: rectangular-crop tile addressing, affine + double-size offset,
-   reverse draw order. (The current `startByte`'s `<<mappingType` overflows on these — that's the `NegativeArray`
-   crash.) These make `CellBank`/`MultiCellBank` render single cells/parts correctly; the head-render proof shows
-   the math. Add a cross-layer render test asserting a known part matches.
+2. ~~Fix **`CellBank.OamImage`** OBJ rendering~~ *(done — see the note above)*: rectangular-crop tile
+   addressing, affine + double-size offset, reverse draw order. Validated against real retail data; test
+   added (`BitmapSheetCellRenderingTest`).
 
-### 11e. NFTR (font) — next up; examples now exist in White2
+### 11e. NFTR (font) — DONE 2026-09-01 (`NitroFont`); see §11f. NTFT/NTFP/NTFI still blocked
 
-Not yet implemented; **White2 has ~10 `RTFN` fonts** (NARC **`a/0/2/3`** = fonts; plus overlay/arm9 copies). Follow
-the exact pattern the other `images/` formats use: extend `framework.GenericNtrFile`, decode the block structure,
-**byte-exact `save()`**, and a `NFTRTest` gated on White2 mirroring `CellAnimationTest` (collect `"RTFN"` via
-`NtrFixtures`, assert `save()` reproduces every file). NFTR layout: `FINF` (font info) + `CGLP` (glyph bitmaps) +
-`CWDH` (char widths) + `CMAP` (code→glyph maps); references: **GBATEK**, ndspy `fnt`/`nftr`, nitrogfx/nitrofont.
-Keep it Java-8-clean (CheerpJ). **NTFT/NTFP/NTFI** (raw headerless texel/palette/index) remain blocked — no clean
-example in the Pokémon ROMs (texture data stays in `TEX0`/NSBTX); needs a different DS title or a decompiled
-filesystem where the `.ntf*` extensions are explicit.
+NFTR is implemented (`images/NitroFont.java`, §11f). **NTFT/NTFP/NTFI** (raw headerless texel/palette/index)
+remain blocked — no clean example in the Pokémon ROMs (texture data stays in `TEX0`/NSBTX); needs a different DS
+title or a decompiled filesystem where the `.ntf*` extensions are explicit.
+
+### 11f. NFTR (font) — the `NitroFont` deliverable (added 2026-09-01)
+
+`images/NitroFont.java` (extends `GenericNtrFile`), tested by `NitroFontTest` gated on **White2** (5 `RTFN`
+fonts collected via `NtrFixtures`; NARC `a/0/2/3`). **Full suite 341 green** (was 334; +7). Rendered checkpoints
+in `g3d_out/`: `nftr_glyph_sheet.png` (full ASCII+Latin+Greek/Cyrillic+kana contact sheet, all correct),
+`nftr_text_{0,1,2}.png` (strings rendered via CMAP+CWDH, e.g. a clean "Pokemon Black 2"). Java-8-clean (CheerpJ).
+
+**What's decoded (all cross-checked against the authoritative layout).** The on-disk block tags are
+**byte-reversed** (like every NTR block): `FINF`→`FNIF`, `CGLP`→`PLGC`, `CWDH`→`HDWC`, `CMAP`→`PAMC`.
+- **FINF** (fully decoded): `u8 fontType, u8 lineFeed, u16 defaultCharIndex, {s8 left, u8 glyphWidth, u8 charWidth}
+  defaultWidths, u8 encoding` (0=UTF8/1=Unicode/2=SJIS/3=CP1252), then `u32` offsets to CGLP/CWDH/CMAP bodies
+  (= block start + 8). v0102 headers (chunk len 0x20) add `u8 height/width/ascent`; v0101 (len 0x1C) omit them.
+- **CGLP** (glyph bitmaps, rendered): `u8 cellWidth, u8 cellHeight, u16 cellSize (stride, bytes/glyph),
+  s8 baselinePos, u8 maxCharWidth, u8 bpp (1/2/3), u8 flags`, then the tiles. A glyph is a **continuous
+  MSB-first bitstream**, `bpp` bits/pixel, row-major `cellWidth×cellHeight`, no row padding; `cellSize` is the
+  stride (can exceed the packed pixel bytes). Glyph count = `(blockLen − 0x10) / cellSize`. `getGlyphImage(i)`
+  → black-on-transparent `BufferedImage` (intensity = alpha).
+- **CMAP** (code→glyph, all three types): header `u16 codeBegin, u16 codeEnd, u16 mapType, u16, u32 next`; then
+  type **0** = one `u16` base index incremented across [begin,end]; type **1** = a `u16` glyph index per code
+  point (`0xFFFF`=none); type **2** = `u16 pairCount` then `(u16 code, u16 glyph)` pairs. `getGlyphIndex(cp)`
+  walks the chain. Verified: 'A'→33, 'a'→65, '0'→16; type-2 pairs land on ¡/Œ/œ correctly.
+- **CWDH** (per-glyph `{s8 left, u8 glyphWidth, u8 advance}`): header `u16 indexBegin, u16 indexEnd, u32 next`,
+  then `indexEnd−indexBegin+1` triples. `widthsFor(glyph)`/`renderString` use them.
+
+**Traps found and handled (these White2 fonts are Game Freak's variant):**
+1. **Header `fileSize` field ≠ real length.** Retail NFTR headers store a `fileSize` (0x08) that disagrees
+   with the actual byte count (e.g. 261976 vs 264360). `save()` **re-emits the original value verbatim** — do
+   not recompute it, or the round-trip breaks.
+2. **Block sizes are content-exact and can be unaligned; successive blocks start 4-byte-aligned**, leaving gap
+   bytes counted by neither block's size (font#4's CGLP ends at 0x67B, CWDH starts at 0x67C). The robust design:
+   **preserve the entire post-header byte region verbatim** for `save()` (byte-exactness is then independent of
+   any decode), and walk blocks with 4-alignment only to locate them for the read-only decode.
+3. **The CWDH/CMAP on-disk `next` pointers are bogus in these fonts** (a CWDH "next" of `0x10`); following the
+   chain walks into garbage. **Iterate the block list in file order instead** — order is authoritative and
+   equivalent (NintyFont's own reader would also read these fonts' CWDH range as ill-formed; NintyFont flags
+   them "PocketMonstersFont" because `cellSize (48) ≠ ceil(cellW·cellH·bpp/8) (45)`). `WidthGroup` treats an
+   `indexEnd < indexBegin` range as "no decodable entries" and falls back to FINF default widths.
+
+**Correctness bar:** byte-exact `save()` over all 5 White2 fonts (the §0 invariant), plus decode-coherence
+asserts (metrics in range, ASCII maps to a consecutive glyph run, a mapped glyph draws ink, a rendered string is
+non-empty). Reference used: the GBATEK "Nitro Font Resource Format" page (imprecise on CWDH) reconciled against
+**hadashisora/NintyFont**'s C++ parser (`formats/NFTR/*`) — the authoritative field order came from the latter.
+
+**Follow-ups (not blockers):** glyph/width **editing** (today the decode is read-only; a `setGlyphImage` +
+CGLP re-encode would round-trip only-dirty tiles, preserving each tile's trailing stride padding); the v0102
+extra-metrics path is decoded but untested (no v0102 fixture in the workspace ROMs); and `NTFT/NTFP/NTFI`
+(§11e) still await an example.
 
 ---
 
