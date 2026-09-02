@@ -104,6 +104,9 @@ import Endianness;
 import MemBuf;
 import javax.imageio.ImageIO;
 import java.io.File;
+import g3d.ModelSet;
+import g3d.Model;
+import g3d.GltfExporter;
 
 public class Example
 {
@@ -178,6 +181,20 @@ public class Example
         ImageIO.write(rom.getBanner().getIcon(), "png", new File("icon.png"));
     }
 
+    /**
+     * Load a 3D model (NSBMD) out of a NARC and export it as an OBJ and a glTF
+     */
+    public static void example7() throws java.io.IOException
+    {
+        NintendoDsRom platinum = NintendoDsRom.fromFile("Platinum.nds");
+        Narc narc = new Narc(platinum.getFile(142)); // wherever your game keeps its models
+        ModelSet models = new ModelSet(narc.getFile(51));
+        Model model = models.getModels().get(0);
+
+        BinaryWriter.writeFile("model.obj", model.toObj().getBytes());
+        BinaryWriter.writeFile("model.gltf", GltfExporter.toGltf(model, models.getEmbeddedTextures()).getBytes());
+    }
+
 
     public static void main(String[] args) throws java.io.IOException
     {
@@ -191,6 +208,7 @@ public class Example
         example4();
         example5();
         example6(rom);
+        example7();
     }
 }
 ```
