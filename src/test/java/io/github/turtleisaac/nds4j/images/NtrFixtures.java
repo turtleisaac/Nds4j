@@ -21,6 +21,7 @@ package io.github.turtleisaac.nds4j.images;
 
 import io.github.turtleisaac.nds4j.Narc;
 import io.github.turtleisaac.nds4j.NintendoDsRom;
+import io.github.turtleisaac.nds4j.framework.NitroLz;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -44,6 +45,20 @@ final class NtrFixtures
         return new String(data, 0, 4, StandardCharsets.ISO_8859_1);
     }
 
+    // Some titles (e.g. Pokemon Ranger: Shadows of Almia) LZ-compress their top-level NARCs, unlike the
+    // Gen IV Pokemon ROMs where they're stored raw; a compressed file's magic isn't visible until
+    // decompressed. A no-op passthrough when not compressed, so this is safe for every existing fixture ROM.
+    private static byte[] decompressIfNeeded(byte[] data)
+    {
+        try
+        {
+            if (NitroLz.isCompressed(data))
+                return NitroLz.decompress(data);
+        }
+        catch (RuntimeException ignored) { }
+        return data;
+    }
+
     /**
      * @param rom the ROM to scan
      * @param wantedMagic the four-byte NTR magic to collect (as stored, e.g. {@code "RNAN"})
@@ -54,7 +69,7 @@ final class NtrFixtures
         List<byte[]> found = new ArrayList<>();
         for (int i = 0; i < rom.getNumFiles(); i++)
         {
-            byte[] file = rom.getFile(i);
+            byte[] file = decompressIfNeeded(rom.getFile(i));
             if (!magic(file).equals("NARC"))
                 continue;
             Narc narc;

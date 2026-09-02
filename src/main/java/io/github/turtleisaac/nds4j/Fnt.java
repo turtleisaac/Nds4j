@@ -38,6 +38,18 @@ public class Fnt
         protected int firstId;
         protected String name;
 
+        // The on-disk entries-table order (file and folder names interleaved as originally declared),
+        // or null if this Folder wasn't parsed from a real FNTB. `files`/`folders` each preserve order
+        // *within* their own collection, but splitting entries into two collections during parsing loses
+        // the interleaving *between* files and folders -- and retail archives aren't always
+        // files-first: a Pokemon Ranger: Shadows of Almia NARC has a subfolder entry (a leftover ".svn"
+        // working-copy directory baked into the shipped ROM) declared before its sibling files. Without
+        // this, save() always emitted every file before every folder, silently reordering that entry and
+        // breaking the byte-exact round-trip. Excluded from equals()/hashCode() as a serialisation-only
+        // detail: a Folder built programmatically (no recorded order) is still equal to an equivalent
+        // parsed one.
+        protected List<String> entryOrder;
+
         public Folder()
         {
             this.folders = new LinkedHashMap<>(); // preserve FNT read order so save() reproduces it byte-exactly
@@ -350,6 +362,7 @@ public class Fnt
         int length;
         int isFolder;
         int subFolderId;
+        folder.entryOrder = new ArrayList<>();
         // Read file and folder entries from the entries table
         while(true)
         {
@@ -363,6 +376,7 @@ public class Fnt
             isFolder = control & 0x80;
 
             name = reader.readString(length);
+            folder.entryOrder.add(name);
 
             if (isFolder == 0x80)
             {
@@ -461,33 +475,56 @@ public class Fnt
         int folderId = nextFolderId[0];
         nextFolderId[0] += 1;
 
-        // Create an entries table and add filenames and folders to it
+        // Create an entries table and add filenames and folders to it. Replay the original on-disk
+        // interleaving of files and folders when it's known (see Folder.entryOrder); entries added since
+        // parsing (present in files/folders but not in entryOrder) are appended after it, files then
+        // folders, matching the always-files-then-folders order used when entryOrder is unknown (a
+        // Folder built entirely from scratch).
+        List<String> orderedEntries = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        if (folder.entryOrder != null)
+        {
+            for (String entryName : folder.entryOrder)
+            {
+                if ((folder.files.contains(entryName) || folder.folders.containsKey(entryName)) && seen.add(entryName))
+                    orderedEntries.add(entryName);
+            }
+        }
+        for (String file : folder.files)
+            if (seen.add(file))
+                orderedEntries.add(file);
+        for (String folderName : folder.folders.keySet())
+            if (seen.add(folderName))
+                orderedEntries.add(folderName);
+
         MemBuf entriesTable = MemBuf.create();
         MemBuf.MemBufWriter entriesTableWriter = entriesTable.writer();
-        for (String file : folder.files)
+        for (String entryName : orderedEntries)
         {
-            if (file.length() > 127)
-                throw new RuntimeException("Filename \"" + file + "\" is " + file.length() + " characters long (maximum is 127)!");
-            entriesTableWriter.writeBytes(file.length());
-            entriesTableWriter.writeString(file);
-        }
+            if (folder.folders.containsKey(entryName))
+            {
+                Folder sub = folder.folders.get(entryName);
 
-        for (String folderName : folder.folders.keySet())
-        {
-            Folder sub = folder.folders.get(folderName);
+                // First, parse the subfolder and get its ID, so we can save that to the entries table.
+                int otherId = parseFolder(sub, folderId, folderEntries, nextFolderId);
 
-            // First, parse the subfolder and get its ID, so we can save that to the entries table.
-            int otherId = parseFolder(sub, folderId, folderEntries, nextFolderId);
+                if (entryName.length() > 127)
+                    throw new RuntimeException("Folder name \"" + entryName + "\" is " + entryName.length() + " characters long (maximum is 127)!");
 
-            if (folderName.length() > 127)
-                throw new RuntimeException("Folder name \"" + folderName + "\" is " + folderName.length() + " characters long (maximum is 127)!");
+                // Folder name is preceded by a 1-byte length value, OR'ed with 0x80 to mark it as a folder.
+                entriesTableWriter.writeBytes(entryName.length() | 0x80);
+                entriesTableWriter.writeString(entryName);
 
-            // Folder name is preceded by a 1-byte length value, OR'ed with 0x80 to mark it as a folder.
-            entriesTableWriter.writeBytes(folderName.length() | 0x80);
-            entriesTableWriter.writeString(folderName);
-
-            // And the ID of the subfolder goes after its name, as a 2-byte value
-            entriesTableWriter.writeShort((short) otherId);
+                // And the ID of the subfolder goes after its name, as a 2-byte value
+                entriesTableWriter.writeShort((short) otherId);
+            }
+            else
+            {
+                if (entryName.length() > 127)
+                    throw new RuntimeException("Filename \"" + entryName + "\" is " + entryName.length() + " characters long (maximum is 127)!");
+                entriesTableWriter.writeBytes(entryName.length());
+                entriesTableWriter.writeString(entryName);
+            }
         }
 
         // entries table needs to end with a null byte to mark its end

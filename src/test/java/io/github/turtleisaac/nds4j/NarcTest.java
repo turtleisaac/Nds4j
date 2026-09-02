@@ -79,17 +79,38 @@ public class NarcTest
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("save() reproduces every real NARC in the ROM byte-for-byte")
+    @org.junit.jupiter.api.DisplayName("save() reproduces every real NARC in HeartGold byte-for-byte")
     void writtenNarcRoundTripsByteExactAcrossRom() {
         // The tests above only compare Nds4j against itself; none checks Nds4j against the retail
         // packer. Doing so revealed two writer defects (a nameless archive's filename table was 4
         // bytes too large, and inter-file padding used 0x00 instead of retail's 0xFF), both of which
         // shifted or altered the bytes. A byte-level round-trip over every real NARC guards them.
-        NintendoDsRom rom = TestRoms.require("HeartGold.nds");
+        assertEveryNarcRoundTripsByteExact("HeartGold.nds");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces every real NARC in Pokemon Ranger: Shadows of Almia byte-for-byte")
+    void writtenNarcRoundTripsByteExactAcrossRanger() {
+        // Found a third writer defect this way: the entries-table writer always emitted every file
+        // before every folder, regardless of their original on-disk order. This retail NARC has a
+        // subfolder entry (a leftover ".svn" working-copy directory baked into the shipped ROM) declared
+        // before its sibling files, which silently reordered on save. See Fnt.Folder.entryOrder.
+        assertEveryNarcRoundTripsByteExact("Pokemon Ranger - Shadows of Almia.nds");
+    }
+
+    private void assertEveryNarcRoundTripsByteExact(String romName) {
+        NintendoDsRom rom = TestRoms.require(romName);
         int checked = 0;
         for (int i = 0; i < rom.getNumFiles(); i++) {
-            byte[] f = rom.getFile(i);
-            if (f == null || f.length < 4 || !new String(f, 0, 4, java.nio.charset.StandardCharsets.ISO_8859_1).equals("NARC"))
+            byte[] raw = rom.getFile(i);
+            if (raw == null)
+                continue;
+            byte[] f = raw;
+            try {
+                if (io.github.turtleisaac.nds4j.framework.NitroLz.isCompressed(raw))
+                    f = io.github.turtleisaac.nds4j.framework.NitroLz.decompress(raw);
+            } catch (RuntimeException ignored) { }
+            if (f.length < 4 || !new String(f, 0, 4, java.nio.charset.StandardCharsets.ISO_8859_1).equals("NARC"))
                 continue;
             Narc parsed;
             try { parsed = new Narc(f); }

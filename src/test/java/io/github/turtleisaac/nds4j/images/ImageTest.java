@@ -23,6 +23,7 @@ import io.github.turtleisaac.nds4j.Narc;
 import io.github.turtleisaac.nds4j.NintendoDsRom;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 public class ImageTest
 {
@@ -319,6 +320,25 @@ public class ImageTest
             byte[] original = ncgrFiles.get(i);
             byte[] written = new IndexedImage(original, 0, 0, 1, 1, true).save();
             assertThat(written).as("RGCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("every NCGR in Pokemon Ranger: Shadows of Almia parses without throwing")
+    void everyNcgrParsesAcrossRanger()
+    {
+        // allRowsHaveSameWidth() used to reject a zero-row pixel grid outright (returning false instead
+        // of the vacuously-true answer), which threw on this ROM's one zero-height (tilesY=0) NCGR. See
+        // IndexedImage.allRowsHaveSameWidth.
+        NintendoDsRom almiaRom = io.github.turtleisaac.nds4j.TestRoms.require("Pokemon Ranger - Shadows of Almia.nds");
+        java.util.List<byte[]> ncgrFiles = NtrFixtures.collect(almiaRom, "RGCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(ncgrFiles.isEmpty(), "no RGCN files found in the test ROM");
+        for (int i = 0; i < ncgrFiles.size(); i++)
+        {
+            byte[] original = ncgrFiles.get(i);
+            assertThatCode(() -> new IndexedImage(original, 0, 0, 1, 1, true))
+                    .as("RGCN file #%d must parse without throwing", i)
+                    .doesNotThrowAnyException();
         }
     }
 }

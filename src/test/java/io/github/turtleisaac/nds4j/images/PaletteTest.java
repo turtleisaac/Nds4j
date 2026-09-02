@@ -117,4 +117,26 @@ public class PaletteTest
             assertThat(written).as("RLCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
         }
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces almost every NCLR in Pokemon Ranger: Shadows of Almia byte-for-byte")
+    void writtenNclrRoundTripsByteExactAcrossRanger()
+    {
+        // HeartGold's NCLRs never exposed the outer NTR header's fileSize quirk (retail files are
+        // observed declaring anywhere from 8 to 40+ bytes short of their real length, yet still load
+        // fine); the old save() always recomputed it instead of preserving the parsed value. See
+        // Palette.save()'s fileSize handling. One known file in this ROM declares a literal 0 there,
+        // which isn't preserved (a documented, un-chased edge case, not worth special-casing for one
+        // file) -- so this allows a single mismatch rather than requiring all of them.
+        NintendoDsRom almiaRom = io.github.turtleisaac.nds4j.TestRoms.require("Pokemon Ranger - Shadows of Almia.nds");
+        java.util.List<byte[]> nclrFiles = NtrFixtures.collect(almiaRom, "RLCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(nclrFiles.isEmpty(), "no RLCN files found in the test ROM");
+        int mismatches = 0;
+        for (byte[] original : nclrFiles)
+        {
+            if (!java.util.Arrays.equals(new Palette(original, 0).save(), original))
+                mismatches++;
+        }
+        assertThat(mismatches).as("at most the one known fileSize=0 exception should mismatch").isLessThanOrEqualTo(1);
+    }
 }

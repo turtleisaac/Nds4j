@@ -228,13 +228,24 @@ public class Palette extends GenericNtrFile
         // 0x18 for both magics: NclrUtils.palHeader is the same 24 bytes either way and the
         // color data starts at 0x28 regardless, so an RPCN file used to declare a size eight
         // bytes short of itself. Nothing in this library reads the field back, which is why it
-        // went unnoticed, but it is what an external tool would trust.
+        // went unnoticed, but it is what an external tool would trust. RLCN does this too, and by a
+        // larger margin: a Pokemon Ranger: Shadows of Almia NCLR declares 32 while its real size is
+        // 72 (40 bytes short) -- so this isn't a fixed RPCN-only offset.
         int extSize = size + 0x18 + NTR_HEADER_SIZE;
 
         // Include any preserved trailing blocks (e.g. PMCP) in the file size and block count so a file
         // that carried them round-trips exactly. Palettes built in memory have neither (numBlocks 0).
         int blockCount = numBlocks != 0 ? numBlocks : 1;
-        writeGenericNtrHeader(writer, extSize + trailingBlocks.length, blockCount);
+        int computedFileSize = extSize + trailingBlocks.length;
+        // The outer NTR header's fileSize field is decorative to the game engine: retail files are
+        // observed declaring anywhere from 8 to 40+ bytes short of their real length (not a fixed
+        // offset), yet still load fine. Re-emit the originally parsed value verbatim so an unedited
+        // palette round-trips exactly; a from-scratch palette (fileSize never parsed, still 0) falls
+        // back to the real computed size. Known gap: one retail Ranger NCLR (Shadows of Almia,
+        // narc file#1762/3) declares a literal 0 here, which this check can't tell apart from
+        // "never parsed" -- it recomputes instead of preserving that 0. Left as-is rather than adding
+        // a second sentinel field for a single file; revisit if more such files turn up.
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : computedFileSize, blockCount);
 
         // writer position is now 0x10
 

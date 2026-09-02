@@ -407,9 +407,10 @@ public class IndexedImage extends GenericNtrFile
 
     private boolean allRowsHaveSameWidth(int[][] pixels)
     {
-        if (pixels.length == 0)
-            return false;
-        if (pixels.length == 1)
+        // Vacuously true: with zero or one row there's no pair of rows that could disagree. A
+        // zero-height NCGR is a real retail case (Pokemon Ranger: Shadows of Almia has one, tilesY=0),
+        // so this must return true here, not reject it -- there's nothing inconsistent about it.
+        if (pixels.length <= 1)
             return true;
 
         int width = pixels[0].length;
@@ -535,7 +536,11 @@ public class IndexedImage extends GenericNtrFile
             numTiles = maxNumTiles;
             this.numTiles = numTiles;
         }
-        else if (numTiles > maxNumTiles)
+        // maxNumTiles is a degenerate 0 for a zero-height (or zero-width) grid -- e.g. a Pokemon Ranger:
+        // Shadows of Almia NCGR that declares tilesY=0 but still carries real tile data (numTiles=4).
+        // There's no meaningful cap to violate against an empty grid, so the file's own count is
+        // trusted rather than rejected.
+        else if (maxNumTiles != 0 && numTiles > maxNumTiles)
             throw new RuntimeException(String.format("The specified number of tiles (%d) is greater than the maximum possible value (%d).", numTiles, maxNumTiles));
 
         int bufferSize = numTiles * tileSize;

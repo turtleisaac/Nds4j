@@ -117,6 +117,27 @@ public class CellAnimationTest
     }
 
     @Test
+    @DisplayName("save() reproduces every RNAN file in Pokemon Ranger: Shadows of Almia byte-for-byte")
+    void writtenNanrEqualsOriginalBytesAcrossRanger()
+    {
+        // HeartGold's NANRs all happen to carry a UEXT content word of 0, which the old save() always
+        // (re-)emitted regardless of the parsed value -- so this bug was invisible against that ROM.
+        // Almia's NANRs are overwhelmingly 1 (376 of 378), which the old code silently rewrote to 0 on
+        // every save. See CellAnimation.uextValue.
+        NintendoDsRom rom = TestRoms.require("Pokemon Ranger - Shadows of Almia.nds");
+        List<byte[]> almiaNanrFiles = NtrFixtures.collect(rom, "RNAN");
+        Assumptions.assumeFalse(almiaNanrFiles.isEmpty(), "no RNAN files found in the test ROM");
+        for (int i = 0; i < almiaNanrFiles.size(); i++)
+        {
+            byte[] original = almiaNanrFiles.get(i);
+            byte[] written = new CellAnimation(original).save();
+            assertThat(written)
+                    .as("RNAN file #%d must round-trip byte-for-byte", i)
+                    .isEqualTo(original);
+        }
+    }
+
+    @Test
     @DisplayName("a non-NANR input is rejected")
     void rejectsNonNanr()
     {
