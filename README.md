@@ -8,7 +8,8 @@ Nds4j
 **Nds4j** is a <u>**WIP**</u> Java library that can help you read, modify and create a few types of files used in
 Nintendo DS games, with many more coming soon.
 
-*Note:* DSi Enhanced ROMs are currently not fully supported. Opening them using Nds4j will have adverse effects on your ROM.
+*Note:* DSi-enhanced ROMs round-trip byte-exact when unedited; editing one and saving doesn't yet recompute
+the DSi digest/signature, so an edited DSi ROM may not pass the console's integrity check.
 
 > Author: Turtleisaac
 
@@ -60,93 +61,36 @@ Formats currently implemented
 | NTFP        | `images.RawPalette`                          | &check; | &check; |         &check;         |
 | ARM9/ARM7   | `binaries.MainCodeFile`                      | &check; |         |                          |
 
-All of the Nitro 3D (`NSB*`) and `SPA` formats round-trip **byte-for-byte** across the retail Gen IV ROMs and
-were reverse-engineered natively (no third-party reader is wrapped or depended upon). Beyond reading, the 3D
-stack can **author** files from scratch and **preview** them, all in pure Java (no native/OS-specific deps):
+All of the formats above round-trip byte-for-byte across the retail ROMs and were reverse-engineered
+natively -- no third-party reader is wrapped or depended upon. A few highlights beyond the table:
 
-* **Convert** &mdash; `g3d.ImdImporter` translates a NITRO intermediate model (`.imd`) into an NSBMD
-  **byte-for-byte identically to Nintendo's `g3dcvtr`** (the `.imd` already carries the exporter's optimiser
-  decisions, so a faithful translation reproduces its exact output; verified against `g3dcvtr` on its sample
-  models). `g3d.ObjImporter` (Wavefront OBJ &rarr; geometry) + `g3d.ModelBuilder` author an NSBMD
-  (untextured, textured, or multi-shape/multi-material with an embedded `TEX0`); `g3d.AnimationBuilder` authors
-  an NSBTA. Two of the format's hardest-to-reproduce sections encode **byte-identically** to NITRO's own tool:
-  the resource dictionaries (`g3d.G3dDictionary` emits nodes in the same pre-order `g3dcvtr` does &mdash;
-  verified against all 5388 retail dictionaries), and the geometry display lists (`g3d.DisplayList`'s
-  `decodeCommands`/`encodeCommands` losslessly round-trip the raw GPU command stream &mdash; verified
-  byte-for-byte over all 19433 retail display lists). `g3d.ModelSet.reencodeModels()` composes both with the
-  container writer to reconstruct a whole `MDL0` from its decoded structure &mdash; every dictionary and
-  display list rebuilt from semantics, fixed structs kept verbatim &mdash; reproducing the file
-  **byte-for-byte over all 5482 retail models** (and reproducing `g3dcvtr`'s own output exactly). This is the
-  byte-exact re-encode path that survives edits.
-* **Export** &mdash; `g3d.GltfExporter` (self-contained glTF 2.0, static or animated) and `Model.toObj()`.
-* **Preview** &mdash; `g3d.SoftwareRenderer` (headless rasteriser), `g3d.ModelViewer`/`ModelViewerFrame` (Swing
-  orbit/scrub/play), `g3d.NitroAnimation` (composes all four animation tracks), `g3d.AnimatedGif`, and
-  `g3d.ParticleRenderer` (plays an `SPA` move effect).
-* **Edit** &mdash; `G3dFile.writeBlockU8/U16` for byte-valid in-place edits (e.g. `NSBMA` color/alpha keyframes,
-  `TextureSet.setPaletteColor` recolor incl. the embedded `TEX0`). All five animation formats
-  (`NSBCA`/`NSBTA`/`NSBTP`/`NSBVA`/`NSBMA`) also have byte-exact `encode()` re-encoders, each validated by
-  decode&rarr;re-encode round-trip over the whole retail corpus.
-
-The 2D `images.*` formats (`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`) round-trip byte-for-byte across
-the retail ROMs and support **write-back**: an edited assembled image (`Screen.applyImage`,
-`CellBank.applyImage`, + palette-rebuild variants) is decomposed back into its source tileset/cells and
-spliced into the NCGR, matching or rebuilding the NCLR as needed. `NMCR`/`NMAR` (Gen V multi-cell
-resource/animation, composing several `NCER` cells into a larger object) and `NFTR` (Nitro bitmap fonts,
-glyph/width/map decode + rendering) round out that set; fixtures for the Gen V-only formats come from
-**White2**, since the Pokémon Gen IV ROMs don't use them.
-
-The `sound.*` package brings NDS audio (`SDAT`, and its embedded `SWAV`/`SWAR`, `SBNK`, `SSEQ`/`SSAR`,
-`STRM`) to the same byte-exact-container bar, plus a pure-JVM software synthesizer
-(`sound.SequencePlayer`) that renders an `SSEQ`+`SBNK`+`SWAR` to PCM, and WAV import/export.
-
-`IconBanner` reads and writes a ROM's cartridge icon bitmap and multilingual titles: `setIcon`/`setTitle`
-edit either, and `toBytes()` recomputes the version's CRC16 checksum(s) (an unedited banner reproduces its
-original bytes exactly).
-
-`NTFT`/`NTFP` (`images.RawTexture`/`images.RawPalette`) are raw, headerless formats &mdash; no magic, no
-header, just pixel/color bytes &mdash; with no confirmed retail example anywhere until one turned up:
-*Learn with Pok&eacute;mon: Typing Adventure* (JP: *Battle &amp; Get! Pok&eacute;mon Typing DS*) ships 7979
-NTFT/NTFP pairs, one per Pok&eacute;mon "note" icon. `RawTexture` is an 8bpp indexed bitmap in plain linear
-(non-tiled) order, always square (32&times;32, 64&times;64, or 128&times;128 &mdash; its side length is simply
-the square root of the file size); `RawPalette` is a flat BGR555 array tightly packed to however many colors
-are actually used. Byte-exact round-trip confirmed over the whole 7979-pair corpus.
-
-`framework.NitroLz` also transparently reads (and, via `compressLz77Tagged`/`compressLz11Lz77Tagged`, can
-re-emit) a `"LZ77"`-ASCII-tagged variant of the same LZ10/LZ11 stream that some titles (first found in
-Animal Crossing: Wild World's loose top-level files) wrap the ordinary header in &mdash; `isCompressed`
-was blind to it before, silently treating every such file as uncompressed.
-
-`framework.NitroHuffman` covers the Nitro SDK's Huffman compression (4-bit and 8-bit symbols, types
-`0x24`/`0x28`), the sibling of `NitroLz`'s LZ10/LZ11 in the same compression family. Layout cross-checked
-against the DSDecmp reference decoder/encoder; no retail file using it has turned up in this project's ROM
-corpus yet (only `NitroLz`-style heuristic false positives), so correctness rests on the round-trip tests.
-
-`text.BinaryMessage` reads and writes `BMG` (Binary MessaGe, magic `MESGbmg1`), Nintendo's cross-title
-GameCube/Wii/DS text container &mdash; independent of any single game's own bespoke text encoding, and
-present in nearly every DS ROM checked so far, including the mainline Pok&eacute;mon games. Ported from
-[ndspy](https://github.com/RoadrunnerWMC/ndspy) rather than derived from scratch; validated byte-exact
-over 193 real files across four titles, including the DS-Zelda-specific `FLW1`/`FLI1` script-flow
-sections Phantom Hourglass uses.
+* The 3D (`NSB*`) stack can **author** files from scratch (`g3d.ObjImporter`/`ModelBuilder`,
+  `g3d.AnimationBuilder`), **export** to glTF 2.0 or OBJ, and **preview** them with a pure-Java software
+  rasterizer (`g3d.SoftwareRenderer`) or a Swing viewer (`g3d.ModelViewer`) -- no native/OS-specific
+  dependencies anywhere. `g3d.ImdImporter` even reproduces Nintendo's own `g3dcvtr` tool byte-for-byte.
+* The 2D `images.*` formats support **write-back**: edit an assembled sprite or background image and Nds4j
+  decomposes it back into its source tileset/cells/palette for you. `NMCR`/`NMAR`/`NFTR` are Gen V-only, so
+  their fixtures come from White2 instead of the Gen IV Pok&eacute;mon ROMs.
+* `sound.*` includes a pure-JVM software synthesizer (`sound.SequencePlayer`) that renders an
+  SSEQ+SBNK+SWAR straight to PCM, plus WAV import/export.
+* `text.BinaryMessage` (`BMG`) is Nintendo's cross-title GameCube/Wii/DS text container, ported from
+  [ndspy](https://github.com/RoadrunnerWMC/ndspy) -- shows up in nearly every DS ROM checked so far,
+  including the mainline Pok&eacute;mon games, not just the ones with a dedicated 3D/2D asset pipeline.
+* `NTFT`/`NTFP` (`images.RawTexture`/`RawPalette`) are raw, headerless formats with no confirmed retail
+  example anywhere until one turned up in *Learn with Pok&eacute;mon: Typing Adventure*.
+* `framework.NitroLz` also handles a `"LZ77"`-tagged variant of the LZ10/LZ11 stream some titles wrap the
+  ordinary stream in; `framework.NitroHuffman` covers the SDK's other built-in compression type.
 
 Likely future supported formats
 --------------------------------
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-The entire Nitro 3D (`NSB*`) and `SPA` priority group, the `LZ10`/`LZ11`/Huffman compression codecs, the 2D
-`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`/`NFTR`/`NTFT`/`NTFP` set, NDS audio (`SDAT` and its
-companions), and `BMG` text are all supported now (see the table above), fully reverse-engineered natively
-and validated byte-for-byte against the retail ROMs. What remains:
-
-* `NTFI` &mdash; raw index data, the third member of the NTFT/NTFP raw-texture family. Unlike NTFT/NTFP
-  (now supported, see above), no retail example of this specific one has turned up yet, and its very
-  existence as a real, distinct on-disk format is unconfirmed (no independent source describes it, unlike
-  NTFT/NTFP which multiple community references agree on).
-* The remaining Nitro compression codec &mdash; RLE (`framework.NitroLz` covers LZ10/LZ11;
-    `framework.NitroHuffman` covers Huffman; `framework.CodeCompression` covers the ARM-code BLZ variant)
-* A glTF *import* front-end for the 3D stack (export already covers glTF; OBJ import is already done via
-    `g3d.ObjImporter` + `g3d.ModelBuilder`). A glTF importer would complete a Blender-edit-and-reimport
-    workflow.
+* RLE, the last of the Nitro SDK's built-in compression codecs (`NitroLz` covers LZ10/LZ11, `NitroHuffman`
+  covers Huffman, `CodeCompression` covers the ARM-code BLZ variant)
+* NTFI, the third member of the NTFT/NTFP raw-texture family -- no confirmed retail example yet, and its
+  existence as a real, distinct format is unconfirmed
+* A glTF *import* front-end for the 3D stack (export and OBJ import both already work)
 
 
 A few examples of Nds4j in action
