@@ -57,13 +57,28 @@ public class CellBank extends GenericNtrFile
     private long kbecReserved0x28;
     private long partitionDataOffset;
     private long tacuOffset;
-    private int uextUnknown;
+    // The single content word of the UEXT ("TXEU") section. It is 0 in every NCER and NANR across the
+    // five retail ROMs, i.e. a reserved/unused word; preserved and reproduced regardless. Confirmed on
+    // the NANR side (CellAnimation.uextValue) against a non-Pokemon title, Pokemon Ranger: Shadows of
+    // Almia, where it's constant 1 across 376/378 files instead of 0 -- still per-title, not
+    // per-animation, and inverting every one of them in a real ROM produced no observable in-game
+    // difference. Likely a build-tool/SDK-version stamp rather than a behavioral flag; NCER's own copy
+    // hasn't been separately flip-tested but shares the exact same section layout.
+    private int uextReserved;
 
     // The partition (VRAM transfer) and TACU sections that follow the cell/OAM data inside the KBEC
     // block, captured verbatim. Their internal layout (alignment, padding, the exact size words) varies
     // and is not worth reconstructing field by field; preserving the bytes keeps the file byte-exact.
     // The parsed per-cell partition and TACU values are still exposed for reading.
     private byte[] auxiliaryData = new byte[0];
+
+    // Bytes, if any, left over after every declared section (KBEC, and LBAL/TXEU when present) is
+    // accounted for. Retail NCER files are occasionally a couple of bytes longer than their own header
+    // declares -- e.g. a 256-byte file whose NTR header fileSize field says 254 -- with no section
+    // claiming the remainder. Cause unconfirmed (possibly a packer quirk unrelated to this format's own
+    // structure); preserved verbatim rather than chased further, per the project's policy of not chasing
+    // byte-exactness on a single anomalous class of file (found across ~60% of one third-party ROM's NCERs).
+    private byte[] trailingPadding = new byte[0];
 
     private Cell[] cells;
     private IndexedImage image;
@@ -235,7 +250,10 @@ public class CellBank extends GenericNtrFile
         auxiliaryData = reader.readBytes(cellBankSectionEnd - cellDataEnd);
 
         if (!labelEnabled)
+        {
+            trailingPadding = reader.readBytes(fileSize - reader.getPosition());
             return;
+        }
 
         reader.setPosition(NTR_HEADER_SIZE + cellBankSectionSize);
 
@@ -290,7 +308,9 @@ public class CellBank extends GenericNtrFile
         }
 
         int uextSectionSize = reader.readInt();
-        uextUnknown = reader.readInt();
+        uextReserved = reader.readInt();
+
+        trailingPadding = reader.readBytes(fileSize - reader.getPosition());
     }
 
 
@@ -345,13 +365,20 @@ public class CellBank extends GenericNtrFile
 
             writer.writeString("TXEU");
             writer.writeInt(12); // section size (magic + size + one word of contents)
-            writer.writeInt(uextUnknown);
+            writer.writeInt(uextReserved);
         }
+
+        // bytes, if any, beyond what every declared section accounts for -- see trailingPadding's field doc
+        writer.write(trailingPadding);
 
         int storedPos = writer.getPosition();
         writer.setPosition(0); //total file size
 
-        writeGenericNtrHeader(writer, storedPos, numBlocks);
+        // The outer NTR header's fileSize field is decorative (see Palette's identical fix): retail files
+        // occasionally declare a value short of their real physical length, with the remainder captured as
+        // trailingPadding above. Re-emit the originally parsed value so an unedited file round-trips
+        // exactly; a from-scratch bank (fileSize never parsed, still 0) falls back to the real computed size.
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : storedPos, numBlocks);
 
         writer.setPosition(storedPos);
 
@@ -456,10 +483,16 @@ public class CellBank extends GenericNtrFile
      */
     public void setParentImage(IndexedImage image)
     {
-        if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED)
-        {
+        // The OAM composition addresses the parent as TILED character data (convertToTiles + tile
+        // offsets) unless the parent is a LINE_BUFFER (plain linear-raster) NCGR — e.g. a Gen V "pokegra"
+        // battle-sprite sheet — in which case OamImage.generateImageData takes a separate rectangular-crop
+        // path (a tile index there names a position in the sheet's own tile grid, not a re-tiled block;
+        // see that method). Any other scanned (LCG-encrypted) mode is genuinely unimplemented — composing
+        // it would scramble the output — so refuse rather than emit garbage. The scanned NCGR's own pixels
+        // are still a correct bitmap on their own, so callers can render it directly. See IndexedImage#isScanned().
+        if (image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.NOT_SCANNED
+                && image.getScanMode() != IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
             throw new RuntimeException("Can't use a scanned image with an NCER");
-        }
         this.image = image;
     }
 
@@ -481,7 +514,7 @@ public class CellBank extends GenericNtrFile
     }
 
     /**
-     * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM colour index 0 is
+     * Same as {@link #getNcerImage(int)}, but drawn on a transparent canvas (OAM color index 0 is
      * left transparent) so the assembled cell can be composited &mdash; for instance under an
      * animation transform supplied by a {@link CellAnimation}.
      * @param i the index of the cell
@@ -505,12 +538,19 @@ public class CellBank extends GenericNtrFile
                 transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
         Graphics2D g = output.createGraphics();
 
+        // Retail draw order is the reverse of OAM index: OAM 0 is topmost, so painting from the last
+        // index down to 0 makes index 0 the last (and therefore topmost) thing drawn.
         Cell.OAM.OamImage[] images = cell.getImages();
-        for (int x = 0; x < images.length; x++)
+        for (int x = images.length - 1; x >= 0; x--)
         {
             Cell.OAM oam = cell.oams[x];
+            if (isOamDisabled(oam))
+                continue;
+            int[] physical = getOamSize(oam);
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - physical[0]) / 2, offY = (footprint[1] - physical[1]) / 2;
             BufferedImage oamImage = transparent ? images[x].getTransparentImage() : images[x].getImage();
-            g.drawImage(oamImage, oam.xCoord - bounds.x, oam.yCoord - bounds.y, null);
+            g.drawImage(oamImage, oam.xCoord + offX - bounds.x, oam.yCoord + offY - bounds.y, null);
         }
         g.dispose();
 
@@ -535,15 +575,193 @@ public class CellBank extends GenericNtrFile
             return new Rectangle(0, 0, 0, 0);
 
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+        boolean any = false;
         for (Cell.OAM oam : cell.oams)
         {
-            int[] size = getOamSize(oam); // {width, height}
+            if (isOamDisabled(oam))
+                continue;
+            int[] footprint = getOamFootprint(oam); // {width, height}, doubled for affine double-size
+            any = true;
             minX = Math.min(minX, oam.xCoord);
             minY = Math.min(minY, oam.yCoord);
-            maxX = Math.max(maxX, oam.xCoord + size[0]);
-            maxY = Math.max(maxY, oam.yCoord + size[1]);
+            maxX = Math.max(maxX, oam.xCoord + footprint[0]);
+            maxY = Math.max(maxY, oam.yCoord + footprint[1]);
         }
+        if (!any)
+            return new Rectangle(0, 0, 0, 0);
         return new Rectangle(minX, minY, maxX - minX, maxY - minY);
+    }
+
+    /** The outcome of {@link #applyImage}/{@link #applyImageRebuildingPalette}. */
+    public static final class ImportResult
+    {
+        /** Pixels whose color wasn't an exact match in the OAM's (sub-)palette (0 = a perfect fit). */
+        public final int unmatchedPixels;
+        /** The palette the pixels were indexed against — the input NCLR, or the freshly-built one after a
+         *  rebuild. Write it back to the NCLR when it changed. */
+        public final Palette palette;
+
+        private ImportResult(int unmatchedPixels, Palette palette)
+        {
+            this.unmatchedPixels = unmatchedPixels;
+            this.palette = palette;
+        }
+    }
+
+    /**
+     * Writes an edited assembled-cell image back into the NCGR — the inverse of {@link #getNcerImage(int)}.
+     * The cell's OAM layout is unchanged: each OAM's region of the image is color-matched to that OAM's
+     * sub-palette and written into the NCGR tiles it references (via each {@link Cell.OAM.OamImage}). Colors
+     * are matched to the EXISTING palette; {@link ImportResult#unmatchedPixels} reports the fit. Because OAMs
+     * (and other cells) can share tiles, editing one region changes every OAM that references those tiles —
+     * the NCGR is the single source of pixels. Persist by saving {@code ncgr}.
+     *
+     * @param cellIndex the cell whose composed image {@code image} is
+     * @param image the edited assembled-cell image (must be the cell's bounds size)
+     * @param ncgr the NCGR whose tiles back this cell (mutated in place)
+     * @param palette the NCLR to match colors against
+     * @return the decomposition stats
+     */
+    public ImportResult applyImage(int cellIndex, BufferedImage image, IndexedImage ncgr, Palette palette)
+    {
+        setParentImage(ncgr);
+        Cell cell = cells[cellIndex];
+        Rectangle bounds = cellBounds(cell);
+        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
+        if (image.getWidth() != cw || image.getHeight() != ch)
+            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
+                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+
+        Color[] colors = palette.getColors();
+        int bitDepth = ncgr.getBitDepth();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        int subCount = Math.max(1, colors.length / subSize);
+        Cell.OAM.OamImage[] oamImages = cell.getImages();
+        int unmatched = 0;
+
+        for (int k = 0; k < cell.oams.length; k++)
+        {
+            Cell.OAM oam = cell.oams[k];
+            if (isOamDisabled(oam))
+                continue;
+            int[] sz = getOamSize(oam);
+            int w = sz[0], h = sz[1];
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - w) / 2, offY = (footprint[1] - h) / 2;
+            int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
+            int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
+            int base = sub * subSize;
+
+            int[][] grid = new int[h][w];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = dx + x, sy = dy + y;
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) { grid[y][x] = 0; continue; }
+                    int argb = image.getRGB(sx, sy);
+                    if (((argb >>> 24) & 0xFF) == 0) { grid[y][x] = 0; continue; } // transparent -> index 0
+                    int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                    int bestIdx = 0;
+                    long bestD = Long.MAX_VALUE;
+                    for (int c = 0; c < subSize && base + c < colors.length; c++)
+                    {
+                        Color col = colors[base + c];
+                        long dr = r - col.getRed(), dg = g - col.getGreen(), db = b - col.getBlue();
+                        long d = dr * dr + dg * dg + db * db;
+                        if (d < bestD) { bestD = d; bestIdx = c; }
+                    }
+                    grid[y][x] = bestIdx;
+                    if (bestD != 0) unmatched++;
+                }
+            }
+            oamImages[k].setPixels(grid);
+            oamImages[k].save(); // splices these pixels into the NCGR tiles this OAM references
+        }
+        return new ImportResult(unmatched, palette);
+    }
+
+    /**
+     * Like {@link #applyImage}, but BUILDS a new palette from the image instead of matching an existing one
+     * — the NCER analog of {@code importPng}'s "rebuild palette" mode. Each 16-color sub-palette (4bpp) is
+     * rebuilt from the opaque colors of the OAMs that use it (grouped by {@code oam.palette}), reserving
+     * slot 0 for transparency (the DS sprite convention) and median-cutting down only if a sub-palette
+     * overflows 15 colors; 8bpp rebuilds the single 256-color palette. Sub-palettes this cell doesn't use
+     * are preserved from {@code templatePalette}. Returns the new palette via {@link ImportResult#palette} —
+     * write it back to the NCLR. The NCGR is still mutated (call {@code ncgr.save()}).
+     *
+     * @param cellIndex the cell whose composed image {@code image} is
+     * @param image the edited assembled-cell image (must be the cell's bounds size)
+     * @param ncgr the NCGR whose tiles back this cell (mutated)
+     * @param templatePalette the existing NCLR — supplies the sub-palette count/size and any unused blocks
+     * @return the decomposition stats + the new palette
+     */
+    public ImportResult applyImageRebuildingPalette(int cellIndex, BufferedImage image, IndexedImage ncgr, Palette templatePalette)
+    {
+        Cell cell = cells[cellIndex];
+        Rectangle bounds = cellBounds(cell);
+        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
+        if (image.getWidth() != cw || image.getHeight() != ch)
+            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
+                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+
+        int bitDepth = ncgr.getBitDepth();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        Color[] tmpl = templatePalette.getColors();
+        int subCount = Math.max(1, tmpl.length / subSize);
+
+        // Gather each sub-palette's opaque colors from the OAMs that draw with it.
+        java.util.List<java.util.LinkedHashSet<Integer>> perSub = new java.util.ArrayList<>();
+        for (int i = 0; i < subCount; i++) perSub.add(new java.util.LinkedHashSet<Integer>());
+        for (Cell.OAM oam : cell.oams)
+        {
+            if (isOamDisabled(oam))
+                continue;
+            int[] sz = getOamSize(oam);
+            int[] footprint = getOamFootprint(oam);
+            int offX = (footprint[0] - sz[0]) / 2, offY = (footprint[1] - sz[1]) / 2;
+            int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
+            int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
+            for (int y = 0; y < sz[1]; y++)
+                for (int x = 0; x < sz[0]; x++)
+                {
+                    int sx = dx + x, sy = dy + y;
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) continue;
+                    int argb = image.getRGB(sx, sy);
+                    if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette color
+                    perSub.get(sub).add(argb & 0xFFFFFF);
+                }
+        }
+
+        // Build the new palette: keep unused sub-palettes; for used ones, slot 0 = transparent marker and
+        // the opaque colors fill slots 1..subSize-1 (median-cut if they overflow).
+        Color[] colors = java.util.Arrays.copyOf(tmpl, tmpl.length);
+        int cap = subSize - 1; // slot 0 reserved
+        for (int p = 0; p < subCount; p++)
+        {
+            java.util.LinkedHashSet<Integer> set = perSub.get(p);
+            if (set.isEmpty()) continue;
+            java.util.List<Color> quant;
+            if (set.size() <= cap)
+            {
+                quant = new java.util.ArrayList<>();
+                for (int rgb : set) quant.add(new Color(rgb));
+            }
+            else
+            {
+                java.util.List<int[]> rgbs = new java.util.ArrayList<>();
+                for (int rgb : set) rgbs.add(new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF});
+                quant = IndexedImage.medianCut(rgbs, cap);
+            }
+            colors[p * subSize] = Color.MAGENTA; // rendered transparent when index-0 transparency is on
+            for (int i = 0; i < cap; i++)
+                colors[p * subSize + 1 + i] = i < quant.size() ? quant.get(i) : Color.BLACK;
+        }
+
+        Palette newPal = new Palette(colors);
+        ncgr.setPalette(newPal);
+        int unmatched = applyImage(cellIndex, image, ncgr, newPal).unmatchedPixels;
+        return new ImportResult(unmatched, newPal);
     }
 
     /**
@@ -601,7 +819,7 @@ public class CellBank extends GenericNtrFile
                 && partitionDataOffset == that.partitionDataOffset
                 && tacuOffset == that.tacuOffset
                 && kbecReserved0x28 == that.kbecReserved0x28
-                && uextUnknown == that.uextUnknown
+                && uextReserved == that.uextReserved
                 && labelCount == that.labelCount
                 && Arrays.equals(cells, that.cells)
                 && Arrays.equals(auxiliaryData, that.auxiliaryData)
@@ -612,7 +830,7 @@ public class CellBank extends GenericNtrFile
     public int hashCode()
     {
         int result = Objects.hash(bankType, mappingType, vramTransfer, tacu, numBlocks, bankDataOffset,
-                partitionDataOffset, tacuOffset, kbecReserved0x28, uextUnknown, labelCount);
+                partitionDataOffset, tacuOffset, kbecReserved0x28, uextReserved, labelCount);
         result = 31 * result + Arrays.hashCode(cells);
         result = 31 * result + Arrays.hashCode(auxiliaryData);
         result = 31 * result + Arrays.hashCode(extraLabels);
@@ -884,9 +1102,9 @@ public class CellBank extends GenericNtrFile
             /** @param tileOffset the tile offset into the NCGR this OAM draws from */
             public void setTileOffset(int tileOffset) { this.tileOffset = tileOffset; }
 
-            /** @return the 16-colour sub-palette index this OAM uses */
+            /** @return the 16-color sub-palette index this OAM uses */
             public int getPalette() { return palette; }
-            /** @param palette the 16-colour sub-palette index this OAM uses */
+            /** @param palette the 16-color sub-palette index this OAM uses */
             public void setPalette(int palette) { this.palette = palette; }
 
             /** @return this OAM's priority (0-3) */
@@ -904,9 +1122,9 @@ public class CellBank extends GenericNtrFile
             /** @param mosaic whether this OAM uses mosaic */
             public void setMosaic(boolean mosaic) { this.mosaic = mosaic; }
 
-            /** @return the colour count of this OAM's tiles (16 or 256) */
+            /** @return the color count of this OAM's tiles (16 or 256) */
             public int getColors() { return colors; }
-            /** @param colors the colour count of this OAM's tiles (16 or 256) */
+            /** @param colors the color count of this OAM's tiles (16 or 256) */
             public void setColors(int colors) { this.colors = colors; }
 
             /** @return whether this OAM is affine (rotation/scaling) rather than a plain sprite */
@@ -972,22 +1190,54 @@ public class CellBank extends GenericNtrFile
                         oamImage = new IndexedImage(storedHeight, storedWidth, image.getBitDepth(), image.getPalette());
                     }
 
-                    int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
-                    byte[] imageData;
+                    // Color this OAM through its own 16-color sub-palette (4bpp): the OAM's `palette`
+                    // field selects which block of the NCLR to draw with. Without this every OAM would
+                    // draw with sub-palette 0, mis-coloring any sprite whose OAMs use palette != 0.
+                    int subCount = Math.max(1, image.getPalette().getNumColors() / 16);
+                    oamImage.setPaletteIdx(image.getBitDepth() == 4 && palette >= 0 && palette < subCount ? palette : 0);
 
-                    switch (oamImage.getBitDepth())
+                    if (image.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
                     {
-                        case 4:
-                            imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
-                            IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, oamImage, startByte);
-                            break;
-                        case 8:
-                            imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
-                            IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, oamImage, startByte);
-                            break;
+                        // The parent NCGR is a plain linear-raster sheet (a Gen V "pokegra" battle-sprite
+                        // sheet), not a bank of independently-addressable tile blocks. A tile index here
+                        // names a position in the sheet's own tile grid — tileOffset % sheetTilesWide,
+                        // tileOffset / sheetTilesWide — and the OAM is a rectangular crop of that grid
+                        // starting there, not a run of consecutive tiles. (Verified against a real part:
+                        // the crop this produces for a Bulbasaur head OAM is pixel-exact.)
+                        int sheetTilesWide = Math.max(1, image.getWidth() / 8);
+                        int srcX = (tileOffset % sheetTilesWide) * 8;
+                        int srcY = (tileOffset / sheetTilesWide) * 8;
+                        for (int row = 0; row < storedHeight; row++)
+                        {
+                            int sy = srcY + row;
+                            if (sy >= image.getHeight())
+                                break;
+                            for (int col = 0; col < storedWidth; col++)
+                            {
+                                int sx = srcX + col;
+                                if (sx >= image.getWidth())
+                                    break;
+                                oamImage.setPixelValue(col, row, image.getPixelValue(sx, sy));
+                            }
+                        }
                     }
-//                    IndexedImage.NcgrUtils.convertOffsetToCoordinate(imageData, startByte, cell.getWidth() * cell.getHeight(), image, image.getNumTiles(), (image.getWidth() / 8) / image.getColsPerChunk(), image.getColsPerChunk(), image.getRowsPerChunk(), cell);
-//                    IndexedImage.NcgrUtils.convertFromTiles4BppAlternate(imageData, cell, startByte);
+                    else
+                    {
+                        int startByte = (tileOffset << (byte) mappingType) * (image.getBitDepth() * 8) + partitionOffset;
+                        byte[] imageData;
+
+                        switch (oamImage.getBitDepth())
+                        {
+                            case 4:
+                                imageData = IndexedImage.NcgrUtils.convertToTiles4Bpp(image);
+                                IndexedImage.NcgrUtils.convertFromTiles4Bpp(imageData, oamImage, startByte);
+                                break;
+                            case 8:
+                                imageData = IndexedImage.NcgrUtils.convertToTiles8Bpp(image);
+                                IndexedImage.NcgrUtils.convertFromTiles8Bpp(imageData, oamImage, startByte);
+                                break;
+                        }
+                    }
                     update = false;
                 }
 
@@ -998,6 +1248,13 @@ public class CellBank extends GenericNtrFile
                  */
                 public void save()
                 {
+                    // Write-back for a LINE_BUFFER (bitmap-sheet) parent isn't implemented: the read side
+                    // above takes a rectangular-crop path with no matching tile-address math to splice
+                    // edited pixels back into the sheet. Refuse rather than silently write through the
+                    // (wrong, tiled) addressing below.
+                    if (image.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
+                        throw new RuntimeException("Editing a LINE_BUFFER (bitmap-sheet) NCGR's OAMs isn't supported yet");
+
                     oamImage.setBitDepth(image.getBitDepth());
 
                     byte[] cellData = new byte[0];
@@ -1250,5 +1507,33 @@ public class CellBank extends GenericNtrFile
     public static int[] getOamSize(Cell.OAM oam)
     {
         return oamSize[oam.shape][oam.size];
+    }
+
+    /**
+     * Gets an OAM's on-screen bounding footprint: its {@link #getOamSize} doubled when the OAM is affine
+     * (rotation/scaling) with the double-size flag set — hardware behavior where the physical sprite
+     * pixels stay the base size but are centered within a box twice as large, so rotation/scaling never
+     * clips the content. A plain (non-affine) OAM's footprint equals its physical size.
+     * @param oam a {@link Cell.OAM}
+     * @return {width, height} of the OAM's bounding footprint
+     */
+    public static int[] getOamFootprint(Cell.OAM oam)
+    {
+        int[] base = getOamSize(oam);
+        if (oam.rotation && oam.sizeDisable)
+            return new int[]{base[0] * 2, base[1] * 2};
+        return base;
+    }
+
+    /**
+     * For a non-affine OAM, the double-size bit (attr0 bit 9) instead means "OBJ disable": the OAM is
+     * defined but not rendered at all. Affine OAMs use the same bit for double-size, so this only fires
+     * for a plain sprite.
+     * @param oam a {@link Cell.OAM}
+     * @return whether the OAM is disabled and should be skipped entirely
+     */
+    public static boolean isOamDisabled(Cell.OAM oam)
+    {
+        return !oam.rotation && oam.sizeDisable;
     }
 }

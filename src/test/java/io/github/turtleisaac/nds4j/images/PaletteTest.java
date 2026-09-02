@@ -99,4 +99,63 @@ public class PaletteTest
         assertThat(new Palette(bulbasaurPalette.save(), 0))
                 .isEqualTo(bulbasaurPalette);
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces every NCLR in the ROM byte-for-byte")
+    void writtenNclrRoundTripsByteExactAcrossRom()
+    {
+        // The equals()-based tests above don't compare the raw bytes, so they missed several NCLR
+        // header/section quirks (the 256-color cap, the 0x1C word, a trailing PMCP block, and the
+        // over-/under-declared palette-length word). A byte-level round-trip over the whole ROM is
+        // what actually pins them down.
+        java.util.List<byte[]> nclrFiles = NtrFixtures.collect(rom, "RLCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(nclrFiles.isEmpty(), "no RLCN files found in the test ROM");
+        for (int i = 0; i < nclrFiles.size(); i++)
+        {
+            byte[] original = nclrFiles.get(i);
+            byte[] written = new Palette(original, 0).save();
+            assertThat(written).as("RLCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces almost every NCLR in Pokemon Ranger: Shadows of Almia byte-for-byte")
+    void writtenNclrRoundTripsByteExactAcrossRanger()
+    {
+        // HeartGold's NCLRs never exposed the outer NTR header's fileSize quirk (retail files are
+        // observed declaring anywhere from 8 to 40+ bytes short of their real length, yet still load
+        // fine); the old save() always recomputed it instead of preserving the parsed value. See
+        // Palette.save()'s fileSize handling. One known file in this ROM declares a literal 0 there,
+        // which isn't preserved (a documented, un-chased edge case, not worth special-casing for one
+        // file) -- so this allows a single mismatch rather than requiring all of them.
+        NintendoDsRom almiaRom = io.github.turtleisaac.nds4j.TestRoms.require("Pokemon Ranger - Shadows of Almia.nds");
+        java.util.List<byte[]> nclrFiles = NtrFixtures.collect(almiaRom, "RLCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(nclrFiles.isEmpty(), "no RLCN files found in the test ROM");
+        int mismatches = 0;
+        for (byte[] original : nclrFiles)
+        {
+            if (!java.util.Arrays.equals(new Palette(original, 0).save(), original))
+                mismatches++;
+        }
+        assertThat(mismatches).as("at most the one known fileSize=0 exception should mismatch").isLessThanOrEqualTo(1);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces the RPCN (old-format NCLR) in Mario Kart DS byte-for-byte")
+    void writtenRpcnRoundTripsByteExactAcrossMarioKartDS()
+    {
+        // Found a shared GenericNtrFile writer defect this way: a loose (non-NARC) RPCN file whose outer
+        // NTR header declares a BOM of 0x0000 -- neither the standard 0xFEFF nor 0xFFFE mark --
+        // which writeGenericNtrHeader always overwrote with a recomputed canonical value instead of
+        // preserving it. See GenericNtrFile.bomParsed; the twin RGCN fix is in ImageTest.
+        NintendoDsRom mkdsRom = io.github.turtleisaac.nds4j.TestRoms.require("Mario Kart DS.nds");
+        java.util.List<byte[]> rpcnFiles = NtrFixtures.collect(mkdsRom, "RPCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(rpcnFiles.isEmpty(), "no RPCN files found in the test ROM");
+        for (int i = 0; i < rpcnFiles.size(); i++)
+        {
+            byte[] original = rpcnFiles.get(i);
+            byte[] written = new Palette(original, 0).save();
+            assertThat(written).as("RPCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
 }

@@ -64,6 +64,15 @@ public class CellAnimation extends GenericNtrFile
     // always do (numBlocks == 3); a bare NANR (numBlocks == 1) omits them, mirroring CellBank/NCER.
     private boolean labelEnabled;
 
+    // The UEXT section's single content word (always a 12-byte section: magic + size + one u32). Its
+    // meaning isn't decoded (retail files carry only 0 or 1), so it's captured and re-emitted verbatim
+    // rather than assumed to always be 0. It's constant per title, not per animation (HeartGold: 0 in
+    // 988/988 NANRs; Pokemon Ranger: Shadows of Almia: 1 in 376/378) and doesn't correlate with element
+    // type, playback mode, or any other decoded property -- consistent with a build-tool/SDK-version
+    // stamp, not a behavioral flag. Empirically tested: every NANR in a real Shadows of Almia ROM was
+    // inverted (376 1s -> 0, 2 0s -> 1) and played for several minutes with no observable difference.
+    private long uextValue;
+
     // The companion cell bank (NCER) whose cells this file animates. Not part of the NANR itself; set
     // by the consumer with setCellBank so a frame can be rendered. Never serialised.
     private CellBank cellBank;
@@ -188,6 +197,8 @@ public class CellAnimation extends GenericNtrFile
         String uextMagic = reader.readString(4);
         if (!uextMagic.equals("TXEU"))
             throw new RuntimeException("Not a valid RNAN file.");
+        reader.skip(4); // section size, always 12 (fixed one-word body); recomputed on save
+        uextValue = reader.readUInt32();
     }
 
     /**
@@ -260,7 +271,7 @@ public class CellAnimation extends GenericNtrFile
 
             writer.writeString("TXEU");
             writer.writeInt(12); // section size (magic + size + one word of contents)
-            writer.writeInt(0);
+            writer.writeUInt32(uextValue);
         }
 
         int fileSize = writer.getPosition();
@@ -429,6 +440,7 @@ public class CellAnimation extends GenericNtrFile
             return false;
         CellAnimation that = (CellAnimation) o;
         return labelEnabled == that.labelEnabled
+                && uextValue == that.uextValue
                 && Arrays.equals(animations, that.animations)
                 && Arrays.equals(resultPool, that.resultPool)
                 && Arrays.equals(bankHeaderExtra, that.bankHeaderExtra);
@@ -437,7 +449,7 @@ public class CellAnimation extends GenericNtrFile
     @Override
     public int hashCode()
     {
-        int result = Objects.hash(labelEnabled);
+        int result = Objects.hash(labelEnabled, uextValue);
         result = 31 * result + Arrays.hashCode(animations);
         result = 31 * result + Arrays.hashCode(resultPool);
         result = 31 * result + Arrays.hashCode(bankHeaderExtra);

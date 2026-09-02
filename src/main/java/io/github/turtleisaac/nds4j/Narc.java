@@ -276,7 +276,9 @@ public class Narc extends GenericNtrFile
             fimgWriter.write(data);
             endOffset = fimgWriter.getPosition();
             fatbWriter.writeUInt32(startOffset).writeUInt32(endOffset);
-            fimgWriter.align(4);
+            // Pad each file up to a 4-byte boundary with 0xFF, matching retail NARCs (the default
+            // zero-fill left 0x00 here and broke the byte-exact round-trip for any archive with padding).
+            fimgWriter.align(4, (byte) 0xFF);
         }
 
         byte[] fimg = fimgBuf.reader().getBuffer();

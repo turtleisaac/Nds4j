@@ -100,7 +100,7 @@ public class CrossLayerRenderingTest
             assertThat(image.getWidth()).isEqualTo(screen.getWidth());
             assertThat(image.getHeight()).isEqualTo(screen.getHeight());
 
-            // The transparent variant must actually leave some pixels transparent (colour index 0),
+            // The transparent variant must actually leave some pixels transparent (color index 0),
             // otherwise it is indistinguishable from the opaque render.
             BufferedImage transparent = screen.getTransparentImage(ncgr, palette);
             boolean anyTransparent = false;

@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
- * Conformance of NCLR colour handling to the DS palette specification.
+ * Conformance of NCLR color handling to the DS palette specification.
  * <p>
  * GBATEK defines a DS palette entry as a little-endian 16-bit value laid out as
  * <pre>
@@ -80,7 +80,7 @@ class PaletteBgr555SpecTest
     }
 
     @Test
-    @DisplayName("every representable colour encodes exactly as the reference does")
+    @DisplayName("every representable color encodes exactly as the reference does")
     void encodingMatchesReferenceExhaustively()
     {
         // Sweep all 32 levels of each channel against the others' extremes and midpoint.
@@ -101,7 +101,7 @@ class PaletteBgr555SpecTest
     }
 
     @Test
-    @DisplayName("save then parse preserves every quantised colour exactly")
+    @DisplayName("save then parse preserves every quantised color exactly")
     void roundTripIsExact()
     {
         // 5 bits per channel means only multiples of 8 are representable. For those, the
@@ -120,7 +120,7 @@ class PaletteBgr555SpecTest
 
         for (int idx = 0; idx < colors.length; idx++)
             assertThat(reparsed.getColor(idx))
-                    .as("colour %d must survive save/parse unchanged", idx)
+                    .as("color %d must survive save/parse unchanged", idx)
                     .isEqualTo(colors[idx]);
     }
 
@@ -141,10 +141,10 @@ class PaletteBgr555SpecTest
     }
 
     @Test
-    @DisplayName("a palette always holds a whole number of 16-colour banks")
+    @DisplayName("a palette always holds a whole number of 16-color banks")
     void sizeIsAlwaysAMultipleOfSixteen()
     {
-        // DS hardware addresses palettes in 16-colour banks, and getColor(i, palIndex)
+        // DS hardware addresses palettes in 16-color banks, and getColor(i, palIndex)
         // indexes as palIndex*16 + i. A palette that is not a multiple of 16 makes that
         // addressing walk off the end.
         for (int requested : new int[]{1, 2, 15, 16, 17, 20, 31, 32, 33, 100, 255, 256})
@@ -154,10 +154,10 @@ class PaletteBgr555SpecTest
             Palette palette = new Palette(colors);
 
             assertThat(palette.size() % 16)
-                    .as("a palette built from %d colours must round up to a whole bank", requested)
+                    .as("a palette built from %d colors must round up to a whole bank", requested)
                     .isZero();
             assertThat(palette.size())
-                    .as("padding must never discard colours")
+                    .as("padding must never discard colors")
                     .isGreaterThanOrEqualTo(requested);
         }
     }
@@ -178,7 +178,7 @@ class PaletteBgr555SpecTest
                 {
                     int finalBank = bank, finalIdx = idx;
                     assertThatCode(() -> palette.getColor(finalIdx, finalBank))
-                            .as("bank %d index %d of a %d-colour palette", bank, idx, palette.size())
+                            .as("bank %d index %d of a %d-color palette", bank, idx, palette.size())
                             .doesNotThrowAnyException();
                 }
         }
@@ -200,7 +200,7 @@ class PaletteBgr555SpecTest
     @DisplayName("copyOf produces an independent palette")
     void copiesAreIndependent()
     {
-        // Aliasing here let one image permanently recolour every other image in the JVM.
+        // Aliasing here let one image permanently recolor every other image in the JVM.
         Palette original = new Palette(16);
         original.setColor(3, Color.BLUE);
         Palette copy = original.copyOf();

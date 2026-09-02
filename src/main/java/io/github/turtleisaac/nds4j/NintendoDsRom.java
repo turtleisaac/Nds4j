@@ -113,6 +113,19 @@ public class NintendoDsRom
 
     int[] arm9PostData;
 
+    // DSi-enhanced (TWL) section — present when unitCode is 0x02 (NDS+DSi) or 0x03 (DSi-exclusive). The
+    // extended header fields (0x180..0x1000) are kept verbatim in padding_16Ch/padding_200h; the TWL data
+    // region (the ARM9i/ARM7i binaries and the digest hash tables, at high absolute offsets past the NTR
+    // content) is captured verbatim here and re-emitted at its original offset on save, so a DSi ROM keeps
+    // its DSi content instead of having it dropped. See the DSi accessors and the extended-header parse.
+    boolean dsi;
+    byte[] dsiRegion = new byte[0];   // the TWL data region, captured verbatim
+    int dsiRegionOffset;              // absolute file offset where dsiRegion begins
+    // parsed extended-header fields (for accessors; the authoritative bytes remain in the paddings)
+    int arm9iRomOffset, arm9iEntryAddress, arm9iLoadAddress, arm9iSize;
+    int arm7iRomOffset, arm7iEntryAddress, arm7iLoadAddress, arm7iSize;
+    long twlTitleId;
+
     // Files Stuff
 
     Folder filenames; // represents the root folder of the filesystem
@@ -235,6 +248,42 @@ public class NintendoDsRom
         }
 
         processOverlays();
+
+        readDsiRegion(reader, fileLength);
+    }
+
+    // Parses the DSi extended header (0x1C0.. — the ARM9i/ARM7i params and the digest table offsets) and
+    // captures the TWL data region (from the first DSi section to end-of-file) verbatim, so save() can
+    // re-emit it at its original offset. Only runs for DSi-enhanced/DSi-exclusive ROMs (unitCode 0x02/0x03).
+    private void readDsiRegion(MemBuf.MemBufReader reader, int fileLength)
+    {
+        if (unitCode == 0 || fileLength < 0x200)
+            return;
+        dsi = true;
+        reader.setPosition(0x1C0);
+        arm9iRomOffset = reader.readInt(); arm9iEntryAddress = reader.readInt();
+        arm9iLoadAddress = reader.readInt(); arm9iSize = reader.readInt();
+        arm7iRomOffset = reader.readInt(); arm7iEntryAddress = reader.readInt();
+        arm7iLoadAddress = reader.readInt(); arm7iSize = reader.readInt();
+        int digestNtrOffset = reader.readInt(); reader.readInt();       // 0x1E0: NTR digest region off/len
+        int digestTwlOffset = reader.readInt(); reader.readInt();       // 0x1E8: TWL digest region off/len
+        int digestSectorHtOffset = reader.readInt(); reader.readInt();  // 0x1F0: sector hashtable off/len
+        int digestBlockHtOffset = reader.readInt(); reader.readInt();   // 0x1F8: block hashtable off/len
+        reader.setPosition(0x230);
+        twlTitleId = reader.readUInt32() | (reader.readUInt32() << 32);
+
+        // the TWL data region starts at the earliest DSi section that lies past the NTR content
+        int start = Integer.MAX_VALUE;
+        for (int off : new int[]{arm9iRomOffset, arm7iRomOffset, digestSectorHtOffset, digestBlockHtOffset})
+            if (off > arm9Offset && off < fileLength) start = Math.min(start, off);
+        if (start == Integer.MAX_VALUE)
+        {
+            dsiRegion = new byte[0];
+            return; // a trimmed DSi ROM: the TWL region is not present in this file
+        }
+        dsiRegionOffset = start;
+        reader.setPosition(start);
+        dsiRegion = reader.readBytes(fileLength - start);
     }
 
     private void readHeader(MemBuf.MemBufReader reader, int fileLength, boolean fromUnpacked)
@@ -592,16 +641,46 @@ public class NintendoDsRom
         }
         writer.setPosition(storedPosition);
 
-        // write the RSA signature
-        align(writer, 0x20);
-        int rsaSignatureOffset = writer.getPosition();
-        writer.write(rsaSignature);
+        // write the RSA signature (only align/pad when one is actually present; padding before an absent
+        // signature would grow ROMs whose used size isn't 0x20-aligned)
+        int rsaSignatureOffset;
+        if (rsaSignature.length > 0)
+        {
+            align(writer, 0x20, (byte) 0xff);
+            rsaSignatureOffset = writer.getPosition();
+            writer.write(rsaSignature);
+        }
+        else
+        {
+            rsaSignatureOffset = writer.getPosition();
+        }
 
         int romSize = writer.getPosition();
 
-        // We need to do this for compatibility with NSMBe (idk why tho)
-        writer.setPosition(0x1000);
-        writer.writeInt(rsaSignatureOffset);
+        // DSi-enhanced: append the preserved TWL data region (ARM9i/ARM7i binaries + digest hash tables) at
+        // its original absolute offset, so the extended-header pointers stay valid and the ROM keeps its DSi
+        // content instead of it being dropped.
+        //
+        // FUTURE (low priority, cosmetic): after editing NTR files the digest hash tables (HMAC-SHA1 over the
+        // digest region) and the RSA header signature go stale. Regenerating the digests needs the 64-byte DSi
+        // digest HMAC key (in the Launcher firmware, not public); and even then the RSA signature over the
+        // master hash is unforgeable. Neither is checked in NDS-mode / flashcart / emulator play, so this is
+        // deliberately not done. See the dsi-enhanced-rom-support notes for the algorithm + validation recipe.
+        if (dsi && dsiRegion.length > 0)
+        {
+            if (writer.getPosition() > dsiRegionOffset)
+                throw new RuntimeException("rebuilt NTR content (0x" + Integer.toHexString(writer.getPosition())
+                        + ") overruns the DSi region start (0x" + Integer.toHexString(dsiRegionOffset)
+                        + "); relocating the DSi region after edits is not yet supported");
+            writer.writeByteNumTimes((byte) 0xFF, dsiRegionOffset - writer.getPosition()); // pad the gap as the ROM does
+            writer.write(dsiRegion);
+            romSize = writer.getPosition();
+        }
+
+        // (Historically this wrote rsaSignatureOffset at 0x1000 "for NSMBe compatibility"; that corrupted the
+        // byte-exact round-trip — retail ROMs hold 0 there, and for DSi ROMs 0x1000 is inside the TWL extended
+        // header — so it is no longer done. The original value is preserved verbatim via padding_200h, and the
+        // reader falls back to romSizeOrRsaSigOffset when 0x1000 is 0.)
 
         // Now that we know how large the ROM data is, we can update the device capacity value
         if (updateDeviceCapacity)
@@ -658,7 +737,9 @@ public class NintendoDsRom
         writer.writeInt(arm9Autoload);
         writer.writeInt(arm7Autoload);
         writer.write(secureDisable);
-        writer.writeInt(rsaSignatureOffset);
+        // 0x80: for NDS this is the RSA-signature offset; for DSi it's the NDS-mode used-rom-size the TWL
+        // extended header expects, so keep the original value there.
+        writer.writeInt(dsi ? (int) romSizeOrRsaSigOffset : rsaSignatureOffset);
         writer.writeInt(0x4000);
         writer.write(padding_088h);
         writer.write(nintendoLogo);
@@ -750,7 +831,7 @@ public class NintendoDsRom
     /**
      * Constructor for a <code>NintendoDsRom</code>, to be used when constructing the object from an unpacked ROM directory
      */
-    private NintendoDsRom()
+    NintendoDsRom()
     {
         title = "";
         gameCode = "####";
@@ -824,7 +905,7 @@ public class NintendoDsRom
     }
 
     /**
-     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk (ndstool/Nds4j or ds-rom extract).
      * @param dir a <code>String</code> containing the path to an unpacked ROM on disk
      * @return a <code>NintendoDsRom</code>
      */
@@ -834,7 +915,22 @@ public class NintendoDsRom
     }
 
     /**
-     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk
+     * Whether {@code dir} looks like an unpacked NDS ROM: the ndstool/Nds4j layout
+     * ({@code header.bin}) or a <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a> extract
+     * ({@code config.yaml} / {@code header.yaml}).
+     */
+    public static boolean looksLikeUnpackedRom(File dir)
+    {
+        if (dir == null || !dir.isDirectory()) return false;
+        if (new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile()) return true;
+        return DsRomUnpacked.isLayout(dir);
+    }
+
+    /**
+     * Creates a <code>NintendoDsRom</code> from an unpacked ROM on disk.
+     * Accepts the ndstool/Nds4j layout ({@code header.bin}, {@code data/}, {@code overlay/}) and a
+     * <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a> extract ({@code config.yaml},
+     * {@code header.yaml}, {@code files/}, {@code arm9/arm9.bin}).
      * @param dir a <code>File</code> containing the path to an unpacked ROM on disk
      * @return a <code>NintendoDsRom</code>
      */
@@ -844,6 +940,9 @@ public class NintendoDsRom
         {
             throw new RuntimeException("\"" + dir.getAbsolutePath() + "\" does not exist");
         }
+
+        if (DsRomUnpacked.isLayout(dir) && !new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile())
+            return DsRomUnpacked.load(dir);
 
         NintendoDsRom rom = new NintendoDsRom();
         byte[] header = Buffer.readFile(Paths.get(dir.getAbsolutePath(), UNPACKED_FILENAMES.HEADER.name));
@@ -887,6 +986,13 @@ public class NintendoDsRom
 
         if (rom.files.contains(null))
             throw new RuntimeException("Internal file table not properly filled");
+
+        // fromUnpacked fills `filenames` from the data/ tree but never serialises an FNT. Consumers
+        // that walk the filesystem via getFnt() (NitroViewer listTree, exportFolderZip) would NPE or
+        // see an empty tree. Rebuild the table from the folder we just loaded so both paths work.
+        MemBuf fntBuf = Fnt.save(rom.filenames);
+        rom.fnt = fntBuf.reader().getBuffer();
+        rom.fntLength = rom.fnt.length;
 
         return rom;
     }
@@ -968,6 +1074,66 @@ public class NintendoDsRom
     public byte[] getIconBanner()
     {
         return iconBanner == null ? null : iconBanner.clone();
+    }
+
+    /**
+     * Gets the ROM's icon/title banner as an editable {@link IconBanner} (the 32&times;32 menu icon and the
+     * per-language game titles), or {@code null} if the ROM has none.
+     * @return an {@link IconBanner}, or {@code null}
+     */
+    public IconBanner getBanner()
+    {
+        return iconBanner == null || iconBanner.length == 0 ? null : new IconBanner(iconBanner);
+    }
+
+    /**
+     * Replaces the ROM's icon/title banner with the (possibly edited) one, recomputing its checksum. The
+     * banner keeps its size, so this is a same-size in-place swap.
+     * @param banner the banner to store
+     */
+    public void setBanner(IconBanner banner)
+    {
+        this.iconBanner = banner.toBytes();
+    }
+
+    /** @return the header unit code: {@code 0} = NDS, {@code 2} = NDS+DSi hybrid, {@code 3} = DSi-exclusive. */
+    public int getUnitCode() { return unitCode; }
+
+    /**
+     * @return whether this is a DSi-enhanced or DSi-exclusive (TWL) ROM &mdash; i.e. it carries the extended
+     *         header and a TWL data region ({@link #getArm9i()}/{@link #getArm7i()} and digest tables).
+     */
+    public boolean isDsiEnhanced() { return dsi; }
+
+    /** @return the TWL title id (from the extended header), or {@code 0} for a plain NDS ROM. */
+    public long getTwlTitleId() { return twlTitleId; }
+
+    /** @return the ARM9i load address (where the DSi loads {@link #getArm9i()}), or {@code 0} if not DSi. */
+    public int getArm9iLoadAddress() { return arm9iLoadAddress; }
+    /** @return the ARM7i load address (where the DSi loads {@link #getArm7i()}), or {@code 0} if not DSi. */
+    public int getArm7iLoadAddress() { return arm7iLoadAddress; }
+
+    /**
+     * @return a copy of the ARM9i binary (the DSi-mode ARM9 executable), or {@code null} if this ROM has no
+     *         TWL region present (a plain NDS ROM, or a DSi ROM trimmed to its NTR part).
+     */
+    public byte[] getArm9i() { return dsiSection(arm9iRomOffset, arm9iSize); }
+
+    /**
+     * @return a copy of the ARM7i binary (the DSi-mode ARM7 executable), or {@code null} if this ROM has no
+     *         TWL region present.
+     */
+    public byte[] getArm7i() { return dsiSection(arm7iRomOffset, arm7iSize); }
+
+    // a copy of a TWL section that lives inside the captured DSi region, or null if it isn't present
+    private byte[] dsiSection(int offset, int size)
+    {
+        if (!dsi || dsiRegion.length == 0 || size <= 0)
+            return null;
+        int rel = offset - dsiRegionOffset;
+        if (rel < 0 || rel + size > dsiRegion.length)
+            return null;
+        return Arrays.copyOfRange(dsiRegion, rel, rel + size);
     }
 
     /**

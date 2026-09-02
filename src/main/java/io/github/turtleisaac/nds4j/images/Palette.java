@@ -41,7 +41,25 @@ public class Palette extends GenericNtrFile
     private int compNum = 0;
     private boolean ir = false;
 
-    // The raw 16-bit BGR555 values as read from a file, kept so an unedited colour round-trips byte-for-byte.
+    // The 32-bit flag word at TTLP offset 0x1C. Across all five retail ROMs it is 0 or 1, and 1 occurs
+    // only on 8bpp palettes, tracking those loaded as extended (multi-bank / >256-color) palettes; it
+    // is 0 for every 4bpp palette and every ordinary single-bank one. Preserved (rather than re-emitted
+    // as 0, which altered those files) but excluded from equals() as a serialisation-only detail.
+    private int extendedPaletteFlag = 0;
+
+    // Blocks that follow the TTLP section (some files carry a trailing PMCP palette-count-map block, so
+    // numBlocks is 2). Preserved verbatim; without this a load/save cycle dropped them and rewrote the
+    // block count as 1. Excluded from equals() as a serialisation-only detail.
+    private byte[] trailingBlocks = new byte[0];
+
+    // The raw palette-length word at TTLP offset 0x20 as read from the file, or NO_SOURCE if this
+    // palette was built in memory or has been resized. Some files over-declare it (e.g. the full
+    // extended-palette VRAM size, or 0 meaning "use the section size") while storing fewer colors; the
+    // reader normalises it to locate the data, but the original value must be re-emitted to stay
+    // byte-exact. The actual color byte count still drives the file layout.
+    private long sourcePaletteLengthField = NO_SOURCE;
+
+    // The raw 16-bit BGR555 values as read from a file, kept so an unedited color round-trips byte-for-byte.
     // BGR555 only uses 15 bits, but retail palettes set the unused bit 15 and java.awt.Color cannot carry it,
     // so without this a plain load/save would clear it (0xFFFF -> 0x7FFF). Null for palettes not read from a file;
     // an individual entry of NO_SOURCE means that slot has been edited/replaced and must not restore an old bit 15.
@@ -90,18 +108,19 @@ public class Palette extends GenericNtrFile
         int compNum = reader.readByte();
         reader.skip(1);
 
-        int paletteUnknown1 = reader.readInt();
-        long paletteLength= reader.readUInt32();
-
-        if(paletteLength == 0 || paletteLength > paletteSectionSize)
-            paletteLength= paletteSectionSize - 0x18;
+        this.extendedPaletteFlag = reader.readInt();
+        this.sourcePaletteLengthField = reader.readUInt32();
 
         long colorStartOffset= reader.readUInt32();
 
-        int numColors = 256;
-
-        if (paletteLength / 2 < numColors)
-            numColors = (int) (paletteLength / 2);
+        // One color per two bytes of palette data. The count is the actual extent of the color data
+        // in the TTLP section (from the color start to the end of the section), NOT the declared
+        // palette-length word at 0x20: retail files both over-declare it (VRAM hints) and under-declare
+        // it, and a former cap of 256 also truncated the extended palettes some files carry (several
+        // 16-/256-color sub-palettes stored consecutively, e.g. the shared opening-sequence NCLRs).
+        // Trusting the word dropped colors and shrank those files; the section bounds are the truth.
+        long colorDataBytes = (NTR_HEADER_SIZE + paletteSectionSize) - (0x18 + colorStartOffset);
+        int numColors = (int) (colorDataBytes / 2);
 
         this.numColors = numColors;
         colors = new Color[numColors];
@@ -122,6 +141,10 @@ public class Palette extends GenericNtrFile
         {
             this.ir = true;
         }
+
+        int trailingStart = NTR_HEADER_SIZE + (int) paletteSectionSize;
+        if (trailingStart < fileSize)
+            trailingBlocks = Arrays.copyOfRange(data, trailingStart, fileSize);
     }
 
     /**
@@ -203,12 +226,26 @@ public class Palette extends GenericNtrFile
 
         int size = numColors * 2; // two bytes per color
         // 0x18 for both magics: NclrUtils.palHeader is the same 24 bytes either way and the
-        // colour data starts at 0x28 regardless, so an RPCN file used to declare a size eight
+        // color data starts at 0x28 regardless, so an RPCN file used to declare a size eight
         // bytes short of itself. Nothing in this library reads the field back, which is why it
-        // went unnoticed, but it is what an external tool would trust.
+        // went unnoticed, but it is what an external tool would trust. RLCN does this too, and by a
+        // larger margin: a Pokemon Ranger: Shadows of Almia NCLR declares 32 while its real size is
+        // 72 (40 bytes short) -- so this isn't a fixed RPCN-only offset.
         int extSize = size + 0x18 + NTR_HEADER_SIZE;
 
-        writeGenericNtrHeader(writer, extSize, 1);
+        // Include any preserved trailing blocks (e.g. PMCP) in the file size and block count so a file
+        // that carried them round-trips exactly. Palettes built in memory have neither (numBlocks 0).
+        int blockCount = numBlocks != 0 ? numBlocks : 1;
+        int computedFileSize = extSize + trailingBlocks.length;
+        // The outer NTR header's fileSize field is decorative to the game engine: retail files are
+        // observed declaring anywhere from 8 to 40+ bytes short of their real length (not a fixed
+        // offset), yet still load fine. Re-emit the originally parsed value verbatim so an unedited
+        // palette round-trips exactly; a from-scratch palette (fileSize never parsed, still 0) falls
+        // back to the real computed size. Known gap: one retail Ranger NCLR (Shadows of Almia,
+        // narc file#1762/3) declares a literal 0 here, which this check can't tell apart from
+        // "never parsed" -- it recomputes instead of preserving that 0. Left as-is rather than adding
+        // a second sentinel field for a single file; revisit if more such files turn up.
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : computedFileSize, blockCount);
 
         // writer position is now 0x10
 
@@ -224,22 +261,29 @@ public class Palette extends GenericNtrFile
         writer.writeShort((short) (bitDepth == 4 ? 0x3 : 0x4)); // 0x18
         writer.writeByte((byte) (compNum)); // 0x1A
 
+        writer.setPosition(NTR_HEADER_SIZE + 0x0C);
+        writer.writeInt(extendedPaletteFlag); // 0x1C
+
         writer.setPosition(NTR_HEADER_SIZE + 0x10);
-        writer.writeInt(size);
+        // Re-emit the file's original palette-length word when it round-trips (it may over-declare or be
+        // 0); a resized/in-memory palette falls back to the true color byte count.
+        writer.writeInt(sourcePaletteLengthField != NO_SOURCE ? (int) sourcePaletteLengthField : size);
 
         writer.setPosition(storedPos);
 
         for (int i = 0; i < colors.length; i++) {
             byte[] packed = NclrUtils.colorToBGR555(colors[i]);
             int value = (packed[0] & 0xff) | ((packed[1] & 0xff) << 8);
-            // If this colour is unchanged since it was read (its repacked 15 bits still match the source),
-            // re-emit the original 16-bit value so bit 15 is preserved. An edited colour won't match and
+            // If this color is unchanged since it was read (its repacked 15 bits still match the source),
+            // re-emit the original 16-bit value so bit 15 is preserved. An edited color won't match and
             // falls through to the freshly packed value (bit 15 = 0), which is correct for new data.
             if (sourceColors != null && i < sourceColors.length && sourceColors[i] != NO_SOURCE && (sourceColors[i] & 0x7FFF) == (value & 0x7FFF))
                 value = sourceColors[i];
             writer.writeByte((byte) (value & 0xff));
             writer.writeByte((byte) ((value >> 8) & 0xff));
         }
+
+        writer.write(trailingBlocks);
 
         return dataBuf.reader().getBuffer();
     }
@@ -283,9 +327,10 @@ public class Palette extends GenericNtrFile
     public void setColors(Color[] colors)
     {
         this.colors = colors;
-        // The whole array was replaced with caller-supplied colours that have no relation to the file that
+        // The whole array was replaced with caller-supplied colors that have no relation to the file that
         // was read, so drop the source values - none of them may restore a stale bit 15.
         this.sourceColors = null;
+        this.sourcePaletteLengthField = NO_SOURCE; // the file's declared length no longer applies to caller data
     }
 
     /**
@@ -313,7 +358,7 @@ public class Palette extends GenericNtrFile
             throw new RuntimeException("Invalid index: " + i);
         colors[i] = color;
         // This slot has been edited, so its original 16-bit value no longer applies - a subsequent save must
-        // pack the new colour fresh (bit 15 = 0) rather than restore the byte that used to be here.
+        // pack the new color fresh (bit 15 = 0) rather than restore the byte that used to be here.
         if (sourceColors != null && i < sourceColors.length)
             sourceColors[i] = NO_SOURCE;
     }
@@ -372,7 +417,7 @@ public class Palette extends GenericNtrFile
             colors[i] = java.awt.Color.BLACK;
         this.colors = colors;
         // Keep the source values aligned with the resized array: preserve the surviving prefix (so unedited
-        // colours still round-trip) and mark any newly-added slots as having no source.
+        // colors still round-trip) and mark any newly-added slots as having no source.
         if (sourceColors != null)
         {
             int[] resized = new int[numColors];
@@ -380,6 +425,7 @@ public class Palette extends GenericNtrFile
             System.arraycopy(sourceColors, 0, resized, 0, Math.min(sourceColors.length, numColors));
             sourceColors = resized;
         }
+        sourcePaletteLengthField = NO_SOURCE; // color count changed; recompute the length word on save
     }
 
     /**
@@ -424,13 +470,16 @@ public class Palette extends GenericNtrFile
         p.bitDepth = bitDepth;
         p.compNum = compNum;
         p.ir = ir;
+        p.extendedPaletteFlag = extendedPaletteFlag;
+        p.trailingBlocks = trailingBlocks.clone();
+        p.sourcePaletteLengthField = sourcePaletteLengthField;
 
         int idx = 0;
         for (Color c : colors)
         {
             p.colors[idx++] = new Color(c.getRGB());
         }
-        // Carry the source values so a copied palette still round-trips bit 15 (the copied colours are
+        // Carry the source values so a copied palette still round-trips bit 15 (the copied colors are
         // identical, so the same restoration applies). Without this, copy-then-save re-clears bit 15.
         p.sourceColors = (sourceColors != null ? sourceColors.clone() : null);
 
@@ -447,9 +496,9 @@ public class Palette extends GenericNtrFile
             return false;
         }
         Palette palette = (Palette) o;
-        // Deliberately not comparing sourceColors: two palettes with the same colours are equal even if one was
+        // Deliberately not comparing sourceColors: two palettes with the same colors are equal even if one was
         // read from a file (and so carries the unused BGR555 bit 15) and the other was built in memory. Bit 15
-        // is ignored by the DS 2D engine, so it is below the granularity of colour equality; it only affects the
+        // is ignored by the DS 2D engine, so it is below the granularity of color equality; it only affects the
         // exact bytes save() emits. copyOf carries sourceColors, so a copy still both equals and serialises like its original.
         return numColors == palette.numColors && bitDepth == palette.bitDepth && compNum == palette.compNum && ir == palette.ir && Arrays.equals(colors, palette.colors);
     }
@@ -536,8 +585,8 @@ public class Palette extends GenericNtrFile
     {
         // ceil, not floor: a palette that does not fill a whole row still needs that row. And
         // IndexedImage requires a height that is a multiple of 8, so the row count is rounded
-        // up to one - which is why this used to work only for 128 and 256 colours and threw for
-        // every other size, including the 16 colour palette that is the norm for 4bpp graphics.
+        // up to one - which is why this used to work only for 128 and 256 colors and threw for
+        // every other size, including the 16 color palette that is the norm for 4bpp graphics.
         int rows = (numColors + 15) / 16;
         int paddedRows = ((rows + 7) / 8) * 8;
         IndexedImage image = new IndexedImage(paddedRows, 16, bitDepth, this);

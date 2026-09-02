@@ -62,6 +62,9 @@ public class IndexedImage extends GenericNtrFile
     private final int width;
 
     private int bitDepth;
+    // Reflects CHAR `flags` bit 0 (the "line buffer instead of tiles" / linear-raster layout; byte 0x24 of the
+    // header). Historically named "scanned"; note the scanned decode ALSO LCG-decrypts, which is only correct
+    // for *encrypted* rasters (DP/HGSS sprites), not plain bitmaps (Gen V pokegra) — see HANDOFF §11d-open.
     // Defaults to NOT_SCANNED so that an image built in memory (rather than parsed from an
     // NCGR) serializes down the plain tiled path. Leaving this null made save() take the
     // scanned branch, where neither direction matched and the pixel buffer came out empty.
@@ -79,16 +82,31 @@ public class IndexedImage extends GenericNtrFile
      * contain: a 160x80 image saved and reparsed as 8x1600.
      */
     private int mappingType = 32;
+    // CHAR `flags` bit 8 (0x100): meaning unknown ("maybe related to mapping type" per ds-pokemon-hacking).
+    // Preserved verbatim for byte-exact save. Census: appears in Gen IV only, never alongside an SOPC section.
     private boolean vram;
     private int encryptionKey = -1;
 
     // Raw NCGR character-header fields that save() otherwise recomputes. Preserved so an unedited image
-    // round-trips byte-for-byte: party-icon NCGRs store 0xFFFF "unspecified" tile width/height and a 0x10
-    // flag at 0x20, which the reader replaces with a computed layout. Only restored when the image has not
-    // been resized (its pixel dimensions still match what was read); an edited/resized image writes fresh
-    // values. Absent for images not read from a file.
+    // round-trips byte-for-byte: some NCGRs store 0xFFFF "unspecified" tile width/height, which the
+    // reader replaces with a computed layout. Only restored when the image has not been resized (its
+    // pixel dimensions still match what was read); an edited/resized image writes fresh values. Absent
+    // for images not read from a file.
+    //
+    // srcUnspecifiedSizeFlag is the u16 at char-header offset 0x20: across all five retail ROMs it is
+    // exactly 0x10 when the tile width/height are the 0xFFFF "unspecified" sentinel and 0x0 otherwise,
+    // i.e. it marks a character set with no explicit size (dimensions supplied by the consumer).
     private boolean hasSourceHeader = false;
-    private int srcCharHeightField, srcCharWidthField, srcUnknown0x20, srcWidthPx, srcHeightPx;
+    private int srcCharHeightField, srcCharWidthField, srcUnspecifiedSizeFlag, srcWidthPx, srcHeightPx;
+    // The RAHC (char) section's own declared size (u32 right after its magic). Decorative like the outer
+    // NTR header's fileSize (see that field's save()-site comment) -- a Mario Kart DS RGCN declares this
+    // 8 bytes short of the section's real size. 0 for an image never parsed from a file.
+    private long srcCharSectionSize;
+    // The SOPC section's stored tile width/height (u16 at SOPC container 0x0C/0x0E). These are NOT always the
+    // CHAR dimensions — often the SOPC height is 2x (sometimes 4x/8x) the CHAR height (a multi-frame full
+    // extent). Captured raw so save() reproduces them exactly instead of recomputing from the tile grid.
+    // -1 when there was no (parseable) SOPC section to read.
+    private int srcSopcWidthField = -1, srcSopcHeightField = -1;
 
     private boolean sopc;
 
@@ -132,6 +150,7 @@ public class IndexedImage extends GenericNtrFile
         }
 
         long charSectionSize = reader.readUInt32();
+        this.srcCharSectionSize = charSectionSize; // captured raw so save() can round-trip it exactly
 
         int tilesHeight = reader.readShort(); //0x18
         this.srcCharHeightField = tilesHeight & 0xFFFF; // captured raw so save() can round-trip it exactly
@@ -162,7 +181,7 @@ public class IndexedImage extends GenericNtrFile
         {
             numColors = 16;
         }
-        this.srcUnknown0x20 = reader.readUInt16(); // 0x20 - captured raw so save() can round-trip it exactly
+        this.srcUnspecifiedSizeFlag = reader.readUInt16(); // 0x20 - captured raw so save() can round-trip it exactly
 
         this.mappingType = reader.readUInt16(); // 0x22
 
@@ -183,11 +202,32 @@ public class IndexedImage extends GenericNtrFile
                 throw new RuntimeException(String.format("Invalid mapping type %d", mappingType));
         }
 
-        boolean scanned = reader.readByte() == 1; // 0x24
-        this.vram = reader.readByte() == 1; // 0x25
-        reader.skip(2);
+        // 0x24-0x27 is the CHAR `flags` bitfield (ds-pokemon-hacking / Gonhex-NOCASH research), NOT an enum:
+        //   bit 0 (0x1)   = "use a line buffer instead of tiles" — a linear-raster/bitmap layout (this is the
+        //                   flag historically read as "scanned" below). It denotes the LAYOUT, not encryption:
+        //                   DP/HGSS Pokémon sprites are an LCG-*encrypted* raster (correctly handled by
+        //                   convertFromScanned), whereas Gen V "pokegra" bitmaps are an UN-encrypted raster the
+        //                   same decrypt currently scrambles — a known limitation (see HANDOFF §11d-open).
+        //   bit 8 (0x100) = unknown, "maybe related to mapping type" (kept as `vram`; census: Gen IV only,
+        //                   never co-occurs with SOPC).
+        //   A census of all 57,705 retail NCGRs saw only 0/1/256 (never 0x101), i.e. one bit set at a time.
+        //   All bits round-trip byte-exact via lineBuffer (bit 0) + vram (bit 8) + the always-zero upper bytes.
+        boolean lineBuffer = reader.readByte() == 1; // 0x24 (flags bit 0)
+        this.vram = reader.readByte() == 1;          // 0x25 (flags bit 8)
+        reader.skip(2);                              // 0x26-0x27 (always 0 in the retail corpus)
 
-        this.scanMode = NcgrUtils.ScanMode.getMode(scanned, scanFrontToBack);
+        this.scanMode = NcgrUtils.ScanMode.getMode(lineBuffer, scanFrontToBack);
+
+        // A line-buffer NCGR that ALSO carries an SOPC section is a plain (un-encrypted) raster — Gen V
+        // "pokegra" bitmaps and the like. The default scanned path LCG-decrypts, which is only correct for the
+        // encrypted rasters (DP/HGSS sprites, which have no SOPC); running it on a plain bitmap scrambles the
+        // pixels. Route the SOPC-carrying line-buffer files to the plain-raster LINE_BUFFER path instead — the
+        // save stays byte-exact either way (both decode/encode paths are self-inverse). Discriminator verified
+        // by a 57,705-NCGR census: Gen V is SOPC⇔bitmap with 0 exceptions; a ~120-per-ROM Gen IV group is
+        // ambiguous and moves here too (its pixels are unverified, but its bytes still round-trip). See
+        // HANDOFF §11d-open.
+        if (this.scanMode != NcgrUtils.ScanMode.NOT_SCANNED && this.sopc)
+            this.scanMode = NcgrUtils.ScanMode.LINE_BUFFER;
 
         int tileSize = bitDepth * 8;
 
@@ -212,7 +252,18 @@ public class IndexedImage extends GenericNtrFile
         reader.setPosition(0x30);
         byte[] imageData = reader.getBuffer();
 
-        if (scanned) // scanned images
+        if (scanMode == NcgrUtils.ScanMode.LINE_BUFFER) // plain (un-encrypted) linear raster
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    NcgrUtils.convertFromLineBuffer4Bpp(imageData, this);
+                    break;
+                case 8:
+                    throw new RuntimeException("8bpp line-buffer NCGR not supported yet.");
+            }
+        }
+        else if (lineBuffer) // encrypted line-buffer ("scanned"): LCG-decrypt then raster (DP/HGSS sprites)
         {
             switch (bitDepth)
             {
@@ -240,6 +291,19 @@ public class IndexedImage extends GenericNtrFile
         this.srcWidthPx = this.width;
         this.srcHeightPx = this.height;
         this.hasSourceHeader = true;
+
+        // Capture the SOPC section's own tile width/height so save() reproduces them verbatim (they are often
+        // not the CHAR dims — e.g. Gen V bitmaps store SOPC height = 2x CHAR height). Skip if the SOPC section
+        // is absent or truncated (some HG/SS files declare numBlocks==2 but carry no SOPC bytes).
+        if (this.sopc)
+        {
+            int sopcStart = NTR_HEADER_SIZE + (int) charSectionSize;
+            if (sopcStart + 16 <= data.length)
+            {
+                this.srcSopcWidthField = (data[sopcStart + 12] & 0xFF) | ((data[sopcStart + 13] & 0xFF) << 8);
+                this.srcSopcHeightField = (data[sopcStart + 14] & 0xFF) | ((data[sopcStart + 15] & 0xFF) << 8);
+            }
+        }
 
         this.update = true;
     }
@@ -348,9 +412,10 @@ public class IndexedImage extends GenericNtrFile
 
     private boolean allRowsHaveSameWidth(int[][] pixels)
     {
-        if (pixels.length == 0)
-            return false;
-        if (pixels.length == 1)
+        // Vacuously true: with zero or one row there's no pair of rows that could disagree. A
+        // zero-height NCGR is a real retail case (Pokemon Ranger: Shadows of Almia has one, tilesY=0),
+        // so this must return true here, not reject it -- there's nothing inconsistent about it.
+        if (pixels.length <= 1)
             return true;
 
         int width = pixels[0].length;
@@ -476,14 +541,29 @@ public class IndexedImage extends GenericNtrFile
             numTiles = maxNumTiles;
             this.numTiles = numTiles;
         }
-        else if (numTiles > maxNumTiles)
+        // maxNumTiles is a degenerate 0 for a zero-height (or zero-width) grid -- e.g. a Pokemon Ranger:
+        // Shadows of Almia NCGR that declares tilesY=0 but still carries real tile data (numTiles=4).
+        // There's no meaningful cap to violate against an empty grid, so the file's own count is
+        // trusted rather than rejected.
+        else if (maxNumTiles != 0 && numTiles > maxNumTiles)
             throw new RuntimeException(String.format("The specified number of tiles (%d) is greater than the maximum possible value (%d).", numTiles, maxNumTiles));
 
         int bufferSize = numTiles * tileSize;
         MemBuf pixelsBuf = MemBuf.create();
         MemBuf.MemBufWriter writer = pixelsBuf.writer();
 
-        if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
+        if (scanMode == NcgrUtils.ScanMode.LINE_BUFFER) // plain raster: exact inverse of convertFromLineBuffer
+        {
+            switch (bitDepth)
+            {
+                case 4:
+                    writer.write(NcgrUtils.convertToLineBuffer4Bpp(this, bufferSize));
+                    break;
+                case 8:
+                    throw new RuntimeException("8bpp line-buffer NCGR not supported yet.");
+            }
+        }
+        else if (scanMode != NcgrUtils.ScanMode.NOT_SCANNED)
         {
             switch (bitDepth)
             {
@@ -512,12 +592,18 @@ public class IndexedImage extends GenericNtrFile
         MemBuf dataBuf = MemBuf.create();
         writer = dataBuf.writer();
 
-        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x40 : 0x30), sopc ? 2 : 1);
+        // The outer NTR header's fileSize field is decorative (see Palette's identical fix): a Mario Kart
+        // DS RGCN was found declaring 8 bytes short of its real length. Re-emit the originally parsed
+        // value so an unedited image round-trips exactly; a from-scratch image (fileSize never parsed,
+        // still 0) falls back to the real computed size.
+        long computedFileSize = bufferSize + (sopc ? 0x40 : 0x30);
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : computedFileSize, sopc ? 2 : 1);
 
         writer.write(NcgrUtils.charHeader);
 
         writer.setPosition(NcgrUtils.charHeaderPos + 4);
-        writer.writeInt(bufferSize + 0x20); // 0x14
+        // Same decorative-field treatment as the outer NTR header just above (see srcCharSectionSize).
+        writer.writeInt((int) (srcCharSectionSize != 0 ? srcCharSectionSize : bufferSize + 0x20)); // 0x14
 
         writer.setPosition(NcgrUtils.charHeaderPos + 8);
 
@@ -577,9 +663,14 @@ public class IndexedImage extends GenericNtrFile
             MemBuf.MemBufWriter sopcWriter = sopcBuf.writer();
             int endPos = sopcWriter.getPosition();
 
+            // Prefer the captured SOPC dimensions for an unedited image (they are not always the tile grid —
+            // often SOPC height = 2x CHAR height); fall back to the recomputed tile dims for a resized image.
+            boolean unedited = hasSourceHeader && width == srcWidthPx && height == srcHeightPx;
+            int sopcW = (unedited && srcSopcWidthField >= 0) ? srcSopcWidthField : tilesWidth;
+            int sopcH = (unedited && srcSopcHeightField >= 0) ? srcSopcHeightField : tilesHeight;
             sopcWriter.setPosition(12);
-            sopcWriter.writeShort((short) tilesWidth);
-            sopcWriter.writeShort((short) tilesHeight);
+            sopcWriter.writeShort((short) sopcW);
+            sopcWriter.writeShort((short) sopcH);
             sopcWriter.setPosition(endPos);
 
             writer.write(sopcBuf.reader().getBuffer());
@@ -595,7 +686,7 @@ public class IndexedImage extends GenericNtrFile
             writer.writeShort((short) srcCharHeightField); // 0x18
             writer.writeShort((short) srcCharWidthField);  // 0x1A
             writer.setPosition(NcgrUtils.charHeaderPos + 16);
-            writer.writeShort((short) srcUnknown0x20);     // 0x20
+            writer.writeShort((short) srcUnspecifiedSizeFlag);     // 0x20
             writer.setPosition(endPos);
         }
 
@@ -869,6 +960,174 @@ public class IndexedImage extends GenericNtrFile
         return this;
     }
 
+    // --- Headless PNG import ------------------------------------------------------------------------
+    // Clean replacements for the deprecated IndexedImage(Image, JPanel) / indexSelf(JPanel) path, which
+    // was a half-finished port from PokEditor: it hardcoded 80x80, capped at 16 exact-match colors,
+    // padded with magenta, took a Swing JPanel it never used (only fed commented-out JOptionPane
+    // dialogs), and left the palette assignment commented out ("//todo fix and uncomment"). These
+    // operate on an existing image so its geometry (dimensions, bit depth, tiling) is preserved and the
+    // result re-encodes cleanly with save(); they are headless (no Swing) and support any size + 4/8bpp.
+
+    /**
+     * Overwrite this image's pixels by matching every pixel of {@code src} to the nearest color in
+     * this image's current palette (squared-RGB distance). Fully transparent pixels (alpha &lt; 128)
+     * map to palette index 0, the DS transparent slot. This image's dimensions, bit depth and tiling
+     * are unchanged, so the result re-encodes with {@link #save()}.
+     *
+     * @param src an image whose dimensions equal this image's
+     * @return the number of pixels whose nearest palette color was not an exact match (a measure of
+     *         how well the image fits the existing palette)
+     * @throws RuntimeException if {@code src}'s dimensions differ, or this image has no palette
+     */
+    public int applyImageMatched(BufferedImage src)
+    {
+        requireSameSize(src);
+        if (palette == null)
+            throw new RuntimeException("This image has no palette to match against.");
+        Color[] pal = palette.getColors();
+        // A 4bpp NCGR indexes into a single 16-color sub-palette; never emit an index past 15.
+        int limit = (bitDepth == 4) ? Math.min(16, pal.length) : pal.length;
+        if (limit < 1)
+            throw new RuntimeException("The palette is empty.");
+        int unmatched = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int argb = src.getRGB(x, y);
+                if ((argb >>> 24) < 128) { pixels[y][x] = 0; continue; } // transparent -> index 0
+                int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                int best = 0, bestDist = Integer.MAX_VALUE;
+                for (int i = 0; i < limit; i++)
+                {
+                    Color c = pal[i];
+                    int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
+                    int d = dr * dr + dg * dg + db * db;
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                if (bestDist != 0) unmatched++;
+                pixels[y][x] = best;
+            }
+        }
+        update = true;
+        return unmatched;
+    }
+
+    /**
+     * Rebuild this image's palette from {@code src} (median-cut to at most {@code maxColors} entries,
+     * with index 0 reserved as the transparent slot) and re-index every pixel against the new palette.
+     * Sets this image's palette and returns it. Headless.
+     *
+     * @param src an image whose dimensions equal this image's
+     * @param maxColors the palette size to fill (16 for a 4bpp NCGR, 256 for 8bpp)
+     * @return the newly built {@link Palette} (also now this image's palette)
+     */
+    public Palette applyImageQuantized(BufferedImage src, int maxColors)
+    {
+        requireSameSize(src);
+        if (maxColors < 2) maxColors = 2;
+
+        boolean[][] transparent = new boolean[height][width];
+        java.util.List<int[]> opaque = new ArrayList<>();
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int argb = src.getRGB(x, y);
+                if ((argb >>> 24) < 128) { transparent[y][x] = true; continue; }
+                opaque.add(new int[]{ (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF });
+            }
+        }
+
+        // Slot 0 is transparent; median-cut the opaque colors into the remaining slots.
+        java.util.List<Color> boxed = medianCut(opaque, maxColors - 1);
+        Color[] colors = new Color[maxColors];
+        colors[0] = Color.MAGENTA; // rendered transparent when index-0 transparency is enabled
+        for (int i = 1; i < maxColors; i++)
+            colors[i] = (i - 1 < boxed.size()) ? boxed.get(i - 1) : Color.BLACK;
+        Palette newPal = new Palette(colors);
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (transparent[y][x]) { pixels[y][x] = 0; continue; }
+                int argb = src.getRGB(x, y);
+                int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+                int best = 1, bestDist = Integer.MAX_VALUE;
+                for (int i = 1; i < maxColors; i++)
+                {
+                    Color c = colors[i];
+                    int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
+                    int d = dr * dr + dg * dg + db * db;
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                pixels[y][x] = best;
+            }
+        }
+
+        setPalette(newPal);
+        update = true;
+        return newPal;
+    }
+
+    private void requireSameSize(BufferedImage src)
+    {
+        if (src == null)
+            throw new RuntimeException("No image was provided.");
+        if (src.getWidth() != width || src.getHeight() != height)
+            throw new RuntimeException(String.format(
+                    "Imported image is %dx%d but this image is %dx%d; they must match.",
+                    src.getWidth(), src.getHeight(), width, height));
+    }
+
+    /**
+     * Median-cut {@code colors} (each an {@code int[]{r,g,b}}) into {@code count} representative colors
+     * (the average of each final box). Splits the box with the widest single-channel range each step.
+     * <p>Package-private so {@link Screen#applyImageRebuildingPalette} can reuse it when quantising a
+     * background's sub-palettes.
+     */
+    static java.util.List<Color> medianCut(java.util.List<int[]> colors, int count)
+    {
+        java.util.List<Color> out = new ArrayList<>();
+        if (count < 1) count = 1;
+        if (colors.isEmpty()) { out.add(Color.BLACK); return out; }
+
+        java.util.List<java.util.List<int[]>> boxes = new ArrayList<>();
+        boxes.add(new ArrayList<>(colors));
+        while (boxes.size() < count)
+        {
+            int bi = -1, bestRange = -1, bestCh = 0;
+            for (int i = 0; i < boxes.size(); i++)
+            {
+                java.util.List<int[]> bx = boxes.get(i);
+                if (bx.size() < 2) continue;
+                for (int ch = 0; ch < 3; ch++)
+                {
+                    int mn = 255, mx = 0;
+                    for (int[] c : bx) { mn = Math.min(mn, c[ch]); mx = Math.max(mx, c[ch]); }
+                    if (mx - mn > bestRange) { bestRange = mx - mn; bi = i; bestCh = ch; }
+                }
+            }
+            if (bi < 0) break; // nothing left worth splitting
+            java.util.List<int[]> bx = boxes.remove(bi);
+            final int ch = bestCh;
+            bx.sort((a, b) -> Integer.compare(a[ch], b[ch]));
+            int mid = bx.size() / 2;
+            boxes.add(new ArrayList<>(bx.subList(0, mid)));
+            boxes.add(new ArrayList<>(bx.subList(mid, bx.size())));
+        }
+
+        for (java.util.List<int[]> bx : boxes)
+        {
+            long r = 0, g = 0, b = 0;
+            for (int[] c : bx) { r += c[0]; g += c[1]; b += c[2]; }
+            int n = Math.max(1, bx.size());
+            out.add(new Color((int) (r / n), (int) (g / n), (int) (b / n)));
+        }
+        return out;
+    }
+
     // TODO figure out what is going on with the following three methods - why did I write these and give them such shitty names
 
 //    /**
@@ -1082,6 +1341,22 @@ public class IndexedImage extends GenericNtrFile
     }
 
     /**
+     * Whether this NCGR sets CHAR {@code flags} bit 0 — the "line buffer instead of tiles" (linear-raster)
+     * layout, historically called "scanned" here. This reports the <em>layout</em>, not encryption: an
+     * <em>encrypted</em> raster (DP/HGSS Pokémon sprites) decodes to a correct bitmap via the LCG path, but an
+     * <em>un-encrypted</em> raster (e.g. Gen V pokegra) is currently scrambled by that same path — a known
+     * limitation (see HANDOFF §11d-open; the un-encrypted case wants a plain-raster decode). Either way the
+     * data is laid out linearly, so it can't be composed through an NCER (whose OAM offsets assume tiled data)
+     * — see {@link CellBank#setParentImage}. Exposed publicly so callers in other packages can branch without
+     * reaching the protected {@link NcgrUtils.ScanMode} enum.
+     * @return {@code true} if the line-buffer/raster flag is set (front-to-back or back-to-front)
+     */
+    public boolean isScanned()
+    {
+        return scanMode != NcgrUtils.ScanMode.NOT_SCANNED;
+    }
+
+    /**
      * Sets the scanning mode of this <code>IndexedImage</code>
      * @param scanMode a <code>NcgrUtils.ScanMode</code>
      */
@@ -1252,6 +1527,9 @@ public class IndexedImage extends GenericNtrFile
             case BACK_TO_FRONT:
                 s = "scanned back-to-front";
                 break;
+            case LINE_BUFFER:
+                s = "line-buffer (bitmap)";
+                break;
             default:
                 s = "";
         }
@@ -1351,6 +1629,40 @@ public class IndexedImage extends GenericNtrFile
             image.setPixels(pixelTable);
 
             return encValue;
+        }
+
+        // Decodes a plain (un-encrypted) line-buffer 4bpp NCGR: the char data is already a linear raster, so
+        // unpack nibble pairs straight into the pixel grid with NO scan cipher. Exact inverse of
+        // convertToLineBuffer4Bpp. Mirrors convertFromScanned4Bpp's sizing/bounds — the tile grid can be larger
+        // than the char data actually present, and the remainder stays palette index 0.
+        protected static void convertFromLineBuffer4Bpp(byte[] src, IndexedImage image)
+        {
+            int width = image.width;
+            int height = image.height;
+
+            MemBuf dataBuf = MemBuf.create(src);
+            MemBuf.MemBufReader reader = dataBuf.reader();
+
+            int[] data = new int[image.numTiles * 16];
+            for (int i = 0; i < data.length; i++)
+                data[i] = reader.readUInt16();
+
+            byte[] arr = new byte[width * height];
+            for (int i = 0; i < arr.length / 4 && i < data.length; i++)
+            {
+                arr[i * 4] = (byte) (data[i] & 0xf);
+                arr[i * 4 + 1] = (byte) ((data[i] >> 4) & 0xf);
+                arr[i * 4 + 2] = (byte) ((data[i] >> 8) & 0xf);
+                arr[i * 4 + 3] = (byte) ((data[i] >> 12) & 0xf);
+            }
+
+            int[][] pixelTable = new int[height][width];
+            int idx = 0;
+            for (int row = 0; row < height; row++)
+                for (int col = 0; col < width; col++)
+                    pixelTable[row][col] = arr[idx++];
+
+            image.setPixels(pixelTable);
         }
 
         private static int convertFromScanned8Bpp(byte[] src, IndexedImage image, boolean scanFrontToBack)
@@ -1611,6 +1923,26 @@ public class IndexedImage extends GenericNtrFile
             return dest;
         }
 
+        // Encodes a plain line-buffer 4bpp NCGR: pack the raster nibble pairs with NO scan cipher. Exact
+        // inverse of convertFromLineBuffer4Bpp, so a LINE_BUFFER image round-trips byte-for-byte.
+        private static byte[] convertToLineBuffer4Bpp(IndexedImage image, int bufferSize)
+        {
+            int idx = 0;
+            int[] data = new int[image.height * image.width];
+            for (int row = 0; row < image.height; row++)
+                for (int col = 0; col < image.width; col++)
+                    data[idx++] = image.pixels[row][col];
+
+            if (bufferSize != data.length / 2)
+                throw new RuntimeException("Invalid buffer length: does not match height * width / 2");
+
+            byte[] dest = new byte[bufferSize];
+            for (int i = 0; i < bufferSize; i++)
+                dest[i] = (byte) ((data[i * 2] & 0xF) | ((data[i * 2 + 1] & 0xF) << 4));
+
+            return dest;
+        }
+
 //        private static byte[] convertToScanned8Bpp(IndexedImage image, int bufferSize)
 //        {
 //            long encValue = image.encryptionKey;
@@ -1847,7 +2179,11 @@ public class IndexedImage extends GenericNtrFile
         protected enum ScanMode {
             NOT_SCANNED,
             FRONT_TO_BACK,
-            BACK_TO_FRONT;
+            BACK_TO_FRONT,
+            // A line-buffer (CHAR flags bit 0) image that is NOT LCG-encrypted: a plain linear raster.
+            // Decoded/encoded without the scan cipher (e.g. Gen V "pokegra" battle-sprite sheets). Still a
+            // line-buffer layout, so isScanned() == true and it can't be composed through an NCER.
+            LINE_BUFFER;
 
             static ScanMode getMode(boolean scanned, boolean frontToBack)
             {
