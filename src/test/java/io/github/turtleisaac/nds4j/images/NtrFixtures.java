@@ -62,7 +62,8 @@ final class NtrFixtures
     /**
      * @param rom the ROM to scan
      * @param wantedMagic the four-byte NTR magic to collect (as stored, e.g. {@code "RNAN"})
-     * @return every embedded file with that magic, in scan order
+     * @return every embedded file with that magic, in scan order -- both inside a NARC and stored loose
+     * as a top-level ROM file (e.g. two of Mario Kart DS's RGCN/RPCN files aren't wrapped in a NARC)
      */
     static List<byte[]> collect(NintendoDsRom rom, String wantedMagic)
     {
@@ -70,6 +71,11 @@ final class NtrFixtures
         for (int i = 0; i < rom.getNumFiles(); i++)
         {
             byte[] file = decompressIfNeeded(rom.getFile(i));
+            if (magic(file).equals(wantedMagic))
+            {
+                found.add(file);
+                continue;
+            }
             if (!magic(file).equals("NARC"))
                 continue;
             Narc narc;

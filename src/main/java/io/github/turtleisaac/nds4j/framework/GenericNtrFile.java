@@ -34,6 +34,12 @@ public class GenericNtrFile
     protected long fileSize;
     protected int headerSize;
     protected int numBlocks;
+    // Whether bom was actually read from a file (readGenericNtrHeader), as opposed to left at its
+    // int-default 0 by an in-memory/from-scratch instance. Distinguishes "this file's declared BOM is
+    // genuinely 0x0000" (seen on two loose, non-NARC RGCN/RPCN files in Mario Kart DS -- not a standard
+    // 0xFEFF/0xFFFE mark, but still the byte-order the rest of the header was written in, LITTLE here)
+    // from "never parsed, so there's nothing to preserve" -- the same convention Palette.fileSize uses.
+    private boolean bomParsed;
 
     public GenericNtrFile(String... magic)
     {
@@ -61,6 +67,7 @@ public class GenericNtrFile
             throw new RuntimeException("Not a " + Arrays.toString(this.magic) + " file.");
 
         bom = reader.readUInt16();
+        bomParsed = true;
         version = reader.readUInt16();
         fileSize = reader.readUInt32();
         headerSize = reader.readUInt16();
@@ -82,6 +89,12 @@ public class GenericNtrFile
             bom = 0xFFFE;
             version = 0x100;
         }
+        // Retail files almost always declare the canonical mark for their own byte order, so recomputing
+        // it is usually a no-op -- except two loose (non-NARC) files in Mario Kart DS whose BOM field is
+        // literally 0x0000. Re-emit what was actually parsed rather than the canonical value once there
+        // is one to preserve.
+        if (bomParsed)
+            bom = this.bom;
 
         if (this.version != 0)
         {
@@ -107,6 +120,7 @@ public class GenericNtrFile
         endiannessOfBeginning = file.endiannessOfBeginning;
         whichMagic = file.whichMagic;
         bom = file.bom;
+        bomParsed = file.bomParsed;
         version = file.version;
         fileSize = file.fileSize;
         headerSize = file.headerSize;
@@ -131,6 +145,7 @@ public class GenericNtrFile
     public void setBom(int bom)
     {
         this.bom = bom;
+        this.bomParsed = true;
     }
 
     public int getVersion()

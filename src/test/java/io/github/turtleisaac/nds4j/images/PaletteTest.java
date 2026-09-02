@@ -139,4 +139,23 @@ public class PaletteTest
         }
         assertThat(mismatches).as("at most the one known fileSize=0 exception should mismatch").isLessThanOrEqualTo(1);
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces the RPCN (old-format NCLR) in Mario Kart DS byte-for-byte")
+    void writtenRpcnRoundTripsByteExactAcrossMarioKartDS()
+    {
+        // Found a shared GenericNtrFile writer defect this way: a loose (non-NARC) RPCN file whose outer
+        // NTR header declares a BOM of 0x0000 -- neither the standard 0xFEFF nor 0xFFFE mark --
+        // which writeGenericNtrHeader always overwrote with a recomputed canonical value instead of
+        // preserving it. See GenericNtrFile.bomParsed; the twin RGCN fix is in ImageTest.
+        NintendoDsRom mkdsRom = io.github.turtleisaac.nds4j.TestRoms.require("Mario Kart DS.nds");
+        java.util.List<byte[]> rpcnFiles = NtrFixtures.collect(mkdsRom, "RPCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(rpcnFiles.isEmpty(), "no RPCN files found in the test ROM");
+        for (int i = 0; i < rpcnFiles.size(); i++)
+        {
+            byte[] original = rpcnFiles.get(i);
+            byte[] written = new Palette(original, 0).save();
+            assertThat(written).as("RPCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
 }

@@ -98,6 +98,10 @@ public class IndexedImage extends GenericNtrFile
     // i.e. it marks a character set with no explicit size (dimensions supplied by the consumer).
     private boolean hasSourceHeader = false;
     private int srcCharHeightField, srcCharWidthField, srcUnspecifiedSizeFlag, srcWidthPx, srcHeightPx;
+    // The RAHC (char) section's own declared size (u32 right after its magic). Decorative like the outer
+    // NTR header's fileSize (see that field's save()-site comment) -- a Mario Kart DS RGCN declares this
+    // 8 bytes short of the section's real size. 0 for an image never parsed from a file.
+    private long srcCharSectionSize;
     // The SOPC section's stored tile width/height (u16 at SOPC container 0x0C/0x0E). These are NOT always the
     // CHAR dimensions — often the SOPC height is 2x (sometimes 4x/8x) the CHAR height (a multi-frame full
     // extent). Captured raw so save() reproduces them exactly instead of recomputing from the tile grid.
@@ -146,6 +150,7 @@ public class IndexedImage extends GenericNtrFile
         }
 
         long charSectionSize = reader.readUInt32();
+        this.srcCharSectionSize = charSectionSize; // captured raw so save() can round-trip it exactly
 
         int tilesHeight = reader.readShort(); //0x18
         this.srcCharHeightField = tilesHeight & 0xFFFF; // captured raw so save() can round-trip it exactly
@@ -587,12 +592,18 @@ public class IndexedImage extends GenericNtrFile
         MemBuf dataBuf = MemBuf.create();
         writer = dataBuf.writer();
 
-        writeGenericNtrHeader(writer, bufferSize + (sopc ? 0x40 : 0x30), sopc ? 2 : 1);
+        // The outer NTR header's fileSize field is decorative (see Palette's identical fix): a Mario Kart
+        // DS RGCN was found declaring 8 bytes short of its real length. Re-emit the originally parsed
+        // value so an unedited image round-trips exactly; a from-scratch image (fileSize never parsed,
+        // still 0) falls back to the real computed size.
+        long computedFileSize = bufferSize + (sopc ? 0x40 : 0x30);
+        writeGenericNtrHeader(writer, fileSize != 0 ? fileSize : computedFileSize, sopc ? 2 : 1);
 
         writer.write(NcgrUtils.charHeader);
 
         writer.setPosition(NcgrUtils.charHeaderPos + 4);
-        writer.writeInt(bufferSize + 0x20); // 0x14
+        // Same decorative-field treatment as the outer NTR header just above (see srcCharSectionSize).
+        writer.writeInt((int) (srcCharSectionSize != 0 ? srcCharSectionSize : bufferSize + 0x20)); // 0x14
 
         writer.setPosition(NcgrUtils.charHeaderPos + 8);
 

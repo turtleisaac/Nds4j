@@ -324,6 +324,28 @@ public class ImageTest
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("save() reproduces every NCGR in Mario Kart DS byte-for-byte")
+    void writtenNcgrRoundTripsByteExactAcrossMarioKartDS()
+    {
+        // Found two shared GenericNtrFile writer defects this way, against a non-Pokemon title: a loose
+        // (non-NARC) RGCN file whose outer NTR header declares a BOM of 0x0000 -- neither the standard
+        // 0xFEFF nor 0xFFFE mark -- which writeGenericNtrHeader always overwrote with a recomputed
+        // canonical value instead of preserving it (see GenericNtrFile.bomParsed); and the same file's
+        // RAHC section size, declared 8 bytes short of its real size, which was recomputed rather than
+        // preserved (see IndexedImage.srcCharSectionSize; the outer NTR fileSize field has the identical
+        // issue, fixed the same way as Palette's).
+        NintendoDsRom mkdsRom = io.github.turtleisaac.nds4j.TestRoms.require("Mario Kart DS.nds");
+        java.util.List<byte[]> ncgrFiles = NtrFixtures.collect(mkdsRom, "RGCN");
+        org.junit.jupiter.api.Assumptions.assumeFalse(ncgrFiles.isEmpty(), "no RGCN files found in the test ROM");
+        for (int i = 0; i < ncgrFiles.size(); i++)
+        {
+            byte[] original = ncgrFiles.get(i);
+            byte[] written = new IndexedImage(original, 0, 0, 1, 1, true).save();
+            assertThat(written).as("RGCN file #%d must round-trip byte-for-byte", i).isEqualTo(original);
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.DisplayName("every NCGR in Pokemon Ranger: Shadows of Almia parses without throwing")
     void everyNcgrParsesAcrossRanger()
     {
