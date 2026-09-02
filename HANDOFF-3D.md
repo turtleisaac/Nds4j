@@ -736,6 +736,141 @@ green** (the sub-palette renderer fix does not touch `save()`). The write-back's
 NCER/NCGR/NCLR or NSCR/NCGR/NCLR set, as `CrossLayerRenderingTest` does). Run:
 `mvn -f Nds4j/pom.xml -Drom.dir=<workspace-root> test`.
 
+### 11d. NMCR + NMAR (multi-cell) — added 2026-09-01; White2 supplies the examples Gen IV lacked
+
+The README's "likely future" 2D companions were parked for lack of examples: the **Gen IV ROMs don't use
+NMCR/NMAR/NFTR**. A magic-scan of **White2.nds** (Gen V, in the workspace root) settled it — NARC-aware,
+decompressing every LZ member before matching:
+
+| format | magic | in White2 | note |
+|:--|:--|:--:|:--|
+| NMCR (multi-cell resource) | `RCMN` | **3181** | stored **raw** (uncompressed) inside NARCs |
+| NMAR (multi-cell animation) | `RAMN` | **3181** | raw; pairs 1:1 with the NMCR in the same NARC |
+| NFTR (font) | `RTFN` | 10 | raw; **not yet implemented** (example now exists) |
+| NTFT/NTFP/NTFI (raw texel/pal/index) | *(headerless)* | 0 identifiable | no magic; Pokémon keeps texture data in `TEX0`/NSBTX — **still blocked on an example** |
+
+NMCR/NMAR always co-locate with the **NCER/NANR** they build on: e.g. White2 `romFile#351` NARC members
+4=NCER, 5=NANR, 6=NMCR, 7=NMAR — a complete cell→multicell→animation bundle, exactly the reference data needed
+to implement *and* round-trip-test them. Six NARCs carry a full raw NMCR+NMAR pair.
+
+**NMCR (`RCMN`, one `KBCM`/"MCBK" block, `numBlocks == 1`, no LBAL).** A bank of *multi-cells*; each multicell
+composes several **NCER cells** at fixed offsets. Layout (all invariants verified across all 3181 files):
+```
+KBCM header @0x10: "KBCM" · u32 size · u16 multicellCount · u16 0xBEEF
+                   · u32 offMulticellArray(=0x14) · u32 offCellInfoArray(=0x14+count*8)
+                   · u32 reserved0(=0) · u32 reserved1(=0)          (both offsets relative to 0x18)
+multicell array:   count × { u16 numCells, u16 attribute, u32 cellInfoOffset }
+cell-info array:   N × { u16 cellIndex→NCER, s16 x, s16 y, u16 attr }   (attr packs palette/priority/flip)
+```
+`cellInfoOffset` is always the running cumulative `sum(prev numCells)*8` (no sharing), and the cell-info array
+runs exactly to the section/file end (no padding) — so `MultiCellBank` fully **reconstructs** the file from
+structured fields (offsets recomputed, `0xBEEF`/reserved words re-emitted) rather than preserving a byte pool.
+The `attribute`/`attr` words aren't decoded field-by-field (palette/priority/flip bits) but are carried
+verbatim, so nothing is lost.
+
+**NMAR (`RAMN`, `KNBA` block + `LBAL`, `numBlocks == 2`, *no* UEXT).** Byte-for-byte the **same KNBA layout as
+NANR** (animation descriptors → frame descriptors → a shared result pool, `bankHeaderExtra` always the two zero
+words), so `MultiCellAnimation` mirrors `CellAnimation` almost exactly; the *only* structural differences from
+NANR are `numBlocks == 2` (there is no `TXEU`/UEXT section — the write path stops after LBAL) and that a frame's
+pooled result names a **multicell index** (into the NMCR), not a cell index. Elements 0/1/2 (index / SRT /
+translation) and playback modes 1/2 are all present, same encodings as NANR; the result pool is preserved
+verbatim exactly as `CellAnimation` does.
+
+**Render chain:** NMAR frame → multicell (NMCR) → its NCER cells → OAMs → NCGR pixels + NCLR palette.
+`MultiCellBank.setCellBank(ncer)` (with `ncer.setParentImage(ncgr)`) supplies the cells;
+`MultiCellAnimation.setMultiCellBank(nmcr)` supplies the multicells; `getFrameImage(frame)` composes and applies
+the frame's SRT/translation transform, reusing `CellAnimation`'s transform math.
+
+**Files:** `images/MultiCellBank.java`, `images/MultiCellAnimation.java`. Tests (ROM-gated on **White2.nds**):
+`MultiCellBankTest` + `MultiCellAnimationTest` (byte-exact `save()` over all 3181 of each; edit-accessor
+persistence incl. `attr`/`attribute`; `Frame` SRT/translation/index transform accessors + element-type guards)
+and `MultiCellRenderingTest` (cross-layer compose + the `IllegalStateException` guards). Same Java-8-clean rule
+as §11a (CheerpJ). **Full suite green: 334 tests, 0 skipped.** The parse/save/edit layer — this session's actual
+deliverable — is done and covered.
+
+### 11d-open. Battle-sprite rendering was investigated hard; here's exactly where it stands (read before retrying)
+
+`save()`/parse is complete. **Rendering an assembled sprite is a different, mostly game-specific problem** — a
+long debugging arc (with the maintainer) established the following; do not repeat it blind. Full detail +
+sources live in memory note **`bw2-graphics-narc-map`**.
+
+- **Where NMCR/NMAR actually live:** the pokegra **battle sprites**, NARC **`a/0/0/4`** (= the old "romFile#351"),
+  **20 files per Pokémon**: front NCGR = files 0/2, back = 9/11, NCER/NANR/NMCR/NMAR follow, palettes = 18(normal)
+  /19(shiny). Overworld sprites (`a/0/3/0`,`a/0/3/1`) use NCER/NANR only (no NMCR).
+- **The old "scanned NCGR" caveat above was WRONG.** These NCGRs are **bitmap format**: the u32 at NCGR `0x24`
+  (`char_type`) is non-zero ⇒ the char data is a **plain linear raster** (nitrogfx `ConvertFromTiles4BppBitmap`),
+  NOT the encrypted "scanned" reorder Nds4j's `IndexedImage` runs on it. Decoding it as a raster yields the correct
+  **sprite *sheet*** (parts laid out). Reference: **`ds-pokemon-hacking/White2Upgrade`** `tools/nitrogfx/gfx.c`.
+- **OAM composition, verified:** each OAM is a **rectangular crop** of the sheet at tile `(T % sheetWtiles,
+  T / sheetWtiles)` (not consecutive tiles); these OAMs are **affine + double-size**, so content is centered in a
+  2× box (offset `+(W/2,H/2)`); and **draw order is reversed** (OAM/cell index 0 on top). With those, a **single
+  part renders pixel-correct** (Bulbasaur's head is exact).
+- **The full sprite is a PUPPET/skeletal system, NOT a static compose.** The NANR holds **20 animations named per
+  body part** (`head, leg_FR/FL/B, foot_FR/FL/B, body1/2, tane`=bulb, + `_2` idle variants), each driving one NCER
+  cell with small per-frame deltas (breathing/squash). Naïvely overlaying all cells just piles them. Assembling
+  the animated sprite needs base rig positions + orchestration that almost certainly lives in **W2 game code** —
+  i.e. it's **game-specific and belongs in PokEditor / a Pokémon module, NOT Nds4j** (README: game-specific formats
+  go in a separate package). Rule of thumb: Nds4j should decode the sheet and render any single cell/part; the app
+  layer assembles parts into a Pokémon. (Broken screenshots I made were deleted; only `nmar_animation.gif`, a real
+  translation NMAR of a small shadow object, remains in the workspace root.)
+
+**Open NMCR/NMAR items that DO belong in Nds4j (general, not Pokémon-specific), if someone wants correct cell
+rendering for any DS game:**
+
+> **Item 1 is DONE (2026-09-01).** `IndexedImage` now has a `ScanMode.LINE_BUFFER` path: a line-buffer NCGR
+> that carries an SOPC section decodes as a plain raster (no LCG), so Gen V pokegra sheets decode coherently via
+> `getImage()` instead of scrambling. Both decode and encode are self-inverse → byte-exact `save()` preserved.
+> This also fixed a **pre-existing SOPC round-trip bug**: `save()` recomputed the SOPC tile width/height from the
+> CHAR grid, but SOPC height is often 2× (sometimes 4×/8×) the CHAR height — the original values are now captured
+> and re-emitted verbatim. Tests: `LineBufferNcgrTest` (byte-exact over every White2 LINE_BUFFER NCGR;
+> classification; a plain-raster coherence check). Full suite **334 green**. The Gen IV `char_type=1 + SOPC`
+> outlier group (~120/ROM) routes here too — byte-exact but pixel-correctness unverified. **Item 2 (CellBank OBJ
+> rendering: rectangular-crop / affine double-size / draw-order) is still open.**
+
+1. ~~Teach `IndexedImage` the **bitmap NCGR format**~~ *(done — see the note above)* — a plain linear-raster decode/encode, distinct from the
+   two paths it has today (tiled, and `convertFromScanned` which **LCG-decrypts** then rasters). The bug: BW2
+   pokegra bitmaps are an *un-encrypted* raster, but Nds4j runs the LCG decrypt on them → scramble. Add a third
+   branch (decode ~L219, encode ~L490) that skips the decrypt.
+   **The `0x24` word is a documented bitfield `flags` (ds-pokemon-hacking / Gonhex-NOCASH), NOT an enum:** bit 0
+   (`0x1`) = *"use a line buffer instead of tiles"* (= the raster/bitmap layout; this is Nds4j's mis-named
+   `scanned` byte and nitrogfx's `char_type` low bit), bit 8 (`0x100`) = *unknown, maybe mapping-related* (=
+   Nds4j's `vram` byte; census's `char_type==256`, Gen IV only). Only one bit is ever set at a time (no `257` in
+   57,705 files). **Bit 0 means "raster layout", NOT "encrypted"** — the LCG encryption on DP/HGSS Pokémon
+   sprites is an *un-flagged Game-Freak overlay* on the raster format (that's precisely why no header field
+   separates encrypted-raster from plain-raster). So: `flags & 0x1` ⇒ decode as a line buffer (rename "scanned"
+   → "lineBuffer"); whether to *also* LCG-decrypt is orthogonal and header-invisible (Gen IV Pokémon convention =
+   yes, Gen V = no). bit 8's meaning is still open across nitrogfx/docs/us — preserve it untouched. (nitrogfx the
+   tool is cruder than its own docs: `if (char_type != 0)` conflates bits 0 and 8, works for Gen V only because
+   bit 8 never appears there.) **Discriminator — a full census of all 57,705
+   NCGRs in the 7 workspace ROMs settled it: there is NO clean header discriminator.** `char_type` (0x24) is
+   NOT binary (values 0/1/256). `numBlocks==2`/SOPC separates cleanly **only for Gen V** (White2/w2test2: every
+   `char_type≠0` NCGR has SOPC, 3563/3563, 0 exceptions). For **DP/Pt/HGSS it FAILS**: ~94–97% of `char_type=1`
+   files lack SOPC (bulk battle sprites) but a consistent **120–126 per ROM have `char_type=1` WITH SOPC**
+   (concentrated in one non-sprite narc, e.g. HeartGold romFile155) — a real counterexample to "SOPC ⇒ plain
+   bitmap." No other single field (bitDepth, mappingType, dims-specified) separates them either; only
+   one-directional necessary conditions (SOPC ⇒ dims-specified & mappingType==0). **So: for Gen V key on SOPC;
+   for the Gen IV outlier group do an actual decode-coherence check (LCG-decrypt vs plain-raster output) before
+   classifying.** Guard two census-found edge cases: `char_type==256` (scanned-byte 0/vram-byte 1, Gen IV only,
+   never SOPC — a third class) and **46 "lying" `numBlocks==2` headers in HG/SS romFile136** whose SOPC is
+   truncated to 0 bytes (SOPC-start == EOF). Note the RGCN round-trip test won't catch a pixel-decode regression
+   — it re-encrypts on save. Keep `save()` byte-exact. (Census aside: SOPC height is usually 2× — sometimes
+   4×/8× — CHAR height, i.e. a multi-frame full extent, NOT the "power-of-2 pad" the format docs guess.)
+2. Fix **`CellBank.OamImage`** OBJ rendering: rectangular-crop tile addressing, affine + double-size offset,
+   reverse draw order. (The current `startByte`'s `<<mappingType` overflows on these — that's the `NegativeArray`
+   crash.) These make `CellBank`/`MultiCellBank` render single cells/parts correctly; the head-render proof shows
+   the math. Add a cross-layer render test asserting a known part matches.
+
+### 11e. NFTR (font) — next up; examples now exist in White2
+
+Not yet implemented; **White2 has ~10 `RTFN` fonts** (NARC **`a/0/2/3`** = fonts; plus overlay/arm9 copies). Follow
+the exact pattern the other `images/` formats use: extend `framework.GenericNtrFile`, decode the block structure,
+**byte-exact `save()`**, and a `NFTRTest` gated on White2 mirroring `CellAnimationTest` (collect `"RTFN"` via
+`NtrFixtures`, assert `save()` reproduces every file). NFTR layout: `FINF` (font info) + `CGLP` (glyph bitmaps) +
+`CWDH` (char widths) + `CMAP` (code→glyph maps); references: **GBATEK**, ndspy `fnt`/`nftr`, nitrogfx/nitrofont.
+Keep it Java-8-clean (CheerpJ). **NTFT/NTFP/NTFI** (raw headerless texel/palette/index) remain blocked — no clean
+example in the Pokémon ROMs (texture data stays in `TEX0`/NSBTX); needs a different DS title or a decompiled
+filesystem where the `.ntf*` extensions are explicit.
+
 ---
 
 ## 12. Audio (SDAT) support — added 2026-08-29
