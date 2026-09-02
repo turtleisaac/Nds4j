@@ -313,7 +313,7 @@ public class Model
                 case 0x00: break;                                   // NOP
                 case 0x01: stop = true; break;                      // RET
                 case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
-                case 0x03: current = stackNode[d[p++] & 0xFF]; break; // MTX (restore)
+                case 0x03: current = stackNode[d[p++] & 0x1F]; break; // MTX (restore) - 5-bit stack slot, matching the store paths
                 case 0x04: currentMat = d[p++] & 0xFF; break; // MAT matId (flag bits are hints, not extra operands)
                 case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) { shapeNode[shp] = current; shapeMaterial[shp] = currentMat; } break; } // SHP
                 case 0x06: {                                        // NODEDESC nodeId, parentId, opt (+ store/restore slots)

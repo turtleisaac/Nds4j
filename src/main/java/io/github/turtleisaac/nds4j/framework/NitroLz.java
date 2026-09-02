@@ -20,6 +20,8 @@
 package io.github.turtleisaac.nds4j.framework;
 
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The general-purpose <b>Nitro LZ77</b> codec (compression types {@code 0x10} = LZ10 and {@code 0x11} =
@@ -180,6 +182,10 @@ public final class NitroLz
         out.write((data.length >> 16) & 0xFF);
 
         int pos = 0;
+        // Record each flag byte's position and value, then patch them all into the finished buffer
+        // in one pass. (Patching in place per group would require copying the whole growing buffer
+        // out and back every 8 tokens -- O(n^2) on large inputs.)
+        List<int[]> flagPatches = new ArrayList<>();
         while (pos < data.length)
         {
             int flagIndex = out.size();
@@ -200,12 +206,12 @@ public final class NitroLz
                     out.write(data[pos++]);
                 }
             }
-            byte[] buf = out.toByteArray();
-            buf[flagIndex] = (byte) flags;
-            out.reset();
-            out.write(buf, 0, buf.length);
+            flagPatches.add(new int[]{flagIndex, flags});
         }
-        return out.toByteArray();
+        byte[] result = out.toByteArray();
+        for (int[] patch : flagPatches)
+            result[patch[0]] = (byte) patch[1];
+        return result;
     }
 
     private static void writeToken(ByteArrayOutputStream out, int len, int disp, boolean lz11)

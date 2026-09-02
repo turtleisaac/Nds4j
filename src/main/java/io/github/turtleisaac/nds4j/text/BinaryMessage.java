@@ -455,8 +455,23 @@ public class BinaryMessage
     /** @return true if this file's multi-byte fields are big-endian (every known title except Super Princess Peach is little-endian). */
     public boolean isBigEndian() { return bigEndian; }
 
+    /** Sets whether this file's multi-byte fields are written big-endian. @param bigEndian the byte order */
+    public void setBigEndian(boolean bigEndian) { this.bigEndian = bigEndian; }
+
     /** @return the text encoding: 1 = Windows-1252, 2 = UTF-16, 3 = Shift-JIS, 4 = UTF-8. */
     public int getEncoding() { return encoding; }
+
+    /**
+     * Sets the text encoding used to serialise message strings.
+     * @param encoding one of 1 = Windows-1252, 2 = UTF-16, 3 = Shift-JIS, 4 = UTF-8
+     * @throws IllegalArgumentException if {@code encoding} is not one of the four known selectors
+     */
+    public void setEncoding(int encoding)
+    {
+        if (encoding < 1 || encoding > 4)
+            throw new IllegalArgumentException("encoding must be 1 (cp1252), 2 (UTF-16), 3 (Shift-JIS), or 4 (UTF-8)");
+        this.encoding = encoding;
+    }
 
     /** @return true if this file carries the (DS Zelda-specific) FLW1 script-flow section. */
     public boolean hasFlw1() { return hasFlw1; }
@@ -470,8 +485,8 @@ public class BinaryMessage
      */
     public static class Message
     {
-        private final byte[] info;
-        private final List<Object> parts; // String or Escape
+        private byte[] info;
+        private List<Object> parts; // String or Escape
         private final boolean isNull;
 
         /**
@@ -502,8 +517,17 @@ public class BinaryMessage
                 {
                     Escape esc = (Escape) part;
                     byte[] start = encodeChar('\u001A', charsetName);
+                    int escLen = esc.data.length + 2 + start.length;
+                    // The escape is length-prefixed by a single byte, so escLen must fit 0..255. Parsed
+                    // escapes always fit (their length came from this same byte); this can only be exceeded
+                    // by an over-long Escape built through the API, or by re-encoding under a wider 0x1A
+                    // marker after a setEncoding() change. Fail loudly rather than let out.write() silently
+                    // truncate the prefix and corrupt the file.
+                    if (escLen > 0xFF)
+                        throw new RuntimeException("BMG escape too long to encode: " + escLen
+                                + " bytes (max 255) under the current encoding; shorten the escape data.");
                     out.writeBytes(start);
-                    out.write(esc.data.length + 2 + start.length);
+                    out.write(escLen);
                     out.write(esc.type);
                     out.writeBytes(esc.data);
                 }
@@ -518,6 +542,47 @@ public class BinaryMessage
         public List<Object> getParts() { return parts; }
         /** @return true if this message has no text at all (distinct from an empty string). */
         public boolean isNull() { return isNull; }
+
+        /**
+         * Replaces this message's opaque per-entry info bytes (speaker id, sound effect, etc.). The
+         * replacement must be the same length as the current info, since every message in a BMG shares
+         * one fixed INF1 entry size; {@link BinaryMessage#save()} enforces that too.
+         * @param info the new info bytes
+         * @throws IllegalArgumentException if {@code info} is a different length than the current info
+         */
+        public void setInfo(byte[] info)
+        {
+            if (info == null || info.length != this.info.length)
+                throw new IllegalArgumentException("info must be " + this.info.length + " bytes to preserve the INF1 entry size");
+            this.info = info.clone();
+        }
+
+        /**
+         * Replaces this message's content. Each part must be a {@code String} or an {@link Escape}; the
+         * new text is re-encoded into DAT1 by {@link BinaryMessage#save()} (message offsets are rebuilt,
+         * so a length change is fine).
+         * @param parts the new content, a list of {@code String} and {@link Escape} objects in order
+         * @throws IllegalArgumentException if any element is neither a {@code String} nor an {@link Escape}
+         */
+        public void setParts(List<Object> parts)
+        {
+            for (Object p : parts)
+                if (!(p instanceof String) && !(p instanceof Escape))
+                    throw new IllegalArgumentException("a message part must be a String or an Escape, got " + p);
+            this.parts = new ArrayList<>(parts);
+        }
+
+        /**
+         * Replaces this message's content with a single run of plain text (a convenience over
+         * {@link #setParts}). Discards any embedded escapes.
+         * @param text the new text
+         */
+        public void setText(String text)
+        {
+            List<Object> p = new ArrayList<>();
+            p.add(text);
+            this.parts = p;
+        }
 
         @Override
         public String toString()
@@ -546,8 +611,8 @@ public class BinaryMessage
         /** An {@code 0x1A} escape sequence embedded in a message: an opaque {@code (type, data)} pair. */
         public static class Escape
         {
-            private final int type;
-            private final byte[] data;
+            private int type;
+            private byte[] data;
 
             /** @param type the escape's 1-byte type selector @param data the escape's raw parameter bytes */
             public Escape(int type, byte[] data)
@@ -560,6 +625,22 @@ public class BinaryMessage
             public int getType() { return type; }
             /** @return the escape's raw parameter bytes */
             public byte[] getData() { return data; }
+
+            /** Sets the escape's 1-byte type selector. @param type 0..255 */
+            public void setType(int type) { this.type = type & 0xFF; }
+            /**
+             * Sets the escape's raw parameter bytes. The whole escape is length-prefixed by a single
+             * byte holding {@code data.length + 2 + (1..2 for the 0x1A marker)}, so {@code data} may be at
+             * most 251 bytes (safe for every encoding, including UTF-16's 2-byte marker).
+             * @param data the new parameter bytes
+             * @throws IllegalArgumentException if {@code data} is too long to encode
+             */
+            public void setData(byte[] data)
+            {
+                if (data == null || data.length > 251)
+                    throw new IllegalArgumentException("escape data must be at most 251 bytes");
+                this.data = data.clone();
+            }
 
             @Override
             public boolean equals(Object o)

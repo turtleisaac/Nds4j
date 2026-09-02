@@ -579,9 +579,9 @@ public class TextureSet extends G3dFile
         int abs = plttDataOfs + palette.dataOffset + index * 2;
         if (abs < 0 || abs + 1 >= tex0.length)
             return;
-        int r = ((rgb >> 16) & 0xFF) * 31 / 255;
-        int g = ((rgb >> 8) & 0xFF) * 31 / 255;
-        int b = (rgb & 0xFF) * 31 / 255;
+        int r = ((rgb >> 16) & 0xFF) >> 3;
+        int g = ((rgb >> 8) & 0xFF) >> 3;
+        int b = (rgb & 0xFF) >> 3;
         int v = r | (g << 5) | (b << 10);
         tex0[abs] = (byte) v;
         tex0[abs + 1] = (byte) (v >> 8);

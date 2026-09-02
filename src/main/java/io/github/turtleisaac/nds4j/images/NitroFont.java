@@ -387,24 +387,28 @@ public class NitroFont extends GenericNtrFile
      */
     public static class FontInfo
     {
+        private final byte[] file;  // the block region, so the metric setters can edit in place
+        private final int body;     // absolute offset of this block's body within file
         private final int fontType;
-        private final int lineFeed;
+        private int lineFeed;
         private final int defaultCharIndex;
-        private final int defaultLeft;
-        private final int defaultGlyphWidth;
-        private final int defaultCharWidth;
+        private int defaultLeft;
+        private int defaultGlyphWidth;
+        private int defaultCharWidth;
         private final int encoding;
         private final long glyphOffset;
         private final long widthOffset;
         private final long mapOffset;
         // Present only in version 0x0102 headers (chunk length 0x20); otherwise unset (-1).
-        private final int height;
-        private final int width;
-        private final int ascent;
+        private int height;
+        private int width;
+        private int ascent;
 
         FontInfo(byte[] d, int blockStart)
         {
+            file = d;
             int b = blockStart + 8; // body after tag + size
+            body = b;
             fontType = u8(d, b);
             lineFeed = u8(d, b + 1);
             defaultCharIndex = u16(d, b + 2);
@@ -454,6 +458,40 @@ public class NitroFont extends GenericNtrFile
         public int getWidth() { return width; }
         /** @return the underline/ascent position (version 0x0102 only), or -1 */
         public int getAscent() { return ascent; }
+
+        /** Sets the line feed (vertical advance between lines), in pixels, in place. @param v 0..255 */
+        public void setLineFeed(int v) { lineFeed = v & 0xFF; file[body + 1] = (byte) lineFeed; }
+        /** Sets the default left bearing (signed) used when a glyph has no CWDH entry, in place. @param v the bearing */
+        public void setDefaultLeft(int v) { defaultLeft = (byte) v; file[body + 4] = (byte) v; }
+        /** Sets the default glyph (ink) width, in place. @param v 0..255 */
+        public void setDefaultGlyphWidth(int v) { defaultGlyphWidth = v & 0xFF; file[body + 5] = (byte) defaultGlyphWidth; }
+        /** Sets the default character advance width, in place. @param v 0..255 */
+        public void setDefaultCharWidth(int v) { defaultCharWidth = v & 0xFF; file[body + 6] = (byte) defaultCharWidth; }
+
+        /**
+         * Sets the font height (version 0x0102 headers only), in place.
+         * @param v 0..255
+         * @throws IllegalStateException if this header carries no height/width/ascent fields
+         */
+        public void setHeight(int v) { requireExtended(); height = v & 0xFF; file[body + 20] = (byte) height; }
+        /**
+         * Sets the font width (version 0x0102 headers only), in place.
+         * @param v 0..255
+         * @throws IllegalStateException if this header carries no height/width/ascent fields
+         */
+        public void setWidth(int v) { requireExtended(); width = v & 0xFF; file[body + 21] = (byte) width; }
+        /**
+         * Sets the underline/ascent position (version 0x0102 headers only), in place.
+         * @param v 0..255
+         * @throws IllegalStateException if this header carries no height/width/ascent fields
+         */
+        public void setAscent(int v) { requireExtended(); ascent = v & 0xFF; file[body + 22] = (byte) ascent; }
+
+        private void requireExtended()
+        {
+            if (height < 0)
+                throw new IllegalStateException("this FINF header has no height/width/ascent fields (pre-0x0102)");
+        }
     }
 
     /**
@@ -536,6 +574,40 @@ public class NitroFont extends GenericNtrFile
             return px;
         }
 
+        /**
+         * Overwrites a glyph's bitmap in place. The inverse of {@link #getGlyphPixels}: the
+         * {@code cellWidth*cellHeight} intensities (0..255, row-major) are re-quantised to this font's
+         * {@code bpp} and packed MSB-first back into the glyph's cell, so the edit shows in a subsequent
+         * {@link #getGlyphImage}/{@link #renderString} and is emitted by {@link #save()}. The write is
+         * same-size (only the cell's packed pixel bits are touched; any trailing cell padding is left
+         * untouched), so an unedited font still round-trips byte-for-byte, and re-setting a glyph to the
+         * intensities {@code getGlyphPixels} just returned reproduces its exact bytes.
+         * @param glyphIndex the glyph index
+         * @param px the pixel intensities (0..255), {@code cellWidth*cellHeight} entries, row-major
+         */
+        public void setGlyphPixels(int glyphIndex, int[] px)
+        {
+            if (glyphIndex < 0 || glyphIndex >= numGlyphs)
+                throw new IndexOutOfBoundsException("glyph " + glyphIndex + " of " + numGlyphs);
+            if (px.length != cellWidth * cellHeight)
+                throw new IllegalArgumentException("expected " + (cellWidth * cellHeight) + " pixels, got " + px.length);
+            int base = bitmapStart + glyphIndex * cellSize;
+            int max = (1 << bpp) - 1;
+            int bitPos = 0;
+            for (int value : px)
+            {
+                int q = (int) Math.round(Math.max(0, Math.min(255, value)) * (double) max / 255.0);
+                for (int bit = bpp - 1; bit >= 0; bit--)
+                {
+                    int byteIdx = base + (bitPos >> 3);
+                    int bitInByte = 7 - (bitPos & 7);
+                    int mask = 1 << bitInByte;
+                    file[byteIdx] = (byte) ((file[byteIdx] & ~mask) | (((q >> bit) & 1) << bitInByte));
+                    bitPos++;
+                }
+            }
+        }
+
         BufferedImage render(int glyphIndex)
         {
             int[] px = getGlyphPixels(glyphIndex);
@@ -561,14 +633,17 @@ public class NitroFont extends GenericNtrFile
         private final int indexEnd;
         private final long nextOffset;
         private final byte[][] entries; // each = {left, glyphWidth, charWidth}, or empty if the range is ill-formed
+        private final byte[] file;      // the block region, so setWidths can edit in place
+        private final int entryBase;    // absolute offset of the first entry within file
 
         WidthGroup(byte[] d, int blockStart)
         {
+            file = d;
             int b = blockStart + 8;
             indexBegin = u16(d, b);
             indexEnd = u16(d, b + 2);
             nextOffset = u32(d, b + 4);
-            int entryBase = b + 8;
+            entryBase = b + 8;
             // Some retail (Game Freak) fonts store an ill-formed range (indexEnd < indexBegin); treat that
             // as "no decodable entries" rather than reading garbage. The block is still preserved verbatim.
             int count = indexEnd >= indexBegin ? (indexEnd - indexBegin + 1) : 0;
@@ -599,6 +674,28 @@ public class NitroFont extends GenericNtrFile
                 return null;
             byte[] e = entries[local];
             return new int[]{e[0], e[1] & 0xFF, e[2] & 0xFF};
+        }
+
+        /**
+         * Sets a glyph's {left, glyph-width, advance} metrics in place, writing them back into the file
+         * so {@link #save()} emits the edited widths. Same-size and in place; re-setting a glyph to the
+         * values {@link #widthsFor} just returned reproduces its exact bytes.
+         * @param glyphIndex the glyph index (must fall within this group's range)
+         * @param left the left bearing (signed)
+         * @param glyphWidth the ink width (0..255)
+         * @param advance the character advance width (0..255)
+         * @throws IndexOutOfBoundsException if this group does not cover {@code glyphIndex}
+         */
+        public void setWidths(int glyphIndex, int left, int glyphWidth, int advance)
+        {
+            int local = glyphIndex - indexBegin;
+            if (local < 0 || local >= entries.length)
+                throw new IndexOutOfBoundsException("glyph " + glyphIndex + " not in width group [" + indexBegin + ", " + indexEnd + "]");
+            byte l = (byte) left, g = (byte) glyphWidth, a = (byte) advance;
+            entries[local] = new byte[]{l, g, a};
+            file[entryBase + local * 3] = l;
+            file[entryBase + local * 3 + 1] = g;
+            file[entryBase + local * 3 + 2] = a;
         }
     }
 

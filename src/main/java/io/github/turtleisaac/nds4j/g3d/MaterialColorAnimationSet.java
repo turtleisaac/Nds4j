@@ -362,7 +362,11 @@ public class MaterialColorAnimationSet extends G3dFile
          */
         public void setRaw(int frame, int raw15)
         {
-            raw15 &= 0x7FFF;
+            // Keep all 16 bits the color word can hold. BGR555 color lives in the low 15 bits, but some
+            // retail NSBMA files set bit 15 of a color word, and the parser preserves it (rawAt returns
+            // it) -- masking it off here would make setRaw(rawAt(f)) a lossy no-op and drop a bit the
+            // file actually contained. (setRgb always supplies bit 15 = 0, so authoring is unaffected.)
+            raw15 &= 0xFFFF;
             if (constant)
             {
                 keys[0] = raw15;
@@ -379,9 +383,9 @@ public class MaterialColorAnimationSet extends G3dFile
         /** Sets the color from {@code 0xRRGGBB}, quantised to 15-bit. @param frame the frame @param rgb the color */
         public void setRgb(int frame, int rgb)
         {
-            int r = ((rgb >> 16) & 0xFF) * 31 / 255;
-            int g = ((rgb >> 8) & 0xFF) * 31 / 255;
-            int b = (rgb & 0xFF) * 31 / 255;
+            int r = ((rgb >> 16) & 0xFF) >> 3;
+            int g = ((rgb >> 8) & 0xFF) >> 3;
+            int b = (rgb & 0xFF) >> 3;
             setRaw(frame, r | (g << 5) | (b << 10));
         }
 
@@ -417,21 +421,27 @@ public class MaterialColorAnimationSet extends G3dFile
         }
 
         /**
-         * Sets the value (0&ndash;31) at {@code frame}, writing it back into the file (a constant channel
-         * ignores {@code frame}). Same-size, in place.
+         * Sets the value at {@code frame}, writing it back into the file (a constant channel ignores
+         * {@code frame}). Same-size, in place.
+         * <p>
+         * A constant channel is an inline 5-bit field (0&ndash;31). An animated channel stores one byte
+         * per frame, and some retail files hold per-frame values above 31; {@link #at(int)} reports those
+         * bytes verbatim (0&ndash;255), so the write-back preserves the full byte width rather than
+         * clamping to 31 &mdash; otherwise {@code set(at(f))} would be a lossy no-op and corrupt a
+         * keyframe the file actually contained.
          * @param frame the frame to set (ignored for a constant channel)
-         * @param value the value, clamped to 0&ndash;31
+         * @param value the value; a constant channel keeps its low 5 bits, an animated frame its low 8
          */
         public void set(int frame, int value)
         {
-            value = Math.min(31, Math.max(0, value));
             if (constant)
             {
-                keys[0] = value;
-                writer.u16(offset, value); // low 16 bits hold the value; upper bits (frames/flags) unchanged
+                keys[0] = value & 0x1F;
+                writer.u16(offset, keys[0]); // low 16 bits hold the value; upper bits (frames/flags) unchanged
             }
             else
             {
+                value &= 0xFF;
                 int f = Math.min(Math.max(frame, 0), keys.length - 1);
                 keys[f] = value;
                 writer.u8(offset + f, value);

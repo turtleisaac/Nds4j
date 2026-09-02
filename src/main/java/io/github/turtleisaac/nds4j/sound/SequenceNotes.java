@@ -163,6 +163,15 @@ public final class SequenceNotes
         void exec(int id, TrackVM tr)
         {
             if (tr.pc < 0 || tr.pc >= ev.length) { tr.active = false; return; }
+            // A truncated/malformed track can run a multi-byte read (note event, readVar/U16/U24,
+            // skipPrefixed) off the end of ev; this is a best-effort piano-roll helper, so stop the
+            // track gracefully rather than propagate an AIOOBE.
+            try { execUnchecked(id, tr); }
+            catch (ArrayIndexOutOfBoundsException e) { tr.active = false; }
+        }
+
+        void execUnchecked(int id, TrackVM tr)
+        {
             if (!firstTickAtPc.containsKey(Integer.valueOf(tr.pc)))
                 firstTickAtPc.put(Integer.valueOf(tr.pc), Integer.valueOf(tick));
             int op = ev[tr.pc++] & 0xFF;
