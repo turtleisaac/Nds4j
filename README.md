@@ -54,6 +54,8 @@ Formats currently implemented
 | SSEQ / SSAR | `sound.Sequence` / `sound.SequenceArchive`   | &check; | &check; |         &cross;         |
 | STRM        | `sound.Stream`                               | &check; | &check; |         &cross;         |
 | Banner/Icon | `IconBanner`                                 | &check; | &check; |         &check;         |
+| NTFT        | `images.RawTexture`                          | &check; | &check; |         &check;         |
+| NTFP        | `images.RawPalette`                          | &check; | &check; |         &check;         |
 | ARM9/ARM7   | `binaries.MainCodeFile`                      | &check; |         |                          |
 
 All of the Nitro 3D (`NSB*`) and `SPA` formats round-trip **byte-for-byte** across the retail Gen IV ROMs and
@@ -99,19 +101,28 @@ The `sound.*` package brings NDS audio (`SDAT`, and its embedded `SWAV`/`SWAR`, 
 edit either, and `toBytes()` recomputes the version's CRC16 checksum(s) (an unedited banner reproduces its
 original bytes exactly).
 
+`NTFT`/`NTFP` (`images.RawTexture`/`images.RawPalette`) are raw, headerless formats &mdash; no magic, no
+header, just pixel/color bytes &mdash; with no confirmed retail example anywhere until one turned up:
+*Learn with Pok&eacute;mon: Typing Adventure* (JP: *Battle &amp; Get! Pok&eacute;mon Typing DS*) ships 7979
+NTFT/NTFP pairs, one per Pok&eacute;mon "note" icon. `RawTexture` is an 8bpp indexed bitmap in plain linear
+(non-tiled) order, always square (32&times;32, 64&times;64, or 128&times;128 &mdash; its side length is simply
+the square root of the file size); `RawPalette` is a flat BGR555 array tightly packed to however many colors
+are actually used. Byte-exact round-trip confirmed over the whole 7979-pair corpus.
+
 Likely future supported formats
 --------------------------------
 
 These are sorted in order of their likely priority, but that order can and will change.
 
 The entire Nitro 3D (`NSB*`) and `SPA` priority group, the `LZ10`/`LZ11` compression codec, the 2D
-`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`/`NFTR` set, and NDS audio (`SDAT` and its companions) are
-all supported now (see the table above), fully reverse-engineered natively and validated byte-for-byte
-against the retail ROMs. What remains:
+`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`/`NFTR`/`NTFT`/`NTFP` set, and NDS audio (`SDAT` and its
+companions) are all supported now (see the table above), fully reverse-engineered natively and validated
+byte-for-byte against the retail ROMs. What remains:
 
-* `NTFT` / `NTFP` / `NTFI` &mdash; raw texture texel / palette / index data. Blocked on an example: the
-  Pokémon ROMs keep texture data in `TEX0`/NSBTX rather than these, so there's no retail fixture yet to
-  reverse-engineer or round-trip-test against.
+* `NTFI` &mdash; raw index data, the third member of the NTFT/NTFP raw-texture family. Unlike NTFT/NTFP
+  (now supported, see above), no retail example of this specific one has turned up yet, and its very
+  existence as a real, distinct on-disk format is unconfirmed (no independent source describes it, unlike
+  NTFT/NTFP which multiple community references agree on).
 * The remaining Nitro compression codecs &mdash; Huffman and RLE (`framework.NitroLz` covers LZ10/LZ11;
     `framework.BLZCoder` covers the ARM-code BLZ variant)
 * A glTF *import* front-end for the 3D stack (export already covers glTF; OBJ import is already done via

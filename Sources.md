@@ -23,6 +23,7 @@ These sources will be denoted as <sup>unused</sup>.
 * [NMCR](#nmcr)
 * [NMAR](#nmar)
 * [NFTR](#nftr)
+* [NTFT / NTFP](#ntft--ntfp)
 * [NSBTX](#nsbtx)
 * [NSBMD](#nsbmd)
 * [NSBCA](#nsbca)
@@ -171,6 +172,30 @@ parser, reconciling the two against the actual retail byte layout. Glyph bitmaps
     [CMAP/cmap.cpp](https://github.com/hadashisora/NintyFont/blob/master/formats/NFTR/CMAP/cmap.cpp)
 * Retail **White2** (Generation V), which ships 5 `RTFN` fonts (NARC `a/0/2/3`) &mdash; the Pokémon
   Generation IV ROMs don't use NFTR. Byte-exact round-trip confirmed against all 5.
+
+## NTFT / NTFP
+Raw, headerless formats with no confirmed retail example anywhere until one was specifically hunted down:
+a [Project Pokémon forum post](https://projectpokemon.org/home/forums/topic/13766-how-to-view-ntfp-and-ntfs-files/)
+first-hand-reported `.ntfp`/`.ntft` files in *Learn with Pokémon: Typing Adventure* (JP: *Battle & Get!
+Pokémon Typing DS*); acquiring that ROM and scanning every NARC's filename table (these formats have no
+magic bytes at all, so they can't be found by content signature, only by file extension) confirmed **7979
+NTFT/NTFP pairs**, one per Pokémon "note" icon. The general shape (raw texture, "size is usually/always a
+power of 2"; raw 16-bit-color palette, "can be quite small") matched GBATEK's existing prose description;
+the exact pixel format (8bpp, linear/non-tiled — a tiled decode produces scrambled diagonal noise instead)
+was determined by rendering a real sample (`001_fushigidane_00_note.ntft`/`.ntfp`, Bulbasaur) both ways and
+comparing against the known artwork. Byte-exact round-trip confirmed over the whole 7979-pair corpus.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [DS Files - 2D Video](https://problemkaputt.de/gbatek-ds-files-2d-video.htm), ".ntft and .ntfp" section
+    — the format-level description (power-of-2 texture size, small variable-size palette); doesn't decode
+    the exact pixel layout or name any game
+* [pleonex/tinke](https://github.com/pleonex/tinke) &mdash; the only other tool found with any NTFT/NTFP
+  support; its plugin hardcodes a fixed 256×192 (the DS's native screen resolution) 8bpp raw-tile
+  interpretation, consistent with "a raw framebuffer/extra 2D layer" but not itself proof of the general
+  (variable-size, square) format confirmed here
+  * [Plugins/Nintendo/Nintendo/ntft.cs](https://github.com/pleonex/tinke/blob/master/Plugins/Nintendo/Nintendo/ntft.cs)
+* Retail **Learn with Pokémon: Typing Adventure**, the sole known source of these formats in any Pokémon
+  title (or any title, per the research above). Byte-exact round-trip and pixel-correct decode confirmed
+  against all 7979 pairs.
 
 ## NSBTX
 The `TEX0` block layout (the texture/palette info headers and the shared `NNS_G3dResDict`
