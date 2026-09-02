@@ -107,6 +107,10 @@ import java.io.File;
 import g3d.ModelSet;
 import g3d.Model;
 import g3d.GltfExporter;
+import images.IndexedImage;
+import images.Palette;
+import images.CellBank;
+import images.CellAnimation;
 
 public class Example
 {
@@ -195,6 +199,28 @@ public class Example
         BinaryWriter.writeFile("model.gltf", GltfExporter.toGltf(model, models.getEmbeddedTextures()).getBytes());
     }
 
+    /**
+     * Assemble a sprite from its NCGR/NCLR/NCER/NANR stack and export one animation frame as a PNG.
+     * Each 2D format layers on the one before it: NCGR is the raw tile pixels, NCLR colors them, NCER
+     * composes tiles into a cell (a single pose), and NANR animates a sequence of cells.
+     */
+    public static void example8(NintendoDsRom rom) throws java.io.IOException
+    {
+        Narc narc = new Narc(rom.getFile(174)); // wherever your game keeps its character sprites
+
+        IndexedImage ncgr = new IndexedImage(narc.getFile(0), 0, 0, 1, 1, true);
+        ncgr.setPalette(new Palette(narc.getFile(1), 0));
+
+        CellBank ncer = new CellBank(narc.getFile(5));
+        ncer.setParentImage(ncgr); // NCER cells are drawn from the NCGR's tiles
+
+        CellAnimation nanr = new CellAnimation(narc.getFile(4));
+        nanr.setCellBank(ncer); // NANR frames animate the NCER's cells
+
+        CellAnimation.Animation.Frame firstFrame = nanr.getAnimations()[0].getFrames()[0];
+        ImageIO.write(nanr.getFrameImage(firstFrame), "png", new File("sprite_frame.png"));
+    }
+
 
     public static void main(String[] args) throws java.io.IOException
     {
@@ -209,6 +235,7 @@ public class Example
         example5();
         example6(rom);
         example7();
+        example8(rom);
     }
 }
 ```
