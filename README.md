@@ -48,6 +48,8 @@ Formats currently implemented
 | NSBMA       | `g3d.MaterialColorAnimationSet`              | &check; | &check; |         &check;         |
 | SPA / SPL   | `g3d.ParticleSet`                            | &check; | &check; |         &cross;         |
 | Nitro LZ    | `framework.NitroLz` (LZ10/LZ11)              | &check; | &check; |         &check;         |
+| Nitro Huffman | `framework.NitroHuffman` (4-bit/8-bit)     | &check; | &check; |         &check;         |
+| BMG         | `text.BinaryMessage`                         | &check; | &check; |         &check;         |
 | SDAT        | `sound.SoundArchive`                         | &check; | &check; |         &cross;         |
 | SWAV / SWAR | `sound.Wave` / `sound.WaveArchive`           | &check; | &check; |         &cross;         |
 | SBNK        | `sound.InstrumentBank`                       | &check; | &check; |         &cross;         |
@@ -109,22 +111,39 @@ NTFT/NTFP pairs, one per Pok&eacute;mon "note" icon. `RawTexture` is an 8bpp ind
 the square root of the file size); `RawPalette` is a flat BGR555 array tightly packed to however many colors
 are actually used. Byte-exact round-trip confirmed over the whole 7979-pair corpus.
 
+`framework.NitroLz` also transparently reads (and, via `compressLz77Tagged`/`compressLz11Lz77Tagged`, can
+re-emit) a `"LZ77"`-ASCII-tagged variant of the same LZ10/LZ11 stream that some titles (first found in
+Animal Crossing: Wild World's loose top-level files) wrap the ordinary header in &mdash; `isCompressed`
+was blind to it before, silently treating every such file as uncompressed.
+
+`framework.NitroHuffman` covers the Nitro SDK's Huffman compression (4-bit and 8-bit symbols, types
+`0x24`/`0x28`), the sibling of `NitroLz`'s LZ10/LZ11 in the same compression family. Layout cross-checked
+against the DSDecmp reference decoder/encoder; no retail file using it has turned up in this project's ROM
+corpus yet (only `NitroLz`-style heuristic false positives), so correctness rests on the round-trip tests.
+
+`text.BinaryMessage` reads and writes `BMG` (Binary MessaGe, magic `MESGbmg1`), Nintendo's cross-title
+GameCube/Wii/DS text container &mdash; independent of any single game's own bespoke text encoding, and
+present in nearly every DS ROM checked so far, including the mainline Pok&eacute;mon games. Ported from
+[ndspy](https://github.com/RoadrunnerWMC/ndspy) rather than derived from scratch; validated byte-exact
+over 193 real files across four titles, including the DS-Zelda-specific `FLW1`/`FLI1` script-flow
+sections Phantom Hourglass uses.
+
 Likely future supported formats
 --------------------------------
 
 These are sorted in order of their likely priority, but that order can and will change.
 
-The entire Nitro 3D (`NSB*`) and `SPA` priority group, the `LZ10`/`LZ11` compression codec, the 2D
-`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`/`NFTR`/`NTFT`/`NTFP` set, and NDS audio (`SDAT` and its
-companions) are all supported now (see the table above), fully reverse-engineered natively and validated
-byte-for-byte against the retail ROMs. What remains:
+The entire Nitro 3D (`NSB*`) and `SPA` priority group, the `LZ10`/`LZ11`/Huffman compression codecs, the 2D
+`NCGR`/`NCLR`/`NCER`/`NANR`/`NSCR`/`NMCR`/`NMAR`/`NFTR`/`NTFT`/`NTFP` set, NDS audio (`SDAT` and its
+companions), and `BMG` text are all supported now (see the table above), fully reverse-engineered natively
+and validated byte-for-byte against the retail ROMs. What remains:
 
 * `NTFI` &mdash; raw index data, the third member of the NTFT/NTFP raw-texture family. Unlike NTFT/NTFP
   (now supported, see above), no retail example of this specific one has turned up yet, and its very
   existence as a real, distinct on-disk format is unconfirmed (no independent source describes it, unlike
   NTFT/NTFP which multiple community references agree on).
-* The remaining Nitro compression codecs &mdash; Huffman and RLE (`framework.NitroLz` covers LZ10/LZ11;
-    `framework.BLZCoder` covers the ARM-code BLZ variant)
+* The remaining Nitro compression codec &mdash; RLE (`framework.NitroLz` covers LZ10/LZ11;
+    `framework.NitroHuffman` covers Huffman; `framework.CodeCompression` covers the ARM-code BLZ variant)
 * A glTF *import* front-end for the 3D stack (export already covers glTF; OBJ import is already done via
     `g3d.ObjImporter` + `g3d.ModelBuilder`). A glTF importer would complete a Blender-edit-and-reimport
     workflow.
@@ -326,6 +345,6 @@ If you plan on contributing to Nds4j, please ensure that your additions meet the
   * Any member variables which you want to expose to the user need to have accessor and mutator methods made available.
 * Any method, member variable, or inner class which does not need to be made available to the user should either be private or protected, depending on whether other classes need to be able to access them.
 * Eliminate redundancy.
-  * For example, if you need to perform compression operations for DS formats, use `framework.BLZCoder`, don't write your own redundant solution. If there is something missing from the framework class, fix the existing class instead of making a new class.
+  * For example, if you need to perform compression operations for DS formats, use `framework.NitroLz`/`framework.NitroHuffman`/`framework.CodeCompression`, don't write your own redundant solution. If there is something missing from the framework class, fix the existing class instead of making a new class.
   * If you have code which multiple of your classes share, don't rewrite it in each of your classes. Either put it in a protected inner class within one of your classes and import it into the other, or if the code is general enough to have other potential applications, put it in a class in the `framework` package.
 * Please do your best to make your code readable to other people! 
