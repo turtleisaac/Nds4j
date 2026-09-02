@@ -66,7 +66,11 @@ public class CellAnimation extends GenericNtrFile
 
     // The UEXT section's single content word (always a 12-byte section: magic + size + one u32). Its
     // meaning isn't decoded (retail files carry only 0 or 1), so it's captured and re-emitted verbatim
-    // rather than assumed to always be 0.
+    // rather than assumed to always be 0. It's constant per title, not per animation (HeartGold: 0 in
+    // 988/988 NANRs; Pokemon Ranger: Shadows of Almia: 1 in 376/378) and doesn't correlate with element
+    // type, playback mode, or any other decoded property -- consistent with a build-tool/SDK-version
+    // stamp, not a behavioral flag. Empirically tested: every NANR in a real Shadows of Almia ROM was
+    // inverted (376 1s -> 0, 2 0s -> 1) and played for several minutes with no observable difference.
     private long uextValue;
 
     // The companion cell bank (NCER) whose cells this file animates. Not part of the NANR itself; set

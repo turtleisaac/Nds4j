@@ -58,7 +58,12 @@ public class CellBank extends GenericNtrFile
     private long partitionDataOffset;
     private long tacuOffset;
     // The single content word of the UEXT ("TXEU") section. It is 0 in every NCER and NANR across the
-    // five retail ROMs, i.e. a reserved/unused word; preserved and reproduced regardless.
+    // five retail ROMs, i.e. a reserved/unused word; preserved and reproduced regardless. Confirmed on
+    // the NANR side (CellAnimation.uextValue) against a non-Pokemon title, Pokemon Ranger: Shadows of
+    // Almia, where it's constant 1 across 376/378 files instead of 0 -- still per-title, not
+    // per-animation, and inverting every one of them in a real ROM produced no observable in-game
+    // difference. Likely a build-tool/SDK-version stamp rather than a behavioral flag; NCER's own copy
+    // hasn't been separately flip-tested but shares the exact same section layout.
     private int uextReserved;
 
     // The partition (VRAM transfer) and TACU sections that follow the cell/OAM data inside the KBEC
