@@ -185,13 +185,18 @@ public class VisibilityAnimationSet extends G3dFile
             long word = readU32(d, p);
             p += 4;
             int bit = 0;
-            // one bit per (frame, node), frame-major, refilling a 32-bit word as it drains
+            int totalBits = frameCount * numNodes;
+            // one bit per (frame, node), frame-major, refilling a 32-bit word as it drains. Only refill
+            // when bits remain -- when totalBits is an exact multiple of 32, the drain-then-refill on the
+            // very last bit used to read one word past the end of the (whole-word-padded) bit stream, which
+            // walks off the end of the buffer when this animation's blob is the last thing in the file.
             for (int f = 0; f < frameCount; f++)
                 for (int n = 0; n < numNodes; n++)
                 {
                     visible[n][f] = (word & 1) != 0;
                     word >>= 1;
-                    if (++bit % 32 == 0)
+                    ++bit;
+                    if (bit % 32 == 0 && bit < totalBits)
                     {
                         word = readU32(d, p);
                         p += 4;

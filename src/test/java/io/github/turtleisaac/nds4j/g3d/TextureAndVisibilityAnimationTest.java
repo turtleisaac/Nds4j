@@ -66,6 +66,13 @@ public class TextureAndVisibilityAnimationTest
         for (int i = 0; i < rom.getNumFiles(); i++)
         {
             byte[] f = rom.getFile(i);
+            // Not every title wraps these in a NARC -- Animal Crossing: Wild World's one BVA0 is a loose
+            // top-level ROM file.
+            if (magic(f).equals(want))
+            {
+                found.add(f);
+                continue;
+            }
             if (!magic(f).equals("NARC"))
                 continue;
             Narc narc;
@@ -154,6 +161,32 @@ public class TextureAndVisibilityAnimationTest
             }
         }
         assertThat(animations).isGreaterThan(0);
+    }
+
+    @Test
+    @DisplayName("NSBVA: parses and round-trips across Animal Crossing: Wild World and New Super Mario Bros")
+    void nsbvaRoundTripAndDecodeAcrossOtherRoms()
+    {
+        // Found a fifth writer/reader defect this way, against two non-Pokemon titles: the bit-stream
+        // reader always refilled its 32-bit word buffer immediately after draining the stream's very
+        // last bit, even when there was no next word -- reading past the end of the buffer whenever a
+        // node/frame count came out to an exact multiple of 32 for an animation that happened to be the
+        // last thing in the file (Animal Crossing's one BVA0). See parseVis0/Animation's constructor.
+        for (String romName : new String[] {"Animal Crossing - Wild World.nds", "New Super Mario Bros.nds"})
+        {
+            NintendoDsRom rom = TestRoms.require(romName);
+            List<byte[]> files = collect(rom, "BVA0");
+            Assumptions.assumeFalse(files.isEmpty(), "no BVA0 files found in " + romName);
+            for (byte[] file : files)
+            {
+                VisibilityAnimationSet set = new VisibilityAnimationSet(file);
+                assertThat(set.save()).as("BVA0 in %s round-trips byte-for-byte", romName).isEqualTo(file);
+                for (VisibilityAnimationSet.Animation anim : set.getAnimations())
+                    for (int n = 0; n < anim.getNodeCount(); n++)
+                        for (int f = 0; f < anim.getFrameCount(); f++)
+                            anim.isVisible(n, f);
+            }
+        }
     }
 
     @Test
