@@ -1,8 +1,8 @@
 Nds4j
 =====
 
-[![Maven](https://maven-badges.herokuapp.com/maven-central/io.github.turtleisaac/Nds4j/badge.svg)](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j/)
-[![javadoc](https://javadoc.io/badge2/io.github.turtleisaac/Nds4j/javadoc.svg?)](https://javadoc.io/doc/io.github.turtleisaac/Nds4j)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.turtleisaac/Nds4j?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.turtleisaac/Nds4j/)
+[![javadoc](https://javadoc.io/badge2/io.github.turtleisaac/Nds4j/1.0.0/javadoc.svg)](https://javadoc.io/doc/io.github.turtleisaac/Nds4j)
 [![License: GNU GPL 3.0](https://img.shields.io/github/license/RoadrunnerWMC/ndspy.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/gpl-3.0)
 
 **Nds4j** is a <u>**WIP**</u> Java library that can help you read, modify and create a few types of files used in
