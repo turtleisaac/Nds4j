@@ -257,7 +257,7 @@ public class BinaryMessage
         ByteArrayOutputStream inf1 = new ByteArrayOutputStream();
         ByteArrayOutputStream dat1Body = new ByteArrayOutputStream();
         byte[] nullChar = encodeChar('\0', charsetName);
-        dat1Body.writeBytes(nullChar);
+        writeBytes(dat1Body, nullChar);
 
         int entryLen = messages.isEmpty() ? Math.max(4, inf1EntryLength) : 4 + messages.get(0).info.length;
         for (int i = 0; i < messages.size(); i++)
@@ -272,13 +272,13 @@ public class BinaryMessage
             // dat1Body.size() is already payload-relative, and starts past the leading nullChar.
             long msgOffset = m.isNull ? 0 : dat1Body.size();
             writeU32(inf1, msgOffset, bigEndian);
-            inf1.writeBytes(m.info);
+            writeBytes(inf1, m.info);
             if (!m.isNull)
-                dat1Body.writeBytes(m.save(charsetName));
+                writeBytes(dat1Body, m.save(charsetName));
         }
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.writeBytes(MAGIC);
+        writeBytes(out, MAGIC);
         int totalLenPos = out.size();
         writeU32(out, 0, bigEndian); // patched at the end
         int numSections = 2;
@@ -288,17 +288,17 @@ public class BinaryMessage
         writeU32(out, unk14, bigEndian);
         writeU32(out, unk18, bigEndian);
         writeU32(out, unk1C, bigEndian);
-        out.writeBytes(headerPadding);
+        writeBytes(out, headerPadding);
 
         writeSection(out, "INF1", true, sec ->
         {
             writeU16(sec, messages.size(), bigEndian);
             writeU16(sec, entryLen, bigEndian);
             writeU32(sec, inf1Id, bigEndian);
-            sec.writeBytes(inf1.toByteArray());
+            writeBytes(sec, inf1.toByteArray());
         });
 
-        writeSection(out, "DAT1", true, sec -> sec.writeBytes(dat1Body.toByteArray()));
+        writeSection(out, "DAT1", true, sec -> writeBytes(sec, dat1Body.toByteArray()));
 
         if (hasFlw1)
         {
@@ -308,7 +308,7 @@ public class BinaryMessage
                 writeU16(sec, instructions.size(), bigEndian);
                 writeU16(sec, labelIndices.length, bigEndian);
                 writeU32(sec, flw1Unk0C, bigEndian);
-                for (byte[] inst : instructions) sec.writeBytes(inst);
+                for (byte[] inst : instructions) writeBytes(sec, inst);
                 for (short idx : labelIndices) writeU16(sec, idx & 0xFFFF, bigEndian);
                 for (byte id : labelBmgIds) sec.write(id);
             });
@@ -330,7 +330,7 @@ public class BinaryMessage
                 {
                     writeU32(sec, s.id, bigEndian);
                     writeU16(sec, s.index & 0xFFFF, bigEndian);
-                    sec.writeBytes(s.padding);
+                    writeBytes(sec, s.padding);
                 }
             });
         }
@@ -352,7 +352,7 @@ public class BinaryMessage
     private void writeSection(ByteArrayOutputStream out, String magic, boolean physicallyPad, SectionBody body)
     {
         ByteArrayOutputStream sec = new ByteArrayOutputStream();
-        sec.writeBytes(magic.getBytes(StandardCharsets.US_ASCII));
+        writeBytes(sec, magic.getBytes(StandardCharsets.US_ASCII));
         writeU32(sec, 0, bigEndian); // patched below
         body.write(sec);
         byte[] bytes = sec.toByteArray();
@@ -361,7 +361,7 @@ public class BinaryMessage
         if (physicallyPad && declaredLen != bytes.length)
             bytes = Arrays.copyOf(bytes, declaredLen);
         patchU32(bytes, 4, declaredLen, bigEndian);
-        out.writeBytes(bytes);
+        writeBytes(out, bytes);
     }
 
     private String charsetName()
@@ -431,6 +431,17 @@ public class BinaryMessage
     {
         if (be) { out.write((v >> 8) & 0xFF); out.write(v & 0xFF); }
         else { out.write(v & 0xFF); out.write((v >> 8) & 0xFF); }
+    }
+
+    // ByteArrayOutputStream's own writeBytes(byte[]) convenience method is a Java 11 API: it compiles
+    // fine under a newer JDK (JUnit here runs on 20) but CheerpJ's Java 8 browser runtime throws a bare
+    // NoSuchMethodError (no message) the instant it's actually called -- silent in every local/CI
+    // build, only visible live in NitroViewer. write(byte[], int, int) has been on ByteArrayOutputStream
+    // since Java 1.0 and (unlike the general OutputStream contract) never actually throws IOException,
+    // so this is a drop-in, Java-8-safe replacement.
+    private static void writeBytes(ByteArrayOutputStream out, byte[] b)
+    {
+        out.write(b, 0, b.length);
     }
 
     private static void patchU32(byte[] data, int off, long v, boolean be)
@@ -511,7 +522,7 @@ public class BinaryMessage
                     String s = (String) part;
                     if (s.indexOf('\0') >= 0 || s.indexOf('\u001A') >= 0)
                         throw new RuntimeException("A BMG message string may not contain a NUL or 0x1A character directly.");
-                    out.writeBytes(Charset.forName(charsetName).encode(s).array());
+                    writeBytes(out, Charset.forName(charsetName).encode(s).array());
                 }
                 else
                 {
@@ -526,13 +537,13 @@ public class BinaryMessage
                     if (escLen > 0xFF)
                         throw new RuntimeException("BMG escape too long to encode: " + escLen
                                 + " bytes (max 255) under the current encoding; shorten the escape data.");
-                    out.writeBytes(start);
+                    writeBytes(out, start);
                     out.write(escLen);
                     out.write(esc.type);
-                    out.writeBytes(esc.data);
+                    writeBytes(out, esc.data);
                 }
             }
-            out.writeBytes(encodeChar('\0', charsetName));
+            writeBytes(out, encodeChar('\0', charsetName));
             return out.toByteArray();
         }
 
