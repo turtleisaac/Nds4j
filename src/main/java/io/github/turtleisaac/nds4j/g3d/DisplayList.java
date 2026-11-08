@@ -175,7 +175,7 @@ public final class DisplayList
      * @param positions raw vertex positions (x,y,z triples), in the VTX_16 fixed-point range
      * @param texcoords texcoords (s,t pairs) in texel units, or null for zero UVs
      * @param triangles triangle indices, 3 per triangle, into the vertex arrays
-     * @return the encoded display-list bytes
+     * @return the encoded display-list bytes, NOP-terminated and 8-byte aligned (see {@link #terminate})
      */
     public static byte[] encode(float[] positions, float[] texcoords, int[] triangles)
     {
@@ -193,7 +193,28 @@ public final class DisplayList
             }
         }
         command(out, END_VTXS);
-        return out.toByteArray();
+        return terminate(out.toByteArray());
+    }
+
+    /**
+     * Terminates an authored display list the way {@code g3dcvtr} does: one all-{@code NOP} command word
+     * appended after the last meaningful command, then zero-padding to a multiple of 8 bytes.
+     * <p>
+     * The trailing word is not cosmetic. Several third-party readers in the {@code LibNDSFormats} lineage
+     * (DSPRE's model renderer among them) walk the stream as
+     * {@code for (i = 0; i < 4 && ptr < limit; i++)} &mdash; the bounds check is re-tested <em>before each
+     * of the four opcodes in a word</em>, so a list whose final operand ends exactly at {@code limit}
+     * silently loses the remaining opcodes of that last word. For a list ending in {@code END_VTXS} that
+     * drops the {@code glEnd()}, leaving the primitive open and the mesh mis-rendered. Padding guarantees
+     * the last real command is always followed by at least one word, so it is always executed.
+     * @param dl the display-list bytes, ending with its last meaningful command
+     * @return {@code dl} with the terminating NOP word and 8-byte alignment padding
+     */
+    static byte[] terminate(byte[] dl)
+    {
+        int len = dl.length + 4;              // the all-NOP command word
+        len += (8 - len % 8) % 8;             // then align to 8, as g3dcvtr's lists are
+        return java.util.Arrays.copyOf(dl, len);
     }
 
     /**

@@ -326,7 +326,7 @@ public final class ImdImporter
         return 0;
     }
 
-    // --- geometry: translate one polygon's primitive commands into GPU commands, pad the DL to /8 ---
+    // --- geometry: translate one polygon's primitive commands into GPU commands, NOP-terminate + pad ---
     private byte[] buildDisplayList(String polygon)
     {
         List<DisplayList.Command> cmds = new ArrayList<>();
@@ -358,9 +358,11 @@ public final class ImdImporter
             }
         }
         cmds.add(cmd(0x41)); // END_VTXS
-        byte[] dl = DisplayList.encodeCommands(cmds);
-        int pad = (8 - dl.length % 8) % 8;
-        return pad == 0 ? dl : java.util.Arrays.copyOf(dl, dl.length + pad);
+        // Terminate with an all-NOP word, then align to 8 (see DisplayList#terminate for why the word is
+        // required). On every g3dcvtr reference fixture the pre-pad length is 52, so this still yields the
+        // same 56 bytes g3dcvtr emits; it additionally covers lists that are already 8-aligned, where the
+        // old align-only padding added nothing and left the final END_VTXS droppable by strict readers.
+        return DisplayList.terminate(DisplayList.encodeCommands(cmds));
     }
 
     // --- node set: node dictionary + one identity node local matrix (flags 0xf807, rotation[0][0] = 1) ---
