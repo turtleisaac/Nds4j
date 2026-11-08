@@ -43,3 +43,7 @@ build/
 ### (NSBMD/NSBTX/NSBCA/NSBTP/NSBVA). Kept locally as a reference for future 3D support work,
 ### not redistributed.
 /NitroSystemTool.jar
+
+### Test output: GenericFormatSurveyTest writes its survey to -Drom.dir (default: the repo root).
+### The contents depend on which ROMs the developer has locally, so it is never committed.
+nds4j_generic_format_survey.txt
