@@ -6,7 +6,13 @@ alwaysApply: false
 
 # Java style
 
-Match the pre-2026 sources in Nds4j, PokEditor, PokEditor-Core, and Nds4j-ToolUI. Code added in 2026 drifted (long javadocs, same-line `if (x) return;`, column-aligned comments). Do not copy that drift.
+The target is the style of code written for the split library stack, not PokEditor v2 and not the files copied out of it unchanged.
+
+PokEditor v2 (2021–2023, `com.turtleisaac.pokeditor`) was already mostly Allman in the editors, but `if(` and `for(` were the habit: about 42% of `if`s had a space. The third-party DSPRE reader under `com.jackhack96` was end-of-line braces and was rewritten, not kept. When that monolith was split, the new files (Nds4j parsers, PokEditor-Core, Nds4j-ToolUI) kept Allman and put the space in: new Nds4j files are 92% `if (` and 96% `for (`, new PokEditor-Core files 98% and 98%, and every hand-written ToolUI `if` and `for` has the space. `PersonalEditor.java` in v2 (`if(files.length > nameData.length)`) became `if (` in `PersonalParser`.
+
+These modern files are v2 carry-overs and still show the old habit. Do not copy them: `MemBuf`, `Buffer`, `BinaryWriter`, `CRC16`, `BitVector`, `BitStream`, `ArrayProcessor`, `CsvReader`, `XmlReader`, `CircleButton`, `TrainerPersonalityCalculator`. `MemBuf.java` in v2 is already `public class MemBuf {`.
+
+Code added in 2026 drifted again (long javadocs, same-line `if (x) return;`, column-aligned comments). Do not copy that drift either.
 
 JFormDesigner files (`Created by JFormDesigner`, including the generated `initComponents` blocks) are not a style sample. Generated ANTLR (`src/main/generated-sources`, gitignored) is not either. Hand-written GUI, including Nds4j-ToolUI classes such as `PanelManager` and `HexadecimalSpinner`, is.
 
