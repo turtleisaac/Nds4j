@@ -245,7 +245,8 @@
                     <dependency>
                         <groupId>com.puppycrawl.tools</groupId>
                         <artifactId>checkstyle</artifactId>
-                        <version>14.4.0</version>
+                        <!-- 13+ is compiled for Java 21. CI still runs verify on JDK 17. -->
+                        <version>12.3.1</version>
                     </dependency>
                 </dependencies>
                 <configuration>
