@@ -1,0 +1,17 @@
+root = true
+
+# Java, and the text files around it. Binary fixtures are not covered:
+# a charset rule on every file flags .nds/.nsbmd resources.
+[*.{java,xml,yml,yaml,md,properties}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.java]
+indent_style = space
+indent_size = 4
+# Signatures and a few data tables run well past 120 columns on purpose.
+max_line_length = off
