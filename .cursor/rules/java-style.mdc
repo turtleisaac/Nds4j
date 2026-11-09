@@ -6,7 +6,9 @@ alwaysApply: false
 
 # Java style
 
-Match the pre-2026 sources. Code added in 2026 drifted (long javadocs, same-line `if (x) return;`, column-aligned comments). Do not copy that drift.
+Match the pre-2026 sources in Nds4j, PokEditor, PokEditor-Core, and Nds4j-ToolUI. Code added in 2026 drifted (long javadocs, same-line `if (x) return;`, column-aligned comments). Do not copy that drift.
+
+JFormDesigner files (`Created by JFormDesigner`, including the generated `initComponents` blocks) are not a style sample. Generated ANTLR (`src/main/generated-sources`, gitignored) is not either. Hand-written GUI, including Nds4j-ToolUI classes such as `PanelManager` and `HexadecimalSpinner`, is.
 
 ## Keywords are not methods
 
@@ -80,7 +82,7 @@ Structured bytes go through `MemBuf`. `Buffer` and `BinaryWriter` are the older 
 
 Four spaces, no tabs. UTF-8, LF, newline at end of file. One space around operators and after commas. A cast has a space after it: `(int) value`. `Type[]`, not `Type []`. Lambdas are `x -> expr` with spaces around `->`. A ternary stays on one line.
 
-Imports are not reordered by the tools. When you write them, group project (`io.github.turtleisaac`), then other libraries, then `java` / `javax`, then static, with a blank line between groups. Wildcards are allowed. PokEditor Swing files often lead with `javax` instead; that disagrees with Nds4j, so follow the file you are in.
+Imports are not reordered by the tools. When you write them, group project (`io.github.turtleisaac`), then other libraries, then `java` / `javax`, then static, with a blank line between groups. Wildcards are allowed. Hand-written Swing (`HexadecimalSpinner`, PokEditor cell editors) often leads with `javax` instead; that disagrees with Nds4j library code, so follow the file you are in.
 
 Nds4j switches are `case` / `break` with an Allman brace (the sources are Java 8). PokEditor and PokEditor-Core are Java 20 and mostly use arrow switches. Do not introduce arrow switches in Nds4j.
 
