@@ -65,6 +65,19 @@ A single-statement `if` or `else` may be unbraced. The statement goes on the nex
 
 `for` and `while` are braced even when the body is one statement. Brace new loops.
 
+After a `for` or `while`, leave a blank line before the next statement. That applies to a one-line body and to a braced body. Skip the blank line when the loop is the last thing in the method: the closing brace of the method comes next.
+
+```java
+for (String filename : files)
+    list.add(filename);
+
+for (String folderName : folders.keySet())
+{
+    list.add(folderName + "/");
+    list.addAll(folder.toStringList());
+}
+```
+
 ## Methods, signatures, tests
 
 Leave one blank line between methods. The formatter preserves a blank line that is already there and will not insert one you forgot.
