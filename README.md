@@ -402,6 +402,7 @@ If you plan on contributing to Nds4j, please ensure that your additions meet the
 * An in-depth and **thoroughly tested** `equals()` method should be included in your classes where applicable.
 * Exceptions should be informative. That is, the message included in them should contain the nature of the exception (aka what caused it), and when applicable, the illegal value that triggered it. Use common sense, and make sure exceptions do not contain expletives.
 * Any sources you used should be added to [Sources.md](Sources.md)
+* Enable the pre-commit hook with `git config core.hooksPath .githooks`, or run `scripts/install-git-hooks.sh`. It runs Spotless plus the CRAP and duplication gates on staged Java. See [.quality/README.md](.quality/README.md).
 * Unit tests have been written and included in the path `src/test/java/` which mirrors the placement of your code in `src/main/java`.
   * Your unit tests should test everything which you think needs to be tested. The most important test in my opinion is making sure that when you convert your object back to a `byte[]` to save it, that `byte[]` should be fed back to the constructor for the class and tested for equality.
 * Limit the member variables your classes include to only what is needed to represent the simplest form of the format while retaining all functionality.
