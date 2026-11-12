@@ -632,62 +632,81 @@ public class CellBank extends GenericNtrFile
         setParentImage(ncgr);
         Cell cell = cells[cellIndex];
         Rectangle bounds = cellBounds(cell);
-        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
-        if (image.getWidth() != cw || image.getHeight() != ch)
-            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
-                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+        requireCellSize(image, bounds, cellIndex);
 
         Color[] colors = palette.getColors();
-        int bitDepth = ncgr.getBitDepth();
-        int subSize = bitDepth == 4 ? 16 : 256;
-        int subCount = Math.max(1, colors.length / subSize);
+        int subSize = ncgr.getBitDepth() == 4 ? 16 : 256;
         Cell.OAM.OamImage[] oamImages = cell.getImages();
         int unmatched = 0;
-
         for (int k = 0; k < cell.oams.length; k++)
         {
             Cell.OAM oam = cell.oams[k];
             if (isOamDisabled(oam))
                 continue;
-            int[] sz = getOamSize(oam);
-            int w = sz[0], h = sz[1];
-            int[] footprint = getOamFootprint(oam);
-            int offX = (footprint[0] - w) / 2, offY = (footprint[1] - h) / 2;
-            int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
-            int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
-            int base = sub * subSize;
+
+            int base = subPaletteBase(oam, ncgr.getBitDepth(), colors.length);
             int count = Math.min(subSize, colors.length - base);
-
-            int[][] grid = new int[h][w];
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    int sx = dx + x, sy = dy + y;
-                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight())
-                    {
-                        grid[y][x] = 0;
-                        continue;
-                    }
-
-                    int argb = image.getRGB(sx, sy);
-                    // transparent -> index 0
-                    if (((argb >>> 24) & 0xFF) == 0)
-                    {
-                        grid[y][x] = 0;
-                        continue;
-                    }
-
-                    int bestIdx = ColorMatch.nearestIndex(colors, base, count, argb, oamImages[k].getPixelValue(x, y));
-                    grid[y][x] = bestIdx;
-                    if (ColorMatch.distanceSq(colors[base + bestIdx], argb) != 0)
-                        unmatched++;
-                }
-            }
-            oamImages[k].setPixels(grid);
-            oamImages[k].save(); // splices these pixels into the NCGR tiles this OAM references
+            unmatched += matchOam(oam, oamImages[k], image, bounds, colors, base, count);
         }
+
         return new ImportResult(unmatched, palette);
+    }
+
+    /** Throws unless {@code image} is the size that cell {@code cellIndex} composes to. */
+    static void requireCellSize(BufferedImage image, Rectangle bounds, int cellIndex)
+    {
+        int cw = Math.max(1, bounds.width), ch = Math.max(1, bounds.height);
+        if (image.getWidth() != cw || image.getHeight() != ch)
+            throw new RuntimeException(String.format("Image is %dx%d but cell %d composes to %dx%d.",
+                    image.getWidth(), image.getHeight(), cellIndex, cw, ch));
+    }
+
+    /** First palette slot of the colors {@code oam} draws with: its own 16-color block at 4bpp, else slot 0. */
+    static int subPaletteBase(Cell.OAM oam, int bitDepth, int numColors)
+    {
+        int subCount = Math.max(1, numColors / 16);
+        boolean ownBlock = bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount;
+        return ownBlock ? oam.palette * 16 : 0;
+    }
+
+    /** Matches one OAM's region of {@code image} into its tiles and returns how many opaque pixels missed the palette. */
+    private static int matchOam(Cell.OAM oam, Cell.OAM.OamImage oamImage, BufferedImage image, Rectangle bounds, Color[] colors, int base, int count)
+    {
+        int[] size = getOamSize(oam);
+        int[] footprint = getOamFootprint(oam);
+        int dx = oam.xCoord + (footprint[0] - size[0]) / 2 - bounds.x;
+        int dy = oam.yCoord + (footprint[1] - size[1]) / 2 - bounds.y;
+
+        int unmatched = 0;
+        int[][] grid = new int[size[1]][size[0]];
+        for (int y = 0; y < size[1]; y++)
+        {
+            for (int x = 0; x < size[0]; x++)
+            {
+                int idx = pixelIndex(image, dx + x, dy + y, colors, base, count, oamImage.getPixelValue(x, y));
+                grid[y][x] = Math.max(idx, 0);
+                if (idx >= 0 && ColorMatch.distanceSq(colors[base + idx], image.getRGB(dx + x, dy + y)) != 0)
+                    unmatched++;
+            }
+        }
+
+        oamImage.setPixels(grid);
+        oamImage.save(); // splices these pixels into the NCGR tiles this OAM references
+        return unmatched;
+    }
+
+    /** Nearest palette index for a pixel, keeping {@code preferred} on a tie; -1 when the pixel is off the image or transparent. */
+    static int pixelIndex(BufferedImage image, int sx, int sy, Color[] colors, int base, int count, int preferred)
+    {
+        if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight())
+            return -1;
+
+        int argb = image.getRGB(sx, sy);
+        // transparent, stored as index 0 without counting a miss
+        if (((argb >>> 24) & 0xFF) == 0)
+            return -1;
+
+        return ColorMatch.nearestIndex(colors, base, count, argb, preferred);
     }
 
     /**
