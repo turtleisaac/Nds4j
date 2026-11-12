@@ -6,6 +6,8 @@
 
 package io.github.turtleisaac.nds4j;
 
+import io.github.turtleisaac.nds4j.framework.NintendoLogo;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +15,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -108,6 +114,130 @@ class DsRomUnpackedTest
         {
             deleteTree(tmp);
         }
+    }
+
+    @Test
+    void saveWritesADsRomExtractThatFromUnpackedReadsBackIdentically() throws Exception
+    {
+        NintendoDsRom packed = TestRoms.require("Platinum.nds");
+        Path first = Files.createTempDirectory("dsrom-save");
+        Path second = Files.createTempDirectory("dsrom-resave");
+        try
+        {
+            deleteTree(first);
+            packed.unpackDsRom(first.toFile());
+            // A ds-rom extract has no header.bin.
+            assertThat(first.resolve("header.bin"))
+                    .doesNotExist();
+            assertThat(first.resolve("arm9/itcm.bin"))
+                    .exists();
+            assertThat(NintendoDsRom.looksLikeUnpackedRom(first.toFile()))
+                    .isTrue();
+
+            NintendoDsRom loaded = NintendoDsRom.fromUnpacked(first.toFile());
+            assertThat(loaded.getTitle().trim())
+                    .isEqualTo(packed.getTitle().trim());
+            assertThat(loaded.getNumFiles())
+                    .isEqualTo(packed.getNumFiles());
+            // File ids follow ds-rom's FNT order, which is the ROM's own.
+            String path = firstFilePath(Fnt.load(packed.getFnt()), "");
+            assertThat(loaded.getFileByName(path))
+                    .isEqualTo(packed.getFileByName(path));
+
+            // Platinum's ARM9 and overlays are uncompressed, so a second extract is identical file for file.
+            deleteTree(second);
+            loaded.unpackDsRom(second.toFile());
+            assertThat(relativeFiles(second))
+                    .isEqualTo(relativeFiles(first));
+            for (Path file : relativeFiles(first))
+            {
+                assertThat(Files.readAllBytes(second.resolve(file)))
+                        .as(file.toString())
+                        .isEqualTo(Files.readAllBytes(first.resolve(file)));
+            }
+        }
+        finally
+        {
+            deleteTree(first);
+            deleteTree(second);
+        }
+    }
+
+    @Test
+    void compressedCodeReadsBackDecompressed() throws Exception
+    {
+        NintendoDsRom packed = TestRoms.require("HeartGold.nds");
+        Path first = Files.createTempDirectory("dsrom-save");
+        Path second = Files.createTempDirectory("dsrom-resave");
+        try
+        {
+            deleteTree(first);
+            packed.unpackDsRom(first.toFile());
+            deleteTree(second);
+            NintendoDsRom.fromUnpacked(first.toFile()).unpackDsRom(second.toFile());
+
+            // The code itself survives; only the compressed flags change, as the reader stores it decompressed.
+            assertThat(relativeFiles(second))
+                    .isEqualTo(relativeFiles(first));
+            for (Path file : relativeFiles(first))
+            {
+                String name = file.toString();
+                if (name.equals("arm9/arm9.yaml") || name.equals("arm9_overlays/overlays.yaml"))
+                {
+                    assertThat(readString(second.resolve(file)))
+                            .isEqualTo(readString(first.resolve(file)).replace("compressed: true", "compressed: false"));
+                }
+                else if (!name.equals("config.yaml"))
+                {
+                    assertThat(Files.readAllBytes(second.resolve(file)))
+                            .as(name)
+                            .isEqualTo(Files.readAllBytes(first.resolve(file)));
+                }
+            }
+        }
+        finally
+        {
+            deleteTree(first);
+            deleteTree(second);
+        }
+    }
+
+    @Test
+    void headerLogoSurvivesDecompressAndCompress()
+    {
+        byte[] logo = new NintendoDsRom().nintendoLogo;
+        assertThat(NintendoLogo.compress(NintendoLogo.decompress(logo)))
+                .isEqualTo(logo);
+    }
+
+    private static List<Path> relativeFiles(Path root) throws IOException
+    {
+        try (Stream<Path> walk = Files.walk(root))
+        {
+            return walk.filter(Files::isRegularFile)
+                    .map(root::relativize)
+                    .sorted()
+                    .collect(Collectors.toList());
+        }
+    }
+
+    private static String readString(Path file) throws IOException
+    {
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    }
+
+    private static String firstFilePath(Fnt.Folder folder, String prefix)
+    {
+        if (!folder.getFiles().isEmpty())
+            return prefix + folder.getFiles().get(0);
+        for (Map.Entry<String, Fnt.Folder> e : folder.getFolders().entrySet())
+        {
+            String found = firstFilePath(e.getValue(), prefix + e.getKey() + "/");
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
     static void writeMinimalDsRomExtract(Path root) throws IOException

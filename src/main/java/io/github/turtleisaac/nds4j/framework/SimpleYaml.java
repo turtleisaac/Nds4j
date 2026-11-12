@@ -20,18 +20,27 @@
 package io.github.turtleisaac.nds4j.framework;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * A small YAML 1.1 subset reader for ds-rom ({@code dsrom}) extract configs: maps, lists of maps,
- * scalars (strings, decimals, {@code 0x} hex, booleans, {@code null}). No anchors, tags, or
- * flow-style nested collections — matching the files {@code serde} writes for
- * <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a>.
+ * scalars (strings, decimals, {@code 0x} hex, booleans, {@code null}), literal blocks, and
+ * {@code !!binary}. No anchors or flow-style nested collections — matching the files {@code serde}
+ * writes for <a href="https://github.com/AetiasHax/ds-rom">ds-rom</a>.
  */
 public final class SimpleYaml
 {
+    // Strings serde_saphyr quotes so they cannot read back as null, a YAML 1.1 bool, or a special float.
+    private static final List<String> AMBIGUOUS_WORDS = Arrays.asList("~", "null", "true", "false", "yes", "no", "y", "n", "on", "off", "nan", "inf", "+inf", "-inf", ".nan", ".inf", "+.nan", "+.inf", "-.nan", "-.inf");
+    private static final String NUMBER_PATTERN = "[+-]?(0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|([0-9][0-9_]*\\.[0-9_]*|\\.[0-9][0-9_]*)([eE][+-]?[0-9][0-9_]*)?|[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*|[0-9][0-9_]*)";
+    private static final int FOLDED_WRAP_CHARS = 80;
+    private static final String NAMED_ESCAPES = "\\\"\0\u0007\b\t\n\u000b\f\r\u001b\u0085\u2028\u2029";
+    private static final String NAMED_ESCAPE_LETTERS = "\\\"0abtnvfreNLP";
+
     private SimpleYaml()
     {
     }
@@ -43,6 +52,192 @@ public final class SimpleYaml
         Parser p = new Parser(text);
         Object value = p.parseBlock(-1);
         return value == null ? new LinkedHashMap<String, Object>() : value;
+    }
+
+    /** Writes {@code root} as block-style YAML laid out the way {@code serde_saphyr} writes ds-rom's files. */
+    public static String dump(Object root)
+    {
+        StringBuilder sb = new StringBuilder();
+        if (root instanceof Map)
+            dumpMap(sb, asMap(root), 0);
+        else if (root instanceof List)
+            dumpList(sb, asList(root), 0);
+        else
+            throw new IllegalArgumentException("expected a mapping or sequence at the document root, got " + typeName(root));
+        return sb.toString();
+    }
+
+    private static void dumpMap(StringBuilder sb, Map<String, Object> map, int indent)
+    {
+        for (Map.Entry<String, Object> e : map.entrySet())
+        {
+            sb.append(spaces(indent));
+            dumpEntry(sb, e.getKey(), e.getValue(), indent);
+        }
+    }
+
+    /** Writes {@code key: value}; the caller has already written the indentation or the {@code "- "}. */
+    private static void dumpEntry(StringBuilder sb, String key, Object value, int indent)
+    {
+        sb.append(key).append(':');
+        if (value instanceof Map && !asMap(value).isEmpty())
+        {
+            sb.append('\n');
+            dumpMap(sb, asMap(value), indent + 2);
+        }
+        else if (value instanceof List && !asList(value).isEmpty())
+        {
+            sb.append('\n');
+            dumpList(sb, asList(value), indent + 2);
+        }
+        else
+        {
+            sb.append(' ');
+            appendScalar(sb, value, indent);
+            sb.append('\n');
+        }
+    }
+
+    private static void dumpList(StringBuilder sb, List<Object> list, int indent)
+    {
+        for (Object item : list)
+        {
+            sb.append(spaces(indent)).append("- ");
+            if (item instanceof Map && !asMap(item).isEmpty())
+            {
+                boolean first = true;
+                for (Map.Entry<String, Object> e : asMap(item).entrySet())
+                {
+                    if (!first)
+                        sb.append(spaces(indent + 2));
+                    dumpEntry(sb, e.getKey(), e.getValue(), indent + 2);
+                    first = false;
+                }
+            }
+            else if (item instanceof List && !asList(item).isEmpty())
+            {
+                throw new IllegalArgumentException("nested sequences are not supported");
+            }
+            else
+            {
+                appendScalar(sb, item, indent + 2);
+                sb.append('\n');
+            }
+        }
+    }
+
+    private static void appendScalar(StringBuilder sb, Object value, int indent)
+    {
+        if (value == null)
+            sb.append("null");
+        else if (value instanceof Boolean || value instanceof Number)
+            sb.append(value);
+        else if (value instanceof byte[])
+            sb.append("!!binary ").append(Base64.getEncoder().encodeToString((byte[]) value));
+        else if (value instanceof Map)
+            sb.append("{}");
+        else if (value instanceof List)
+            sb.append("[]");
+        else
+            appendString(sb, String.valueOf(value), indent);
+    }
+
+    /** Picks plain, literal block, or double-quoted style the way {@code serde_saphyr} 0.0.19 does. */
+    private static void appendString(StringBuilder sb, String s, int indent)
+    {
+        if (s.indexOf('\n') >= 0)
+        {
+            String content = s.replaceAll("\n+$", "");
+            if (s.codePointCount(0, s.length()) > FOLDED_WRAP_CHARS || isPlainValueSafe(content.replace('\n', ' ')))
+            {
+                appendLiteral(sb, s, content, indent);
+                return;
+            }
+        }
+        else if (isPlainValueSafe(s))
+        {
+            sb.append(s);
+            return;
+        }
+        appendQuoted(sb, s);
+    }
+
+    private static void appendLiteral(StringBuilder sb, String s, String content, int indent)
+    {
+        int trailingNewlines = s.length() - content.length();
+        sb.append('|');
+        if (content.startsWith(" "))
+            sb.append(indent + 2);
+        sb.append(trailingNewlines == 0 ? "-" : trailingNewlines == 1 ? "" : "+");
+        String pad = spaces(indent + 2);
+        for (String line : content.split("\n", -1))
+        {
+            sb.append('\n').append(pad).append(line);
+        }
+
+        for (int i = 1; i < trailingNewlines; i++)
+        {
+            sb.append('\n').append(pad);
+        }
+    }
+
+    private static void appendQuoted(StringBuilder sb, String s)
+    {
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++)
+        {
+            char c = s.charAt(i);
+            int named = NAMED_ESCAPES.indexOf(c);
+            if (named >= 0)
+                sb.append('\\').append(NAMED_ESCAPE_LETTERS.charAt(named));
+            else if (c == 0xFEFF)
+                sb.append("\\uFEFF");
+            else if (isControl(c))
+                sb.append(String.format("\\x%02X", (int) c));
+            else
+                sb.append(c);
+        }
+
+        sb.append('"');
+    }
+
+    /** Port of {@code serde_saphyr}'s {@code is_plain_value_safe} for a block-context value. */
+    private static boolean isPlainValueSafe(String s)
+    {
+        if (s.isEmpty() || AMBIGUOUS_WORDS.contains(s.toLowerCase()) || s.matches(NUMBER_PATTERN))
+            return false;
+        char first = s.charAt(0);
+        if (Character.isWhitespace(first) && first < 0x80)
+            return false;
+        if ((first == '-' || first == '?') && (s.length() == 1 || (Character.isWhitespace(s.charAt(1)) && s.charAt(1) < 0x80)))
+            return false;
+        if (",:[]{}#&*!|>'\"%@`".indexOf(first) >= 0)
+            return false;
+        if (s.contains(": ") || s.trim().endsWith(":") || s.indexOf('#') >= 0)
+            return false;
+        for (int i = 0; i < s.length(); i++)
+        {
+            if (isControl(s.charAt(i)))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static boolean isControl(char c)
+    {
+        return c < 0x20 || (c >= 0x7F && c <= 0x9F);
+    }
+
+    private static String spaces(int n)
+    {
+        StringBuilder sb = new StringBuilder(n);
+        for (int i = 0; i < n; i++)
+        {
+            sb.append(' ');
+        }
+
+        return sb.toString();
     }
 
     @SuppressWarnings("unchecked")
@@ -185,6 +380,10 @@ public final class SimpleYaml
                     else
                         value = null;
                 }
+                else if (rest.equals("|") || rest.equals("|-") || rest.equals("|+"))
+                {
+                    value = parseBlockScalar(indent, !rest.equals("|-"));
+                }
                 else
                 {
                     value = parseScalar(rest);
@@ -239,6 +438,49 @@ public final class SimpleYaml
                 }
             }
             return list;
+        }
+
+        /** Reads a literal block scalar's lines, all indented past {@code keyIndent}. */
+        private String parseBlockScalar(int keyIndent, boolean keepNewline)
+        {
+            List<String> body = new ArrayList<String>();
+            int blockIndent = -1;
+            while (i < lines.length)
+            {
+                String line = lines[i];
+                if (line.trim().isEmpty())
+                {
+                    body.add("");
+                    i++;
+                    continue;
+                }
+
+                int here = indentOf(line);
+                if (here <= keyIndent || (blockIndent >= 0 && here < blockIndent))
+                    break;
+                if (blockIndent < 0)
+                    blockIndent = here;
+                body.add(line.substring(blockIndent));
+                i++;
+            }
+
+            while (!body.isEmpty() && body.get(body.size() - 1).isEmpty())
+            {
+                body.remove(body.size() - 1);
+            }
+
+            StringBuilder out = new StringBuilder();
+            for (int n = 0; n < body.size(); n++)
+            {
+                if (n > 0)
+                    out.append('\n');
+                out.append(body.get(n));
+            }
+
+            if (keepNewline && !body.isEmpty())
+                out.append('\n');
+
+            return out.toString();
         }
 
         private Object parseInlineOrNull(String rest)
@@ -313,6 +555,8 @@ public final class SimpleYaml
             if ((s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2)
                     || (s.startsWith("'") && s.endsWith("'") && s.length() >= 2))
                 return unescape(s.substring(1, s.length() - 1), s.charAt(0) == '"');
+            if (s.startsWith("!!binary "))
+                return Base64.getMimeDecoder().decode(s.substring("!!binary ".length()).trim());
             if ("true".equals(s) || "True".equals(s) || "TRUE".equals(s))
                 return Boolean.TRUE;
             if ("false".equals(s) || "False".equals(s) || "FALSE".equals(s))
@@ -369,6 +613,49 @@ public final class SimpleYaml
                             break;
                         case '"':
                             out.append('"');
+                            break;
+                        case '0':
+                            out.append('\0');
+                            break;
+                        case 'a':
+                            out.append('\u0007');
+                            break;
+                        case 'b':
+                            out.append('\b');
+                            break;
+                        case 'v':
+                            out.append('\u000b');
+                            break;
+                        case 'f':
+                            out.append('\f');
+                            break;
+                        case 'e':
+                            out.append('\u001b');
+                            break;
+                        case 'N':
+                            out.append('\u0085');
+                            break;
+                        case 'L':
+                            out.append('\u2028');
+                            break;
+                        case 'P':
+                            out.append('\u2029');
+                            break;
+                        case 'x':
+                            out.append((char) Integer.parseInt(s.substring(i + 1, i + 3), 16));
+                            i += 2;
+                            break;
+                        case 'u':
+                            if (i + 4 < s.length())
+                            {
+                                out.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16));
+                                i += 4;
+                            }
+                            else
+                            {
+                                out.append(n);
+                            }
+
                             break;
                         default:
                             out.append(n);

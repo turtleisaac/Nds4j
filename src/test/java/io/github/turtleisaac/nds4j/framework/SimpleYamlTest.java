@@ -9,6 +9,8 @@ package io.github.turtleisaac.nds4j.framework;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -71,5 +73,65 @@ class SimpleYamlTest
         assertThat(SimpleYaml.getString(map, "gamecode", null)).isEqualTo("IPKE");
         assertThat(map.get("arm7_overlays")).isNull();
         assertThat(map.get("empty")).isNull();
+    }
+
+    @Test
+    void dumpMatchesSerdeSaphyrLayout()
+    {
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("makercode", "01");
+        root.put("title", "POKEMON PL");
+        root.put("arm7_overlays", null);
+        Map<String, Object> ov = new LinkedHashMap<String, Object>();
+        ov.put("id", 0);
+        ov.put("compressed", true);
+        root.put("overlays", Arrays.<Object> asList(ov));
+        root.put("bytes", Arrays.<Object> asList(1, 2));
+        Map<String, Object> kind = new LinkedHashMap<String, Object>();
+        kind.put("Unknown", 2);
+        root.put("kind", kind);
+        assertThat(SimpleYaml.dump(root))
+                .isEqualTo("makercode: \"01\"\n"
+                        + "title: POKEMON PL\n"
+                        + "arm7_overlays: null\n"
+                        + "overlays:\n"
+                        + "  - id: 0\n"
+                        + "    compressed: true\n"
+                        + "bytes:\n"
+                        + "  - 1\n"
+                        + "  - 2\n"
+                        + "kind:\n"
+                        + "  Unknown: 2\n");
+    }
+
+    @Test
+    void dumpPicksLiteralBlockOnlyWhenTheJoinedLinesArePlainSafe()
+    {
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("plain", "Pokémon Platinum\nNintendo");
+        root.put("colon", "Animal Crossing: Wild World\nNintendo");
+        String yaml = SimpleYaml.dump(root);
+        assertThat(yaml)
+                .isEqualTo("plain: |-\n"
+                        + "  Pokémon Platinum\n"
+                        + "  Nintendo\n"
+                        + "colon: \"Animal Crossing: Wild World\\nNintendo\"\n");
+        Map<String, Object> back = SimpleYaml.asMap(SimpleYaml.parse(yaml));
+        assertThat(back.get("plain"))
+                .isEqualTo("Pokémon Platinum\nNintendo");
+        assertThat(back.get("colon"))
+                .isEqualTo("Animal Crossing: Wild World\nNintendo");
+    }
+
+    @Test
+    void binaryRoundTrips()
+    {
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("rsa_signature", new byte[] { 1, 2, (byte) 0xFF });
+        String yaml = SimpleYaml.dump(root);
+        assertThat(yaml)
+                .isEqualTo("rsa_signature: !!binary AQL/\n");
+        assertThat((byte[]) SimpleYaml.asMap(SimpleYaml.parse(yaml)).get("rsa_signature"))
+                .containsExactly(1, 2, 0xFF);
     }
 }

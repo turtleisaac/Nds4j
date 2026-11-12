@@ -132,6 +132,9 @@ public class NintendoDsRom
     ArrayList<byte[]> files;
     ArrayList<Integer> sortedFileIDs;
 
+    // Set when the header came from somewhere without a capacity byte (a ds-rom extract), so save() derives it.
+    boolean capacityFromSize;
+
     private static final HashMap<Integer, Integer> ICON_BANNER_LENGTHS = new HashMap<Integer, Integer>() {
         {
             put(0x0001, 0x840);
@@ -700,7 +703,7 @@ public class NintendoDsRom
         // reader falls back to romSizeOrRsaSigOffset when 0x1000 is 0.)
 
         // Now that we know how large the ROM data is, we can update the device capacity value
-        if (updateDeviceCapacity)
+        if (updateDeviceCapacity || capacityFromSize)
         {
             deviceCapacity = (byte) (Math.ceil(Math.log(romSize) / Math.log(2)) - 17);
         }
@@ -873,7 +876,7 @@ public class NintendoDsRom
         secureDisable = new byte[] { 0, 0, 0, 0, 0, 0, 0, 0 };
 
         //0x38 bytes
-        padding_088h = new byte[] { 0x38 };
+        padding_088h = new byte[0x38];
 
         nintendoLogo = new byte[] {
                 (byte) 0x24, (byte) 0xFF, (byte) 0xAE, (byte) 0x51, (byte) 0x69, (byte) 0x9A, (byte) 0xA2,
@@ -1226,6 +1229,12 @@ public class NintendoDsRom
             fileId = y9Buf.reader().readInt();
             BinaryWriter.writeFile(Paths.get(overlayDir.getAbsolutePath(), formatOutputString(i, y9.length / 32, "overlay_", ".bin")), files.get(fileId));
         }
+    }
+
+    /** Writes this rom to {@code dir} in the ds-rom ({@code dsrom extract}) layout instead of the ndstool one. */
+    public void unpackDsRom(File dir) throws IOException
+    {
+        DsRomUnpacked.save(this, dir);
     }
 
     /**
