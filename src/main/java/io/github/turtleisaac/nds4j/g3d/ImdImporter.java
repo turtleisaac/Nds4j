@@ -326,7 +326,7 @@ public final class ImdImporter
         return 0;
     }
 
-    // --- geometry: translate one polygon's primitive commands into GPU commands, NOP-terminate + pad ---
+    // --- geometry: translate one polygon's primitive commands into GPU commands, NOP-terminate ---
     private byte[] buildDisplayList(String polygon)
     {
         List<DisplayList.Command> cmds = new ArrayList<>();
@@ -358,10 +358,10 @@ public final class ImdImporter
             }
         }
         cmds.add(cmd(0x41)); // END_VTXS
-        // Terminate with an all-NOP word, then align to 8 (see DisplayList#terminate for why the word is
-        // required). On every g3dcvtr reference fixture the pre-pad length is 52, so this still yields the
-        // same 56 bytes g3dcvtr emits; it additionally covers lists that are already 8-aligned, where the
-        // old align-only padding added nothing and left the final END_VTXS droppable by strict readers.
+        // The final packed word's top-most command is END_VTXS, which has no parameters, so GBATEK's packing
+        // rule requires one more word after it: terminate() appends exactly one all-zero word, as g3dcvtr does
+        // (see DisplayList#terminate). On every checked-in g3dcvtr fixture this yields the same 56 bytes.
+        // Only the first <primitive> is read, so END_VTXS never appears mid-list here.
         return DisplayList.terminate(DisplayList.encodeCommands(cmds));
     }
 

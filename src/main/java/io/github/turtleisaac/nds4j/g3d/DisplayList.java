@@ -175,7 +175,7 @@ public final class DisplayList
      * @param positions raw vertex positions (x,y,z triples), in the VTX_16 fixed-point range
      * @param texcoords texcoords (s,t pairs) in texel units, or null for zero UVs
      * @param triangles triangle indices, 3 per triangle, into the vertex arrays
-     * @return the encoded display-list bytes, NOP-terminated and 8-byte aligned (see {@link #terminate})
+     * @return the encoded display-list bytes, terminated by one all-zero word (see {@link #terminate})
      */
     public static byte[] encode(float[] positions, float[] texcoords, int[] triangles)
     {
@@ -197,24 +197,35 @@ public final class DisplayList
     }
 
     /**
-     * Terminates an authored display list the way {@code g3dcvtr} does: one all-{@code NOP} command word
-     * appended after the last meaningful command, then zero-padding to a multiple of 8 bytes.
+     * Terminates an authored display list the way {@code g3dcvtr} does: exactly one all-zero word appended
+     * after the last meaningful command, and nothing else.
      * <p>
-     * The trailing word is not cosmetic. Several third-party readers in the {@code LibNDSFormats} lineage
-     * (DSPRE's model renderer among them) walk the stream as
-     * {@code for (i = 0; i < 4 && ptr < limit; i++)} &mdash; the bounds check is re-tested <em>before each
-     * of the four opcodes in a word</em>, so a list whose final operand ends exactly at {@code limit}
-     * silently loses the remaining opcodes of that last word. For a list ending in {@code END_VTXS} that
-     * drops the {@code glEnd()}, leaving the primitive open and the mesh mis-rendered. Padding guarantees
-     * the last real command is always followed by at least one word, so it is always executed.
+     * <b>Why the word exists.</b> GBATEK's GXFIFO packed-command rules state that the <em>top-most packed
+     * command MUST have parameters</em>. {@code END_VTXS} has none, so a packed word whose top-most command is
+     * {@code END_VTXS} &mdash; which the last word of every list is &mdash; must be followed by one more word.
+     * {@code g3dcvtr} applies this everywhere, not only at the end: across ~1.4M packed words in retail ROMs
+     * (Gen IV/V Pok&eacute;mon, Mario Kart DS, Phantom Hourglass, Animal Crossing: Wild World), every word
+     * whose top-most command takes no parameters is followed by an all-zero word, mid-list (~51k times) as
+     * well as at the end, and never directly by another opcode word. The zero word is safe under either
+     * reading of it (dummy parameter, or a word of four {@code NOP}s). GBATEK does not document the
+     * failure mode; melonDS does not enforce the rule, so emulator testing will not catch a violation.
+     * <p>
+     * <b>No alignment.</b> The trailing padding on retail lists is always exactly 4 bytes; about half of them
+     * have a length &equiv; 4 (mod 8), including lists that were already 8-aligned before the word was added.
+     * <p>
+     * <b>Side effect.</b> The word also keeps strict third-party readers in the {@code LibNDSFormats} lineage
+     * (DSPRE, SDSME, VS-Maker, ...) working: they re-test {@code ptr < limit} before <em>each</em> opcode in a
+     * word, so without a following word they skip a final {@code END_VTXS} and drop that primitive's faces.
+     * <p>
+     * Every list Nds4j authors has a single primitive whose {@code END_VTXS} is the last command, so the rule
+     * is needed only at the end. An encoder emitting several primitives per list must also insert a zero word
+     * after any <em>mid-list</em> word whose top-most command is {@code END_VTXS}.
      * @param dl the display-list bytes, ending with its last meaningful command
-     * @return {@code dl} with the terminating NOP word and 8-byte alignment padding
+     * @return {@code dl} followed by one all-zero word
      */
     static byte[] terminate(byte[] dl)
     {
-        int len = dl.length + 4;              // the all-NOP command word
-        len += (8 - len % 8) % 8;             // then align to 8, as g3dcvtr's lists are
-        return java.util.Arrays.copyOf(dl, len);
+        return java.util.Arrays.copyOf(dl, dl.length + 4);
     }
 
     /**

@@ -30,30 +30,29 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Every authored display list must survive a <b>strict</b> third-party reader &mdash; the
- * {@code LibNDSFormats} walker used by DSPRE's model renderer and its relatives, which re-tests its bounds
- * check <em>before each of the four opcodes in a command word</em>:
- * <pre>{@code for (i = 0; i < 4 && commandptr < commandlimit; i++) { switch (command[i]) { ... } }}</pre>
- * A list whose final operand ends exactly at the buffer limit therefore loses the remaining opcodes of its
- * last word. When the lost opcode is {@code END_VTXS} the reader's {@code glEnd()} never runs, the primitive
- * is left open and the mesh mis-renders &mdash; the failure mode that makes an otherwise valid NSBMD
- * "not importable" in those tools.
+ * Authored display lists must follow the GXFIFO packing rule that the <em>top-most packed command must have
+ * parameters</em> (GBATEK): since {@code END_VTXS} has none, the packed word that ends a list must be followed
+ * by one all-zero word, exactly as {@code g3dcvtr} does (see {@link DisplayList#terminate}).
  * <p>
- * {@link DisplayList#terminate} prevents it by appending an all-{@code NOP} word. These tests pin that
- * behaviour for both authoring front doors, and confirm the real {@code g3dcvtr} fixtures already satisfy it.
+ * The check used here is a strict third-party reader: the {@code LibNDSFormats} walker used by DSPRE's model
+ * renderer and its relatives, which re-tests its bounds check <em>before each of the four opcodes in a word</em>:
+ * <pre>{@code for (i = 0; i < 4 && commandptr < commandlimit; i++) { switch (command[i]) { ... } }}</pre>
+ * Without the trailing word that reader skips the final {@code END_VTXS}, so its {@code glEnd()} never runs
+ * and the primitive's faces are never collected. These tests pin the behaviour for both authoring front
+ * doors and confirm the real {@code g3dcvtr} fixtures already satisfy it.
  */
-@DisplayName("Display-list termination (strict third-party readers)")
+@DisplayName("Display-list termination (GXFIFO packing rule)")
 public class DisplayListTerminationTest
 {
     /**
      * The LibNDSFormats/DSPRE command walker, ported faithfully (including its mid-word bounds check).
-     * @return true if an {@code END_VTXS} opcode was actually reached and executed
+     * @return the number of {@code END_VTXS} opcodes actually reached and executed
      */
-    private static boolean strictReaderReachesEndVtxs(byte[] polydata)
+    static int strictReaderEndVtxsCount(byte[] polydata)
     {
         int commandptr = 0, limit = polydata.length;
         int[] command = new int[4];
-        boolean sawEnd = false;
+        int ends = 0;
         while (commandptr < limit)
         {
             for (int i = 0; i < 4; ++i)
@@ -61,12 +60,61 @@ public class DisplayListTerminationTest
             for (int i = 0; i < 4 && commandptr < limit; i++)
             {
                 if (command[i] == 0x41)
-                    sawEnd = true;
+                    ends++;
                 if (command[i] != 0xFF)
                     commandptr += 4 * DisplayList.operandWords(command[i]);
             }
         }
-        return sawEnd;
+        return ends;
+    }
+
+    private static boolean strictReaderReachesEndVtxs(byte[] polydata)
+    {
+        return strictReaderEndVtxsCount(polydata) > 0;
+    }
+
+    /**
+     * Walks the packed opcode words of a display list and checks GBATEK's rule that the top-most packed
+     * command must have parameters, in {@code g3dcvtr}'s form: a word whose top-most non-NOP command takes no
+     * parameters must be followed by an all-zero word.
+     * @return {violations, words that needed the zero word and had it mid-list, ... at the end of the list}
+     */
+    static int[] topMostRule(byte[] dl)
+    {
+        int violations = 0, midList = 0, atEnd = 0, pos = 0;
+        while (pos + 4 <= dl.length)
+        {
+            int top = -1;
+            int[] ops = {dl[pos] & 0xFF, dl[pos + 1] & 0xFF, dl[pos + 2] & 0xFF, dl[pos + 3] & 0xFF};
+            pos += 4;
+            for (int i = 0; i < 4; i++)
+            {
+                pos += 4 * Math.max(0, DisplayList.operandWords(ops[i]));
+                if (ops[i] != 0)
+                    top = ops[i];
+            }
+            if (top < 0 || DisplayList.operandWords(top) > 0)
+                continue;
+            boolean zeroFollows = pos + 4 <= dl.length
+                    && dl[pos] == 0 && dl[pos + 1] == 0 && dl[pos + 2] == 0 && dl[pos + 3] == 0;
+            if (!zeroFollows)
+                violations++;
+            else if (pos + 4 >= dl.length)
+                atEnd++;
+            else
+                midList++;
+        }
+        return new int[]{violations, midList, atEnd};
+    }
+
+    /** the list length with trailing NOP commands stripped, i.e. what an encoder had before terminating */
+    static int unterminatedLength(byte[] dl)
+    {
+        java.util.List<DisplayList.Command> cmds = DisplayList.decodeCommands(dl);
+        int n = cmds.size();
+        while (n > 0 && cmds.get(n - 1).opcode == 0) // NOP
+            n--;
+        return DisplayList.encodeCommands(cmds.subList(0, n)).length;
     }
 
     private static byte[] resource(String name)
@@ -99,24 +147,48 @@ public class DisplayListTerminationTest
 
     @ParameterizedTest(name = "{0} triangle(s)")
     @ValueSource(ints = {1, 2, 3, 4, 5, 8, 17})
-    @DisplayName("DisplayList.encode output is NOP-terminated, 8-aligned, and readable by a strict reader")
+    @DisplayName("DisplayList.encode output ends with exactly one NOP word and is readable by a strict reader")
     void encodeIsTerminated(int triangles)
     {
         byte[] dl = DisplayList.encode(triangleFan(triangles), null, sequentialIndices(triangles));
 
-        assertThat(dl.length % 8)
-                .as("%d-triangle display list is 8-byte aligned", triangles)
-                .isZero();
+        assertThat(dl.length - unterminatedLength(dl))
+                .as("%d-triangle display list carries exactly one NOP word of padding, no alignment", triangles)
+                .isEqualTo(4);
         assertThat(new byte[]{dl[dl.length - 4], dl[dl.length - 3], dl[dl.length - 2], dl[dl.length - 1]})
                 .as("%d-triangle display list ends with an all-NOP command word", triangles)
                 .containsOnly((byte) 0);
         assertThat(strictReaderReachesEndVtxs(dl))
                 .as("a strict LibNDSFormats-style reader still executes END_VTXS for %d triangle(s)", triangles)
                 .isTrue();
+        assertThat(topMostRule(dl)[0])
+                .as("%d-triangle display list follows the top-most-command packing rule", triangles)
+                .isZero();
         // termination must not disturb the geometry the encoder promises
         assertThat(DisplayList.decode(dl).triangles.length)
                 .as("termination padding does not change decoded geometry")
                 .isEqualTo(triangles * 3);
+    }
+
+    @Test
+    @DisplayName("the checks reject a list that breaks the rule, at the end or mid-list")
+    void checksCatchViolations()
+    {
+        DisplayList.Command begin = new DisplayList.Command(0x40, new int[]{0});
+        DisplayList.Command vtx = new DisplayList.Command(0x25, new int[]{0});
+        DisplayList.Command end = new DisplayList.Command(0x41, new int[0]);
+
+        // BEGIN, VTX_XY x2, END in one word: END is top-most and nothing follows it
+        byte[] unterminated = DisplayList.encodeCommands(java.util.List.of(begin, vtx, vtx, end));
+        assertThat(topMostRule(unterminated)[0]).as("unterminated list breaks the rule").isEqualTo(1);
+        assertThat(strictReaderReachesEndVtxs(unterminated)).as("strict reader skips its END_VTXS").isFalse();
+        assertThat(topMostRule(DisplayList.terminate(unterminated))).containsExactly(0, 0, 1);
+
+        // two primitives back to back: the first word's top-most END is followed directly by the next opcode word
+        java.util.List<DisplayList.Command> two = java.util.List.of(begin, vtx, vtx, end, begin, vtx, vtx, end);
+        assertThat(topMostRule(DisplayList.terminate(DisplayList.encodeCommands(two)))[0])
+                .as("a mid-list END_VTXS without a following zero word breaks the rule")
+                .isEqualTo(1);
     }
 
     @Test
@@ -140,11 +212,14 @@ public class DisplayListTerminationTest
         byte[] dl = set.getModels().get(0).getMeshes().get(0).getRawDisplayList();
 
         assertThat(dl.length)
-                .as("the unterminated stream is 24 bytes (already 8-aligned), so a NOP word must still follow")
-                .isGreaterThan(24);
+                .as("the unterminated stream is 24 bytes (already 8-aligned); exactly one NOP word still follows")
+                .isEqualTo(28);
         assertThat(strictReaderReachesEndVtxs(dl))
                 .as("a strict reader executes END_VTXS for an already-aligned .imd display list")
                 .isTrue();
+        assertThat(topMostRule(dl)[0])
+                .as("an already-aligned .imd display list follows the top-most-command packing rule")
+                .isZero();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -156,8 +231,14 @@ public class DisplayListTerminationTest
         ModelSet set = new ModelSet(resource(fixture));
         for (Model model : set.getModels())
             for (Model.Mesh mesh : model.getMeshes())
+            {
                 assertThat(strictReaderReachesEndVtxs(mesh.getRawDisplayList()))
                         .as("g3dcvtr's %s/%s display list executes END_VTXS", model.getName(), mesh.getName())
                         .isTrue();
+                assertThat(topMostRule(mesh.getRawDisplayList())[0])
+                        .as("g3dcvtr's %s/%s display list follows the top-most-command packing rule",
+                                model.getName(), mesh.getName())
+                        .isZero();
+            }
     }
 }

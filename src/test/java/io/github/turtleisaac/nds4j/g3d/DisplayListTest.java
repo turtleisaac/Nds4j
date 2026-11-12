@@ -129,7 +129,7 @@ public class DisplayListTest
     @DisplayName("the command codec round-trips every retail display list byte-for-byte")
     void commandCodecIsByteExact()
     {
-        int meshes = 0, commands = 0;
+        int meshes = 0, commands = 0, notEightAligned = 0, alignedBeforeTermination = 0, midListZeroWords = 0;
         for (String romName : new String[]{"Platinum.nds", "HeartGold.nds", "Diamond.nds"})
         {
             NintendoDsRom rom;
@@ -160,12 +160,43 @@ public class DisplayListTest
                                     .isEqualTo(dl);
                             commands += cmds.size();
                             meshes++;
+
+                            // GBATEK: the top-most packed command must have parameters. g3dcvtr satisfies it by
+                            // following every word whose top-most command is parameterless with a zero word,
+                            // mid-list as well as at the end
+                            int[] rule = DisplayListTerminationTest.topMostRule(dl);
+                            assertThat(rule[0])
+                                    .as("retail display list of %s follows the top-most-command packing rule",
+                                            mesh.getName())
+                                    .isZero();
+                            midListZeroWords += rule[1];
+
+                            // its end-of-list case, which DisplayList#terminate reproduces: exactly one zero word
+                            // after the last real command, never any further alignment padding
+                            int core = DisplayListTerminationTest.unterminatedLength(dl);
+                            assertThat(dl.length - core)
+                                    .as("retail display list of %s ends with exactly one NOP word", mesh.getName())
+                                    .isEqualTo(4);
+                            if (dl.length % 8 != 0) notEightAligned++;
+                            if (core % 8 == 0) alignedBeforeTermination++;
+                            // ...which is what keeps strict LibNDSFormats-style readers executing every END_VTXS
+                            long ends = cmds.stream().filter(c -> c.opcode == 0x41).count();
+                            assertThat(DisplayListTerminationTest.strictReaderEndVtxsCount(dl))
+                                    .as("a strict reader executes every END_VTXS in %s", mesh.getName())
+                                    .isEqualTo((int) ends);
                         }
                 }
             }
         }
         Assumptions.assumeTrue(meshes > 0, "need retail meshes");
-        System.out.printf("DisplayList command codec: %d meshes byte-exact, %d commands%n", meshes, commands);
+        System.out.printf("DisplayList command codec: %d meshes byte-exact, %d commands; %d not 8-aligned, "
+                + "%d NOP-terminated although already 8-aligned, %d mid-list zero words%n", meshes, commands,
+                notEightAligned, alignedBeforeTermination, midListZeroWords);
         assertThat(meshes).isGreaterThan(1000);
+        // evidence that the NOP word is deliberate and there is no align-to-8 step on top of it
+        assertThat(notEightAligned).as("retail lists whose length is not a multiple of 8").isPositive();
+        assertThat(alignedBeforeTermination).as("retail lists terminated although already 8-aligned").isPositive();
+        // evidence that the zero word is the packing rule, not only an end-of-list convention
+        assertThat(midListZeroWords).as("mid-list zero words after a parameterless top-most command").isPositive();
     }
 }
