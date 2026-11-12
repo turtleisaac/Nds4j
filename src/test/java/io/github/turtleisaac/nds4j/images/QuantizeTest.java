@@ -29,7 +29,8 @@ class QuantizeTest
     private static Palette pal16(Color... first)
     {
         Color[] c = new Color[16];
-        for (int i = 0; i < 16; i++) c[i] = i < first.length ? first[i] : Color.BLACK;
+        for (int i = 0; i < 16; i++)
+            c[i] = i < first.length ? first[i] : Color.BLACK;
         return new Palette(c);
     }
 
@@ -61,16 +62,17 @@ class QuantizeTest
         Palette pal = pal16(Color.MAGENTA, Color.RED);
         IndexedImage img = new IndexedImage(8, 8, 4, pal);
         BufferedImage src = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
-        src.setRGB(0, 0, 0x00000000);            // fully transparent -> index 0
+        src.setRGB(0, 0, 0x00000000); // fully transparent -> index 0
         src.setRGB(1, 0, new Color(250, 5, 5).getRGB()); // near-red, not exact -> matches red, counts as miss
         for (int y = 0; y < 8; y++)
             for (int x = 0; x < 8; x++)
-                if (!((x == 0 || x == 1) && y == 0)) src.setRGB(x, y, Color.RED.getRGB());
+                if (!((x == 0 || x == 1) && y == 0))
+                    src.setRGB(x, y, Color.RED.getRGB());
 
         int unmatched = img.applyImageMatched(src);
         assertThat(img.getPixelValue(0, 0)).isEqualTo(0); // transparent
         assertThat(img.getPixelValue(1, 0)).isEqualTo(1); // nearest = red
-        assertThat(unmatched).isEqualTo(1);               // only the near-red pixel missed
+        assertThat(unmatched).isEqualTo(1); // only the near-red pixel missed
     }
 
     @Test
@@ -79,8 +81,54 @@ class QuantizeTest
     {
         IndexedImage img = new IndexedImage(8, 8, 4, pal16(Color.RED));
         BufferedImage wrong = new BufferedImage(16, 8, BufferedImage.TYPE_INT_ARGB);
-        try { img.applyImageMatched(wrong); assertThat(false).isTrue(); }
-        catch (RuntimeException e) { assertThat(e.getMessage()).contains("must match"); }
+        try
+        {
+            img.applyImageMatched(wrong);
+            assertThat(false).isTrue();
+        }
+        catch (RuntimeException e)
+        {
+            assertThat(e.getMessage()).contains("must match");
+        }
+    }
+
+    @Test
+    @DisplayName("applyImageMatched keeps each pixel's index when the palette repeats its color")
+    void matchedKeepsDuplicateIndex()
+    {
+        Color grey = new Color(80, 80, 80);
+        Palette pal = pal16(Color.MAGENTA, Color.RED, Color.GREEN, grey, Color.BLUE, Color.YELLOW, Color.CYAN, grey);
+        IndexedImage img = new IndexedImage(8, 8, 4, pal);
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                img.setPixelValue(x, y, x < 4 ? 3 : 7);
+            }
+        }
+
+        img.setPixelValue(0, 7, 5);
+
+        BufferedImage src = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                src.setRGB(x, y, grey.getRGB());
+            }
+        }
+
+        int unmatched = img.applyImageMatched(src);
+
+        assertThat(unmatched)
+                .isEqualTo(0);
+        assertThat(img.getPixelValue(1, 1))
+                .isEqualTo(3);
+        assertThat(img.getPixelValue(6, 1))
+                .isEqualTo(7);
+        assertThat(img.getPixelValue(0, 7))
+                .as("a repainted pixel takes the first matching index")
+                .isEqualTo(3);
     }
 
     @Test
@@ -98,8 +146,8 @@ class QuantizeTest
 
         Palette built = img.applyImageQuantized(src, 16);
         assertThat(built.getColors()).hasSize(16);
-        assertThat(img.getPixelValue(0, 0)).isEqualTo(0);            // transparent -> 0
-        assertThat(img.getPixelValue(2, 0)).isGreaterThan(0);        // an opaque hue -> non-zero slot
+        assertThat(img.getPixelValue(0, 0)).isEqualTo(0); // transparent -> 0
+        assertThat(img.getPixelValue(2, 0)).isGreaterThan(0); // an opaque hue -> non-zero slot
         // distinct hues should not all collapse to one index
         assertThat(img.getPixelValue(0, 2)).isNotEqualTo(img.getPixelValue(6, 2));
         assertThat(img.save()).isNotEmpty();

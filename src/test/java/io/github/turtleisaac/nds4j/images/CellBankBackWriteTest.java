@@ -42,7 +42,10 @@ public class CellBankBackWriteTest
     private static NintendoDsRom rom;
 
     @BeforeAll
-    static void loadRom() { rom = TestRoms.require("HeartGold.nds"); }
+    static void loadRom()
+    {
+        rom = TestRoms.require("HeartGold.nds");
+    }
 
     private static String magic(byte[] d)
     {
@@ -52,7 +55,8 @@ public class CellBankBackWriteTest
     private static int indexOf(Narc narc, String m)
     {
         for (int i = 0; i < narc.getNumFiles(); i++)
-            if (magic(narc.getFile(i)).equals(m)) return i;
+            if (magic(narc.getFile(i)).equals(m))
+                return i;
         return -1;
     }
 
@@ -63,12 +67,21 @@ public class CellBankBackWriteTest
         boolean exercised = false;
         for (int f = 0; f < rom.getNumFiles() && !exercised; f++)
         {
-            if (!magic(rom.getFile(f)).equals("NARC")) continue;
+            if (!magic(rom.getFile(f)).equals("NARC"))
+                continue;
             Narc narc;
-            try { narc = new Narc(rom.getFile(f)); } catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(rom.getFile(f));
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
 
             int ncerI = indexOf(narc, "RECN"), ncgrI = indexOf(narc, "RGCN"), nclrI = indexOf(narc, "RLCN");
-            if (ncerI < 0 || ncgrI < 0 || nclrI < 0) continue;
+            if (ncerI < 0 || ncgrI < 0 || nclrI < 0)
+                continue;
 
             IndexedImage ncgr;
             Palette palette;
@@ -81,16 +94,24 @@ public class CellBankBackWriteTest
                 bank = new CellBank(narc.getFile(ncerI));
                 bank.setParentImage(ncgr); // throws for scanned NCGRs — skip those bundles
             }
-            catch (RuntimeException e) { continue; }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
 
             // Find a cell that actually composes to something.
             int cellIndex = -1;
             for (int c = 0; c < bank.getNumCells(); c++)
             {
                 java.awt.Rectangle b = bank.getCellBounds(c);
-                if (b.width > 0 && b.height > 0) { cellIndex = c; break; }
+                if (b.width > 0 && b.height > 0)
+                {
+                    cellIndex = c;
+                    break;
+                }
             }
-            if (cellIndex < 0) continue;
+            if (cellIndex < 0)
+                continue;
 
             BufferedImage rendered = bank.getNcerImage(cellIndex);
             CellBank.ImportResult res = bank.applyImage(cellIndex, rendered, ncgr, palette);
@@ -126,11 +147,20 @@ public class CellBankBackWriteTest
         boolean exercised = false;
         for (int f = 0; f < rom.getNumFiles() && !exercised; f++)
         {
-            if (!magic(rom.getFile(f)).equals("NARC")) continue;
+            if (!magic(rom.getFile(f)).equals("NARC"))
+                continue;
             Narc narc;
-            try { narc = new Narc(rom.getFile(f)); } catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(rom.getFile(f));
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             int ncerI = indexOf(narc, "RECN"), ncgrI = indexOf(narc, "RGCN"), nclrI = indexOf(narc, "RLCN");
-            if (ncerI < 0 || ncgrI < 0 || nclrI < 0) continue;
+            if (ncerI < 0 || ncgrI < 0 || nclrI < 0)
+                continue;
 
             IndexedImage ncgr;
             Palette palette;
@@ -143,15 +173,23 @@ public class CellBankBackWriteTest
                 bank = new CellBank(narc.getFile(ncerI));
                 bank.setParentImage(ncgr);
             }
-            catch (RuntimeException e) { continue; }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
 
             int cellIndex = -1;
             for (int c = 0; c < bank.getNumCells(); c++)
             {
                 java.awt.Rectangle b = bank.getCellBounds(c);
-                if (b.width > 0 && b.height > 0) { cellIndex = c; break; }
+                if (b.width > 0 && b.height > 0)
+                {
+                    cellIndex = c;
+                    break;
+                }
             }
-            if (cellIndex < 0) continue;
+            if (cellIndex < 0)
+                continue;
 
             // Transparent render: index-0 pixels are transparent, so the rebuild (which reserves slot 0)
             // round-trips exactly — opaque colors come back, transparent pixels stay transparent.
@@ -166,11 +204,100 @@ public class CellBankBackWriteTest
                 {
                     int a = rendered.getRGB(x, y), b = again.getRGB(x, y);
                     boolean aT = (a >>> 24) == 0, bT = (b >>> 24) == 0;
-                    if (aT || bT) assertThat(bT).as("transparency at (%d,%d)", x, y).isEqualTo(aT);
-                    else assertThat(b & 0xFFFFFF).as("color at (%d,%d)", x, y).isEqualTo(a & 0xFFFFFF);
+                    if (aT || bT)
+                        assertThat(bT).as("transparency at (%d,%d)", x, y).isEqualTo(aT);
+                    else
+                        assertThat(b & 0xFFFFFF).as("color at (%d,%d)", x, y).isEqualTo(a & 0xFFFFFF);
                 }
             exercised = true;
         }
         Assumptions.assumeTrue(exercised, "no loadable NCER+NCGR+NCLR bundle found in the test ROM");
+    }
+
+    @Test
+    @DisplayName("an unchanged single-OAM cell re-import leaves the NCGR bytes identical, duplicate colors included")
+    void unchangedCellKeepsIndices()
+    {
+        int checked = 0;
+        for (int f = 0; f < rom.getNumFiles(); f++)
+        {
+            Bundle bundle = Bundle.load(rom.getFile(f));
+            if (bundle == null)
+                continue;
+
+            for (int c = 0; c < bundle.bank.getNumCells(); c++)
+            {
+                java.awt.Rectangle b = bundle.bank.getCellBounds(c);
+                if (b.width <= 0 || b.height <= 0 || bundle.bank.getCell(c).getOams().length != 1)
+                    continue;
+
+                BufferedImage rendered = bundle.render(c);
+                if (rendered == null)
+                    continue;
+
+                byte[] before = bundle.ncgr.save();
+                bundle.bank.applyImage(c, rendered, bundle.ncgr, bundle.palette);
+
+                assertThat(bundle.ncgr.save())
+                        .as("file %d cell %d", f, c)
+                        .isEqualTo(before);
+                checked++;
+            }
+        }
+
+        Assumptions.assumeTrue(checked > 0, "no single-OAM cell found in the test ROM");
+    }
+
+    /** The first NCER, NCGR and NCLR of a NARC, wired together. */
+    private static final class Bundle
+    {
+        IndexedImage ncgr;
+        Palette palette;
+        CellBank bank;
+
+        /** Renders a cell, or returns null when its OAMs point past the NCGR's tiles. */
+        BufferedImage render(int cell)
+        {
+            try
+            {
+                return bank.getNcerImage(cell);
+            }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
+        }
+
+        /** Loads the bundle from a ROM file, or returns null when it is not a usable NARC. */
+        static Bundle load(byte[] file)
+        {
+            if (!magic(file).equals("NARC"))
+                return null;
+
+            try
+            {
+                Narc narc = new Narc(file);
+                int ncerI = indexOf(narc, "RECN");
+                int ncgrI = indexOf(narc, "RGCN");
+                int nclrI = indexOf(narc, "RLCN");
+                if (ncerI < 0 || ncgrI < 0 || nclrI < 0)
+                    return null;
+
+                Bundle bundle = new Bundle();
+                bundle.ncgr = new IndexedImage(narc.getFile(ncgrI), 0, 0, 1, 1, true);
+                bundle.palette = new Palette(narc.getFile(nclrI), 0);
+                bundle.ncgr.setPalette(bundle.palette);
+                bundle.bank = new CellBank(narc.getFile(ncerI));
+                bundle.bank.setParentImage(bundle.ncgr);
+                if (bundle.ncgr.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
+                    return null;
+
+                return bundle;
+            }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
+        }
     }
 }

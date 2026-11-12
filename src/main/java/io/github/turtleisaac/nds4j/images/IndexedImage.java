@@ -145,7 +145,8 @@ public class IndexedImage extends GenericNtrFile
         //character data
         String charMagic = reader.readString(4);
 
-        if (!charMagic.equals("RAHC")) {
+        if (!charMagic.equals("RAHC"))
+        {
             throw new RuntimeException("Not a valid NCGR file.");
         }
 
@@ -167,7 +168,7 @@ public class IndexedImage extends GenericNtrFile
         //0x1C
         if (bitDepth == 0)
         {
-            bitDepth = reader.readInt() == 3 ? 4 : 8;  //4bpp if == 3, 8bpp if == 4
+            bitDepth = reader.readInt() == 3 ? 4 : 8; //4bpp if == 3, 8bpp if == 4
         }
         else
         {
@@ -185,7 +186,8 @@ public class IndexedImage extends GenericNtrFile
 
         this.mappingType = reader.readUInt16(); // 0x22
 
-        switch(mappingType) {
+        switch (mappingType)
+        {
             case 0:
                 mappingType = 32;
                 break;
@@ -213,8 +215,8 @@ public class IndexedImage extends GenericNtrFile
         //   A census of all 57,705 retail NCGRs saw only 0/1/256 (never 0x101), i.e. one bit set at a time.
         //   All bits round-trip byte-exact via lineBuffer (bit 0) + vram (bit 8) + the always-zero upper bytes.
         boolean lineBuffer = reader.readByte() == 1; // 0x24 (flags bit 0)
-        this.vram = reader.readByte() == 1;          // 0x25 (flags bit 8)
-        reader.skip(2);                              // 0x26-0x27 (always 0 in the retail corpus)
+        this.vram = reader.readByte() == 1; // 0x25 (flags bit 8)
+        reader.skip(2); // 0x26-0x27 (always 0 in the retail corpus)
 
         this.scanMode = NcgrUtils.ScanMode.getMode(lineBuffer, scanFrontToBack);
 
@@ -451,7 +453,7 @@ public class IndexedImage extends GenericNtrFile
         }
         else
         {
-            bufferedImage = new BufferedImage(image.getWidth(null),image.getHeight(null),BufferedImage.TYPE_INT_RGB);
+            bufferedImage = new BufferedImage(image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_RGB);
             Graphics2D bGr = bufferedImage.createGraphics();
             bGr.drawImage(image, 0, 0, null);
             bGr.dispose();
@@ -462,7 +464,7 @@ public class IndexedImage extends GenericNtrFile
         {
             for (int col = 0; col < bufferedImage.getWidth(); col++)
             {
-                Color color = new Color(bufferedImage.getRGB(col,row));
+                Color color = new Color(bufferedImage.getRGB(col, row));
                 if (!colorList.contains(color))
                     colorList.add(color);
             }
@@ -490,7 +492,7 @@ public class IndexedImage extends GenericNtrFile
         {
             for (int col = 0; col < width; col++)
             {
-                pixels[row][col] = colorList.indexOf(new Color(bufferedImage.getRGB(col,row)));
+                pixels[row][col] = colorList.indexOf(new Color(bufferedImage.getRGB(col, row)));
             }
         }
 
@@ -623,9 +625,11 @@ public class IndexedImage extends GenericNtrFile
         writer.writeByte((byte) (bitDepth == 4 ? 3 : 4));
 
         writer.setPosition(NcgrUtils.charHeaderPos + 18);
-        if (mappingType != 0) {
+        if (mappingType != 0)
+        {
             short val = 0;
-            switch (mappingType) {
+            switch (mappingType)
+            {
                 case 32:
                     break;
                 case 64:
@@ -684,9 +688,9 @@ public class IndexedImage extends GenericNtrFile
             int endPos = writer.getPosition(); // getBuffer() returns up to the writer position, so seek back after
             writer.setPosition(NcgrUtils.charHeaderPos + 8);
             writer.writeShort((short) srcCharHeightField); // 0x18
-            writer.writeShort((short) srcCharWidthField);  // 0x1A
+            writer.writeShort((short) srcCharWidthField); // 0x1A
             writer.setPosition(NcgrUtils.charHeaderPos + 16);
-            writer.writeShort((short) srcUnspecifiedSizeFlag);     // 0x20
+            writer.writeShort((short) srcUnspecifiedSizeFlag); // 0x20
             writer.setPosition(endPos);
         }
 
@@ -715,7 +719,6 @@ public class IndexedImage extends GenericNtrFile
 
 
 
-
     /**
      * Creates a <code>BufferedImage</code> using this <code>IndexedImage</code>
      * @return a <code>BufferedImage</code> representation of this <code>IndexedImage</code>
@@ -724,12 +727,12 @@ public class IndexedImage extends GenericNtrFile
     {
         if (update)
         {
-            storedImage = new BufferedImage(width, height,BufferedImage.TYPE_INT_RGB);
+            storedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             for (int row = 0; row < height; row++)
             {
                 for (int col = 0; col < width; col++)
                 {
-                    storedImage.setRGB(col,row,palette.getColor(getPixelValue(col, row), paletteIdx).getRGB());
+                    storedImage.setRGB(col, row, palette.getColor(getPixelValue(col, row), paletteIdx).getRGB());
                 }
             }
             update = false;
@@ -744,13 +747,13 @@ public class IndexedImage extends GenericNtrFile
      */
     public BufferedImage getTransparentImage()
     {
-        BufferedImage ret = new BufferedImage(width, height,BufferedImage.TYPE_INT_ARGB);
+        BufferedImage ret = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         for (int row = 0; row < height; row++)
         {
             for (int col = 0; col < width; col++)
             {
                 if (pixels[row][col] != 0)
-                    ret.setRGB(col,row,palette.getColor(pixels[row][col], paletteIdx).getRGB());
+                    ret.setRGB(col, row, palette.getColor(pixels[row][col], paletteIdx).getRGB());
             }
         }
 
@@ -817,12 +820,12 @@ public class IndexedImage extends GenericNtrFile
     @Deprecated
     public BufferedImage getResizedImage()
     {
-        BufferedImage image = new BufferedImage(width, height,BufferedImage.TYPE_INT_RGB);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         for (int row = 0; row < height; row++)
         {
             for (int col = 0; col < width; col++)
             {
-                image.setRGB(col,row,palette.getColor(pixels[row][col]).getRGB());
+                image.setRGB(col, row, palette.getColor(pixels[row][col]).getRGB());
             }
         }
 
@@ -836,13 +839,13 @@ public class IndexedImage extends GenericNtrFile
     @Deprecated
     public BufferedImage getResizedImage(int newWidth, int newHeight)
     {
-        BufferedImage image = new BufferedImage(width, height,BufferedImage.TYPE_INT_RGB);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
 
         for (int row = 0; row < height; row++)
         {
             for (int col = 0; col < width; col++)
             {
-                image.setRGB(col,row,palette.getColor(pixels[row][col]).getRGB());
+                image.setRGB(col, row, palette.getColor(pixels[row][col]).getRGB());
             }
         }
 
@@ -856,7 +859,7 @@ public class IndexedImage extends GenericNtrFile
     @Deprecated
     public IndexedImage indexSelf(JPanel parent)
     {
-        IndexedImage newSprite = new IndexedImage(getImage(),parent);
+        IndexedImage newSprite = new IndexedImage(getImage(), parent);
         pixels = newSprite.getPixels();
         setPalette(newSprite.getPalette());
         return this;
@@ -934,7 +937,7 @@ public class IndexedImage extends GenericNtrFile
     {
         indexSelf(parent);
 
-        ArrayList<Color> colorGuideList= new ArrayList<>(Arrays.asList(paletteGuide));
+        ArrayList<Color> colorGuideList = new ArrayList<>(Arrays.asList(paletteGuide));
 
         for (int i = 0; i < palette.size(); i++)
         {
@@ -971,8 +974,9 @@ public class IndexedImage extends GenericNtrFile
     /**
      * Overwrite this image's pixels by matching every pixel of {@code src} to the nearest color in
      * this image's current palette (squared-RGB distance). Fully transparent pixels (alpha &lt; 128)
-     * map to palette index 0, the DS transparent slot. This image's dimensions, bit depth and tiling
-     * are unchanged, so the result re-encodes with {@link #save()}.
+     * map to palette index 0, the DS transparent slot. When the palette holds the same color at several
+     * indices, a pixel keeps its current index if that is one of the nearest. This image's dimensions,
+     * bit depth and tiling are unchanged, so the result re-encodes with {@link #save()}.
      *
      * @param src an image whose dimensions equal this image's
      * @return the number of pixels whose nearest palette color was not an exact match (a measure of
@@ -995,17 +999,16 @@ public class IndexedImage extends GenericNtrFile
             for (int x = 0; x < width; x++)
             {
                 int argb = src.getRGB(x, y);
-                if ((argb >>> 24) < 128) { pixels[y][x] = 0; continue; } // transparent -> index 0
-                int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-                int best = 0, bestDist = Integer.MAX_VALUE;
-                for (int i = 0; i < limit; i++)
+                // transparent -> index 0
+                if ((argb >>> 24) < 128)
                 {
-                    Color c = pal[i];
-                    int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
-                    int d = dr * dr + dg * dg + db * db;
-                    if (d < bestDist) { bestDist = d; best = i; }
+                    pixels[y][x] = 0;
+                    continue;
                 }
-                if (bestDist != 0) unmatched++;
+
+                int best = ColorMatch.nearestIndex(pal, 0, limit, argb, pixels[y][x]);
+                if (ColorMatch.distanceSq(pal[best], argb) != 0)
+                    unmatched++;
                 pixels[y][x] = best;
             }
         }
@@ -1025,7 +1028,8 @@ public class IndexedImage extends GenericNtrFile
     public Palette applyImageQuantized(BufferedImage src, int maxColors)
     {
         requireSameSize(src);
-        if (maxColors < 2) maxColors = 2;
+        if (maxColors < 2)
+            maxColors = 2;
 
         boolean[][] transparent = new boolean[height][width];
         java.util.List<int[]> opaque = new ArrayList<>();
@@ -1034,8 +1038,12 @@ public class IndexedImage extends GenericNtrFile
             for (int x = 0; x < width; x++)
             {
                 int argb = src.getRGB(x, y);
-                if ((argb >>> 24) < 128) { transparent[y][x] = true; continue; }
-                opaque.add(new int[]{ (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF });
+                if ((argb >>> 24) < 128)
+                {
+                    transparent[y][x] = true;
+                    continue;
+                }
+                opaque.add(new int[] { (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF });
             }
         }
 
@@ -1051,7 +1059,11 @@ public class IndexedImage extends GenericNtrFile
         {
             for (int x = 0; x < width; x++)
             {
-                if (transparent[y][x]) { pixels[y][x] = 0; continue; }
+                if (transparent[y][x])
+                {
+                    pixels[y][x] = 0;
+                    continue;
+                }
                 int argb = src.getRGB(x, y);
                 int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
                 int best = 1, bestDist = Integer.MAX_VALUE;
@@ -1060,7 +1072,11 @@ public class IndexedImage extends GenericNtrFile
                     Color c = colors[i];
                     int dr = c.getRed() - r, dg = c.getGreen() - g, db = c.getBlue() - b;
                     int d = dr * dr + dg * dg + db * db;
-                    if (d < bestDist) { bestDist = d; best = i; }
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        best = i;
+                    }
                 }
                 pixels[y][x] = best;
             }
@@ -1090,8 +1106,13 @@ public class IndexedImage extends GenericNtrFile
     static java.util.List<Color> medianCut(java.util.List<int[]> colors, int count)
     {
         java.util.List<Color> out = new ArrayList<>();
-        if (count < 1) count = 1;
-        if (colors.isEmpty()) { out.add(Color.BLACK); return out; }
+        if (count < 1)
+            count = 1;
+        if (colors.isEmpty())
+        {
+            out.add(Color.BLACK);
+            return out;
+        }
 
         java.util.List<java.util.List<int[]>> boxes = new ArrayList<>();
         boxes.add(new ArrayList<>(colors));
@@ -1101,15 +1122,26 @@ public class IndexedImage extends GenericNtrFile
             for (int i = 0; i < boxes.size(); i++)
             {
                 java.util.List<int[]> bx = boxes.get(i);
-                if (bx.size() < 2) continue;
+                if (bx.size() < 2)
+                    continue;
                 for (int ch = 0; ch < 3; ch++)
                 {
                     int mn = 255, mx = 0;
-                    for (int[] c : bx) { mn = Math.min(mn, c[ch]); mx = Math.max(mx, c[ch]); }
-                    if (mx - mn > bestRange) { bestRange = mx - mn; bi = i; bestCh = ch; }
+                    for (int[] c : bx)
+                    {
+                        mn = Math.min(mn, c[ch]);
+                        mx = Math.max(mx, c[ch]);
+                    }
+                    if (mx - mn > bestRange)
+                    {
+                        bestRange = mx - mn;
+                        bi = i;
+                        bestCh = ch;
+                    }
                 }
             }
-            if (bi < 0) break; // nothing left worth splitting
+            if (bi < 0)
+                break; // nothing left worth splitting
             java.util.List<int[]> bx = boxes.remove(bi);
             final int ch = bestCh;
             bx.sort((a, b) -> Integer.compare(a[ch], b[ch]));
@@ -1121,7 +1153,12 @@ public class IndexedImage extends GenericNtrFile
         for (java.util.List<int[]> bx : boxes)
         {
             long r = 0, g = 0, b = 0;
-            for (int[] c : bx) { r += c[0]; g += c[1]; b += c[2]; }
+            for (int[] c : bx)
+            {
+                r += c[0];
+                g += c[1];
+                b += c[2];
+            }
             int n = Math.max(1, bx.size());
             out.add(new Color((int) (r / n), (int) (g / n), (int) (b / n)));
         }
@@ -1455,8 +1492,8 @@ public class IndexedImage extends GenericNtrFile
 
         for (int row = 0; row < leftImage.getHeight(); row++)
         {
-            System.arraycopy(leftImage.getPixels()[row],0,ret[row],0,leftImage.getWidth());
-            System.arraycopy(rightImage.getPixels()[row],0,ret[row],leftImage.getWidth(),rightImage.getWidth());
+            System.arraycopy(leftImage.getPixels()[row], 0, ret[row], 0, leftImage.getWidth());
+            System.arraycopy(rightImage.getPixels()[row], 0, ret[row], leftImage.getWidth(), rightImage.getWidth());
         }
 
         IndexedImage image = new IndexedImage(leftImage.height, rightImage.width + leftImage.width, leftImage.bitDepth, leftImage.palette);
@@ -1481,11 +1518,13 @@ public class IndexedImage extends GenericNtrFile
     @Override
     public boolean equals(Object o)
     {
-        if(this == o) {
+        if (this == o)
+        {
             return true;
         }
 
-        if(o == null || getClass() != o.getClass()) {
+        if (o == null || getClass() != o.getClass())
+        {
             return false;
         }
 
@@ -1559,7 +1598,8 @@ public class IndexedImage extends GenericNtrFile
     }
 
 
-    protected static class NcgrUtils {
+    protected static class NcgrUtils
+    {
         // reading ncgr code
 
         private static int convertFromScanned4Bpp(byte[] src, IndexedImage image, boolean scanFrontToBack)
@@ -1586,7 +1626,7 @@ public class IndexedImage extends GenericNtrFile
             if (scanFrontToBack)
             {
                 encValue = data[0];
-                for(int i = 0; i < data.length; i++)
+                for (int i = 0; i < data.length; i++)
                 {
                     data[i] = data[i] ^ (encValue & 0xffff);
                     encValue *= 1103515245;
@@ -1597,7 +1637,7 @@ public class IndexedImage extends GenericNtrFile
             {
                 encValue = data[data.length - 1];
 
-                for(int i = data.length - 1; i >= 0; i--)
+                for (int i = data.length - 1; i >= 0; i--)
                 {
                     data[i] = data[i] ^ (encValue & 0xffff);
                     encValue *= 1103515245;
@@ -1605,18 +1645,18 @@ public class IndexedImage extends GenericNtrFile
                 }
             }
 
-            byte[] arr = new byte[width*height];
+            byte[] arr = new byte[width * height];
             // bounded by both: a partial file supplies fewer words than the grid has room for,
             // and the remainder stays as palette index 0
-            for (int i = 0; i < arr.length/4 && i < data.length; i++)
+            for (int i = 0; i < arr.length / 4 && i < data.length; i++)
             {
-                arr[i*4] = (byte) (data[i] & 0xf);
-                arr[i*4+1] = (byte) ((data[i] >> 4) & 0xf);
-                arr[i*4+2] = (byte) ((data[i] >> 8) & 0xf);
-                arr[i*4+3] = (byte)((data[i] >> 12) & 0xf);
+                arr[i * 4] = (byte) (data[i] & 0xf);
+                arr[i * 4 + 1] = (byte) ((data[i] >> 4) & 0xf);
+                arr[i * 4 + 2] = (byte) ((data[i] >> 8) & 0xf);
+                arr[i * 4 + 3] = (byte) ((data[i] >> 12) & 0xf);
             }
 
-            int[][] pixelTable= new int[height][width];
+            int[][] pixelTable = new int[height][width];
             int idx = 0;
             for (int row = 0; row < height; row++)
             {
@@ -1687,7 +1727,7 @@ public class IndexedImage extends GenericNtrFile
             if (scanFrontToBack)
             {
                 encValue = data[0];
-                for(int i = 0; i < data.length; i++)
+                for (int i = 0; i < data.length; i++)
                 {
                     data[i] = data[i] ^ (encValue & 0xffff);
                     encValue *= 1103515245;
@@ -1698,7 +1738,7 @@ public class IndexedImage extends GenericNtrFile
             {
                 encValue = data[data.length - 1];
 
-                for(int i = data.length - 1; i >= 0; i--)
+                for (int i = data.length - 1; i >= 0; i--)
                 {
                     data[i] = data[i] ^ (encValue & 0xffff);
                     encValue *= 1103515245;
@@ -1706,15 +1746,15 @@ public class IndexedImage extends GenericNtrFile
                 }
             }
 
-            byte[] arr = new byte[width*height];
+            byte[] arr = new byte[width * height];
             // see the 4bpp path: bounded by the data actually present as well as by the grid
-            for (int i = 0; i < arr.length/2 && i < data.length; i++)
+            for (int i = 0; i < arr.length / 2 && i < data.length; i++)
             {
-                arr[i*2] = (byte) (data[i] & 0xff);
-                arr[i*2+1] = (byte) ((data[i] >> 8) & 0xff);
+                arr[i * 2] = (byte) (data[i] & 0xff);
+                arr[i * 2 + 1] = (byte) ((data[i] >> 8) & 0xff);
             }
 
-            int[][] pixelTable= new int[height][width];
+            int[][] pixelTable = new int[height][width];
             int idx = 0;
             for (int row = 0; row < height; row++)
             {
@@ -1736,7 +1776,9 @@ public class IndexedImage extends GenericNtrFile
             int chunkStartX = 0;
             int chunkStartY = 0;
 
-            ChunkManager() {}
+            ChunkManager()
+            {
+            }
 
             void advanceTilePosition(int chunksWide, int colsPerChunk, int rowsPerChunk)
             {
@@ -1877,7 +1919,7 @@ public class IndexedImage extends GenericNtrFile
             long encValue = image.encryptionKey;
 
             int idx = 0;
-            int[] data = new int[image.height*image.width];
+            int[] data = new int[image.height * image.width];
 
             for (int row = 0; row < image.height; row++)
             {
@@ -1887,10 +1929,10 @@ public class IndexedImage extends GenericNtrFile
                 }
             }
 
-            short[] arr = new short[data.length/2];
+            short[] arr = new short[data.length / 2];
             for (int i = 0; i < arr.length; i++)
             {
-                arr[i] = (short) (( (data[i * 2] & 0xF) | ((data[i * 2 + 1] & 0xF) << 4)) & 0xff);
+                arr[i] = (short) (((data[i * 2] & 0xF) | ((data[i * 2 + 1] & 0xF) << 4)) & 0xff);
             }
 
             if (bufferSize != arr.length)
@@ -2006,11 +2048,14 @@ public class IndexedImage extends GenericNtrFile
 
             byte[] dest = new byte[image.numTiles * 32]; // 4bpp tile is 32 bytes
             idx = 0;
-            for (int i = 0; i < image.numTiles; i++) {
-                for (int j = 0; j < 8; j++) {
+            for (int i = 0; i < image.numTiles; i++)
+            {
+                for (int j = 0; j < 8; j++)
+                {
                     int srcY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
-                    for (int k = 0; k < 4; k++) {
+                    for (int k = 0; k < 4; k++)
+                    {
                         int srcX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 4 + k;
                         byte leftPixel = (byte) (src[2 * (srcY * pitch + srcX)] & 0xF);
                         byte rightPixel = (byte) (src[2 * (srcY * pitch + srcX) + 1] & 0xF);
@@ -2043,11 +2088,14 @@ public class IndexedImage extends GenericNtrFile
 
             byte[] dest = new byte[image.numTiles * 64]; // 8bpp tile is 64 bytes
             idx = 0;
-            for (int i = 0; i < image.numTiles; i++) {
-                for (int j = 0; j < 8; j++) {
+            for (int i = 0; i < image.numTiles; i++)
+            {
+                for (int j = 0; j < 8; j++)
+                {
                     int srcY = (chunkManager.chunkStartY * image.rowsPerChunk + chunkManager.rowsSoFar) * 8 + j;
 
-                    for (int k = 0; k < 8; k++) {
+                    for (int k = 0; k < 8; k++)
+                    {
                         int srcX = (chunkManager.chunkStartX * image.colsPerChunk + chunkManager.tilesSoFar) * 8 + k;
                         byte pixel = (byte) (src[srcY * pitch + srcX] & 0xFF);
 
@@ -2176,10 +2224,9 @@ public class IndexedImage extends GenericNtrFile
 //            return bit4;
 //        }
 
-        protected enum ScanMode {
-            NOT_SCANNED,
-            FRONT_TO_BACK,
-            BACK_TO_FRONT,
+        protected enum ScanMode
+        {
+            NOT_SCANNED, FRONT_TO_BACK, BACK_TO_FRONT,
             // A line-buffer (CHAR flags bit 0) image that is NOT LCG-encrypted: a plain linear raster.
             // Decoded/encoded without the scan cipher (e.g. Gen V "pokegra" battle-sprite sheets). Still a
             // line-buffer layout, so isScanned() == true and it can't be composed through an NCER.
@@ -2233,13 +2280,13 @@ public class IndexedImage extends GenericNtrFile
         }
 
         private static int called = 0;
-        private static Color[] testColors = {Color.MAGENTA, Color.CYAN, Color.RED, Color.YELLOW, Color.PINK, Color.ORANGE, Color.GRAY, Color.GREEN, Color.BLUE, Color.DARK_GRAY,
+        private static Color[] testColors = { Color.MAGENTA, Color.CYAN, Color.RED, Color.YELLOW, Color.PINK, Color.ORANGE, Color.GRAY, Color.GREEN, Color.BLUE, Color.DARK_GRAY,
                 new Color(82, 102, 180),
                 new Color(17, 30, 100),
                 new Color(152, 89, 66),
                 new Color(132, 200, 100),
                 new Color(54, 19, 206),
-                new Color(119, 61, 97)};
+                new Color(119, 61, 97) };
 
         protected static void convertOffsetToCoordinate(byte[] src, int startByte, int numPixels, IndexedImage image, int numTiles, int chunksWide, int colsPerChunk, int rowsPerChunk, IndexedImage cell)
         {
@@ -2292,7 +2339,7 @@ public class IndexedImage extends GenericNtrFile
                                 {
                                     Thread.sleep(100);
                                 }
-                                catch(InterruptedException e)
+                                catch (InterruptedException e)
                                 {
                                     e.printStackTrace();
                                 }
@@ -2316,11 +2363,11 @@ public class IndexedImage extends GenericNtrFile
 
     /* BEGIN SECTION: PNG */
 
-    private static final byte[] imageChunkHeader = new byte[] {0x49,0x48,0x44,0x52}; //IHDR
-    private static final byte[] paletteChunkHeader = new byte[] {0x50,0x4C,0x54,0x45}; //PLTE
-    private static final byte[] dataChunkHeader = new byte[] {0x49,0x44,0x41,0x54}; //IDAT
-    private static final byte[] endChunkHeader = new byte[] {0x49,0x45,0x4E,0x44}; //IEND
-    private static final byte[] pngHeader = new byte[] {(byte) 0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A}; //PNG
+    private static final byte[] imageChunkHeader = new byte[] { 0x49, 0x48, 0x44, 0x52 }; //IHDR
+    private static final byte[] paletteChunkHeader = new byte[] { 0x50, 0x4C, 0x54, 0x45 }; //PLTE
+    private static final byte[] dataChunkHeader = new byte[] { 0x49, 0x44, 0x41, 0x54 }; //IDAT
+    private static final byte[] endChunkHeader = new byte[] { 0x49, 0x45, 0x4E, 0x44 }; //IEND
+    private static final byte[] pngHeader = new byte[] { (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }; //PNG
 
     // PNG importing code
 
@@ -2353,19 +2400,19 @@ public class IndexedImage extends GenericNtrFile
 
         for (int i = 0; i < fileContents.length - 4; i++)
         {
-            byte[] thisFour = Arrays.copyOfRange(fileContents,i,i+4);
+            byte[] thisFour = Arrays.copyOfRange(fileContents, i, i + 4);
 
-            if (Arrays.equals(thisFour,paletteChunkHeader))
+            if (Arrays.equals(thisFour, paletteChunkHeader))
             {
                 paletteIdx = i;
             }
 
-            if (Arrays.equals(thisFour,dataChunkHeader))
+            if (Arrays.equals(thisFour, dataChunkHeader))
             {
                 imageDataIdxList.add(i);
             }
 
-            if (Arrays.equals(thisFour,endChunkHeader))
+            if (Arrays.equals(thisFour, endChunkHeader))
             {
                 break;
             }
@@ -2413,30 +2460,30 @@ public class IndexedImage extends GenericNtrFile
 
 //        System.out.println("Bit Depth: " + bitDepth);
         ArrayList<Color> colorList = new ArrayList<>();
-        buffer.skipTo(paletteIdx-4);
+        buffer.skipTo(paletteIdx - 4);
 
         int chunkLength = swapEndianness(buffer.readInt());
         buffer.skipBytes(4);
 
-        for (int i = 0; i < chunkLength/3; i++)
+        for (int i = 0; i < chunkLength / 3; i++)
         {
             int r = buffer.readByte();
-            r -= r%8;
+            r -= r % 8;
 
             int g = buffer.readByte();
-            g -= g%8;
+            g -= g % 8;
 
             int b = buffer.readByte();
-            b -= b%8;
+            b -= b % 8;
 
-            colorList.add(new Color(r,g,b));
+            colorList.add(new Color(r, g, b));
         }
 
         // a PNG may split its image data across any number of IDAT chunks - all of them together form one zlib stream
         MemBuf imageDataBuf = MemBuf.create();
         for (int imageDataIdx : imageDataIdxList)
         {
-            buffer.skipTo(imageDataIdx-4);
+            buffer.skipTo(imageDataIdx - 4);
             chunkLength = swapEndianness(buffer.readInt());
             buffer.skipBytes(4);
             imageDataBuf.writer().write(buffer.readBytes(chunkLength));
@@ -2447,7 +2494,7 @@ public class IndexedImage extends GenericNtrFile
 
         Palette palette = new Palette(colorList.toArray(new Color[0]));
         IndexedImage ret = new IndexedImage(height, width, bitDepth, palette);
-        ret.setPixels(PngUtils.createScanlines(imageData,bitDepth,filterMethod,width,height));
+        ret.setPixels(PngUtils.createScanlines(imageData, bitDepth, filterMethod, width, height));
         ret.bitDepth = bitDepth;
         ret.scanMode = NcgrUtils.ScanMode.NOT_SCANNED;
 
@@ -2489,7 +2536,7 @@ public class IndexedImage extends GenericNtrFile
 
         writer.writeInt(swapEndianness(width));
         writer.writeInt(swapEndianness(height));
-        writer.writeBytes(exportBitDepth,colorType,compressionMethod,filterMethod,interlaceMethod);
+        writer.writeBytes(exportBitDepth, colorType, compressionMethod, filterMethod, interlaceMethod);
 
         //Palette Chunk (PLTE)
         MemBuf paletteBuf = MemBuf.create();
@@ -2497,14 +2544,14 @@ public class IndexedImage extends GenericNtrFile
 
         for (Color c : palette.getColors())
         {
-            writer.writeBytes(c.getRed(),c.getGreen(),c.getBlue());
+            writer.writeBytes(c.getRed(), c.getGreen(), c.getBlue());
         }
 
         //Image Data Chunk (IDAT)
         MemBuf dataBuf = MemBuf.create();
         writer = dataBuf.writer().write(dataChunkHeader);
 
-        byte[] imageData = PngUtils.convertScanlines(pixels,exportBitDepth,filterMethod);
+        byte[] imageData = PngUtils.convertScanlines(pixels, exportBitDepth, filterMethod);
         imageData = PngUtils.compress(imageData);
 
         writer.write(imageData);
@@ -2521,19 +2568,19 @@ public class IndexedImage extends GenericNtrFile
 
         imageWriter.write(pngHeader);
 
-        imageWriter.writeInt(swapEndianness(imageHeaderBuf.reader().getBuffer().length-4));
+        imageWriter.writeInt(swapEndianness(imageHeaderBuf.reader().getBuffer().length - 4));
         imageWriter.write(imageHeaderBuf.reader().getBuffer());
         imageWriter.writeInt(PngUtils.getCrc32(imageHeaderBuf.reader().getBuffer()));
 
-        imageWriter.writeInt(swapEndianness(paletteBuf.reader().getBuffer().length-4));
+        imageWriter.writeInt(swapEndianness(paletteBuf.reader().getBuffer().length - 4));
         imageWriter.write(paletteBuf.reader().getBuffer());
         imageWriter.writeInt(PngUtils.getCrc32(paletteBuf.reader().getBuffer()));
 
-        imageWriter.writeInt(swapEndianness(dataBuf.reader().getBuffer().length-4));
+        imageWriter.writeInt(swapEndianness(dataBuf.reader().getBuffer().length - 4));
         imageWriter.write(dataBuf.reader().getBuffer());
         imageWriter.writeInt(PngUtils.getCrc32(dataBuf.reader().getBuffer()));
 
-        imageWriter.writeInt(swapEndianness(endBuf.reader().getBuffer().length-4));
+        imageWriter.writeInt(swapEndianness(endBuf.reader().getBuffer().length - 4));
         imageWriter.write(endBuf.reader().getBuffer());
         imageWriter.writeInt(PngUtils.getCrc32(endBuf.reader().getBuffer()));
 
@@ -2560,7 +2607,8 @@ public class IndexedImage extends GenericNtrFile
         BinaryWriter.writeFile(file, saveAsIndexedPng());
     }
 
-    private static class PngUtils {
+    private static class PngUtils
+    {
         private static byte[] compress(byte[] arr) throws IOException
         {
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -2580,8 +2628,8 @@ public class IndexedImage extends GenericNtrFile
 
             for (int[] scanline : pixels)
             {
-                if(scanline.length % pixelsPerByte != 0)
-                    scanline = Arrays.copyOf(scanline,scanline.length + (pixelsPerByte - scanline.length % pixelsPerByte));
+                if (scanline.length % pixelsPerByte != 0)
+                    scanline = Arrays.copyOf(scanline, scanline.length + (pixelsPerByte - scanline.length % pixelsPerByte));
 
                 retList.add((byte) filterMethod);
 
@@ -2590,12 +2638,12 @@ public class IndexedImage extends GenericNtrFile
                     switch (bitDepth)
                     {
                         case 2:
-                            retList.add((byte) ( ((scanline[x] & 0x3) << 6) | ((scanline[x + 1] & 0x3) << 4)
-                                    | ((scanline[x + 2] & 0x3) << 2) | (scanline[x + 3] & 0x3) ) );
+                            retList.add((byte) (((scanline[x] & 0x3) << 6) | ((scanline[x + 1] & 0x3) << 4)
+                                    | ((scanline[x + 2] & 0x3) << 2) | (scanline[x + 3] & 0x3)));
                             break;
 
                         case 4:
-                            retList.add((byte) ( ((scanline[x] & 0xff) << 4) | ((scanline[x + 1] & 0xff) & 0xf) ) );
+                            retList.add((byte) (((scanline[x] & 0xff) << 4) | ((scanline[x + 1] & 0xff) & 0xf)));
                             break;
 
                         case 8:
@@ -2609,7 +2657,7 @@ public class IndexedImage extends GenericNtrFile
 
             for (int x = 0; x < ret.length; x++)
             {
-                ret[x]= retList.get(x);
+                ret[x] = retList.get(x);
             }
 
             return ret;
@@ -2638,24 +2686,24 @@ public class IndexedImage extends GenericNtrFile
             while ((rlen = inflaterInputStream.read(buf)) != -1)
             {
                 int current = ret.length;
-                ret = Arrays.copyOf(ret,ret.length + rlen);
-                System.arraycopy(buf,0,ret,current,rlen);
+                ret = Arrays.copyOf(ret, ret.length + rlen);
+                System.arraycopy(buf, 0, ret, current, rlen);
             }
 
             return ret;
         }
 
-        private static int[][] createScanlines(byte[] arr, int bitDepth, int filterMethod,int width, int height)
+        private static int[][] createScanlines(byte[] arr, int bitDepth, int filterMethod, int width, int height)
         {
             int[][] ret = new int[height][width];
-            int numBytes = (int) Math.ceil((double) bitDepth*width/8);
+            int numBytes = (int) Math.ceil((double) bitDepth * width / 8);
 
             int idx = 0;
             for (int i = 0; i < ret.length; i++)
             {
-                byte[] scanline = Arrays.copyOfRange(arr,idx,idx+numBytes+1);
+                byte[] scanline = Arrays.copyOfRange(arr, idx, idx + numBytes + 1);
 //            System.out.println(hexToString(scanline));
-                idx += numBytes+1;
+                idx += numBytes + 1;
 
                 ArrayList<Byte> byteList = new ArrayList<>();
 
@@ -2665,7 +2713,7 @@ public class IndexedImage extends GenericNtrFile
                 }
 
 
-                for (byte b : Arrays.copyOfRange(scanline,1,scanline.length))
+                for (byte b : Arrays.copyOfRange(scanline, 1, scanline.length))
                 {
                     switch (bitDepth)
                     {
@@ -2698,7 +2746,7 @@ public class IndexedImage extends GenericNtrFile
 
                 if (ret[i].length > width)
                 {
-                    ret[i] = Arrays.copyOf(ret[i],width);
+                    ret[i] = Arrays.copyOf(ret[i], width);
                 }
             }
 
@@ -2716,7 +2764,7 @@ public class IndexedImage extends GenericNtrFile
 
                 ret.append("0x").append(s).append(",");
             }
-            ret.deleteCharAt(ret.length()-1);
+            ret.deleteCharAt(ret.length() - 1);
             ret.append("]");
 
             return ret.toString();
