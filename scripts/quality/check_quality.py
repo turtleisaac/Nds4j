@@ -111,7 +111,7 @@ def pin_failure(tool, recorded, current):
 
 def crap_failures(root, pins, functions, ranges):
     """
-    Existing scores may not rise. A new or edited function must stay under CRAP 10
+    Existing scores may not rise. A new or edited function must stay under CRAP 10. A reformat is not an edit
     """
     path = root / '.quality' / 'crap-baseline.json'
     if not path.is_file():
@@ -132,7 +132,7 @@ def crap_failures(root, pins, functions, ranges):
                 failures.append('CRAP increased for %s: %s -> %s' %
                                 (format_function(row), previous['crap'], row['crap']))
             edited = overlaps(row['path'], row['start'], row['end'], ranges)
-            if edited and row['crap'] >= CRAP_LIMIT:
+            if edited and row['body'] != previous['body'] and row['crap'] >= CRAP_LIMIT:
                 failures.append('changed function %s has CRAP %s (ub-mode requires < %g)' %
                                 (format_function(row), row['crap'], CRAP_LIMIT))
 
@@ -145,12 +145,13 @@ def crap_failures(root, pins, functions, ranges):
 
 def dry_failures(root, pins, pairs, threshold, ranges):
     """
-    A new pair at the default threshold fails, and an edited function may not stay in one
+    A new pair at the default threshold fails, and an edited function may not stay in one. A reformat is not an edit
     """
     path = root / '.quality' / 'dry-baseline.json'
     if not path.is_file():
         return ['missing .quality/dry-baseline.json (run scripts/quality/refresh-baseline.sh)']
 
+    bodies = baseline_bodies(root)
     baseline = read_json(path)
     failures = pin_failure('dryer', baseline.get('dryer'), pins.get('dryer'))
     if abs(float(baseline['threshold']) - float(threshold)) > CRAP_EPSILON:
@@ -162,10 +163,11 @@ def dry_failures(root, pins, pairs, threshold, ranges):
     for pair in pairs:
         edited = False
         for side in (pair['left'], pair['right']):
-            if overlaps(side['path'], side['start'], side['end'], ranges):
+            if side_edited(side, ranges, bodies):
                 edited = True
 
-        if pair_key(pair) in known and not edited:
+        # a pair of unedited functions is new only because a reformat made dryer see it
+        if not edited:
             continue
 
         if pair_key(pair) not in known:
@@ -177,6 +179,26 @@ def dry_failures(root, pins, pairs, threshold, ranges):
                         (kind, pair['score'], format_side(pair['left']), format_side(pair['right'])))
 
     return failures
+
+def baseline_bodies(root):
+    """
+    Identity of every function in the CRAP baseline, with its whitespace-free body hash
+    """
+    path = root / '.quality' / 'crap-baseline.json'
+    if not path.is_file():
+        return set()
+
+    rows = read_json(path)['functions']
+    return {(row['path'], row['namespace'], row['name'], row['body']) for row in rows}
+
+def side_edited(side, ranges, bodies):
+    """
+    True when a pair side is in a diff hunk and its body is not one the baseline already has
+    """
+    if not overlaps(side['path'], side['start'], side['end'], ranges):
+        return False
+
+    return (side['path'], side['namespace'], side['name'], side['body']) not in bodies
 
 if __name__ == '__main__':
     sys.exit(main())

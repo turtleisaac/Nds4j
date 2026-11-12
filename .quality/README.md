@@ -1,6 +1,6 @@
 # Quality gates
 
-CRAP scores cannot rise, new or changed functions stay under 10, and new dryer pairs fail. Mutation scores cannot drop.
+CRAP scores cannot rise, new or changed functions stay under 10, and new dryer pairs fail. A reformat alone does not count as a change. Mutation scores cannot drop.
 
 Enable the hook with `git config core.hooksPath .githooks`.
 
