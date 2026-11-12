@@ -1,0 +1,1032 @@
+{
+  "version": 1,
+  "score": {
+    "killedAndTimedOut": "counted as detected",
+    "excluded": [
+      "NON_VIABLE",
+      "EQUIVALENT",
+      "COMPILE_ERROR",
+      "IGNORED"
+    ]
+  },
+  "java": {
+    "tool": "pitest",
+    "totals": {
+      "killed": 3901,
+      "timedOut": 49,
+      "survived": 1184,
+      "noCoverage": 7711,
+      "other": 2
+    },
+    "classes": {
+      "io.github.turtleisaac.nds4j.g3d.ImdImporter": {
+        "killed": 493,
+        "timedOut": 8,
+        "survived": 45,
+        "noCoverage": 25,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.Model": {
+        "killed": 208,
+        "timedOut": 9,
+        "survived": 182,
+        "noCoverage": 159,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequencePlayer": {
+        "killed": 222,
+        "timedOut": 5,
+        "survived": 180,
+        "noCoverage": 123,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.IndexedImage": {
+        "killed": 171,
+        "timedOut": 0,
+        "survived": 52,
+        "noCoverage": 259,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.IndexedImage$NcgrUtils": {
+        "killed": 62,
+        "timedOut": 0,
+        "survived": 15,
+        "noCoverage": 306,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSet": {
+        "killed": 78,
+        "timedOut": 0,
+        "survived": 15,
+        "noCoverage": 273,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.Screen": {
+        "killed": 228,
+        "timedOut": 0,
+        "survived": 46,
+        "noCoverage": 70,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 336,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ModelBuilder": {
+        "killed": 248,
+        "timedOut": 3,
+        "survived": 76,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SoftwareRenderer": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 300,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleRenderer": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 283,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.NintendoDsRom": {
+        "killed": 18,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 256,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.text.BinaryMessage": {
+        "killed": 133,
+        "timedOut": 2,
+        "survived": 40,
+        "noCoverage": 94,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.MidiSequence": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 266,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SoundFontExporter": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 260,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SkeletalAnimationSet": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 259,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceMidi$Sim": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 244,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.NitroLz": {
+        "killed": 182,
+        "timedOut": 5,
+        "survived": 31,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.NitroHuffman": {
+        "killed": 172,
+        "timedOut": 0,
+        "survived": 30,
+        "noCoverage": 5,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.DisplayList": {
+        "killed": 122,
+        "timedOut": 3,
+        "survived": 11,
+        "noCoverage": 50,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.Wave": {
+        "killed": 87,
+        "timedOut": 0,
+        "survived": 20,
+        "noCoverage": 73,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SoundArchive": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 174,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.SimpleYaml$Parser": {
+        "killed": 93,
+        "timedOut": 2,
+        "survived": 27,
+        "noCoverage": 37,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.GltfExporter$SkinnedBuild": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 159,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.Palette": {
+        "killed": 81,
+        "timedOut": 1,
+        "survived": 28,
+        "noCoverage": 47,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ModelViewer": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 154,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceNotes$Sim": {
+        "killed": 67,
+        "timedOut": 4,
+        "survived": 41,
+        "noCoverage": 37,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.NitroFont": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 147,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$Emitter": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 146,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.IconBanner": {
+        "killed": 103,
+        "timedOut": 0,
+        "survived": 34,
+        "noCoverage": 5,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.Buffer": {
+        "killed": 13,
+        "timedOut": 1,
+        "survived": 12,
+        "noCoverage": 99,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.G3dDictionary": {
+        "killed": 98,
+        "timedOut": 5,
+        "survived": 18,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellAnimation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 120,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.CodeCompression": {
+        "killed": 26,
+        "timedOut": 0,
+        "survived": 13,
+        "noCoverage": 78,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.WavFile": {
+        "killed": 91,
+        "timedOut": 0,
+        "survived": 21,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellAnimation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 115,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSrtAnimationSet": {
+        "killed": 64,
+        "timedOut": 0,
+        "survived": 11,
+        "noCoverage": 29,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.Stream": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 93,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.InstrumentBank": {
+        "killed": 29,
+        "timedOut": 0,
+        "survived": 15,
+        "noCoverage": 48,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ModelSet": {
+        "killed": 19,
+        "timedOut": 0,
+        "survived": 6,
+        "noCoverage": 67,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.GltfExporter$Build": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 91,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 91,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TexturePatternAnimationSet$Animation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 88,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.GltfExporter": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 88,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellAnimation$Animation$Frame": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 86,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellAnimation$Animation$Frame": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 86,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.NitroFont$GlyphData": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 83,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.AnimationBuilder": {
+        "killed": 66,
+        "timedOut": 0,
+        "survived": 15,
+        "noCoverage": 0,
+        "other": 1
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 81,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSrtAnimationSet$Animation": {
+        "killed": 19,
+        "timedOut": 0,
+        "survived": 6,
+        "noCoverage": 55,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.DsSynth": {
+        "killed": 46,
+        "timedOut": 0,
+        "survived": 20,
+        "noCoverage": 11,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.Narc": {
+        "killed": 55,
+        "timedOut": 0,
+        "survived": 6,
+        "noCoverage": 16,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$ParticleTexture": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 75,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.VisibilityAnimationSet": {
+        "killed": 57,
+        "timedOut": 1,
+        "survived": 14,
+        "noCoverage": 1,
+        "other": 1
+      },
+      "io.github.turtleisaac.nds4j.Fnt": {
+        "killed": 44,
+        "timedOut": 0,
+        "survived": 17,
+        "noCoverage": 11,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.IndexedImage$PngUtils": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 72,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.WaveArchive": {
+        "killed": 14,
+        "timedOut": 0,
+        "survived": 1,
+        "noCoverage": 57,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$NcerUtils": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 71,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.WaveformRenderer": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 71,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellBank": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 70,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet$Animation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 69,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.MemBuf$MemBufWriter": {
+        "killed": 29,
+        "timedOut": 0,
+        "survived": 23,
+        "noCoverage": 14,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.Fnt$Folder": {
+        "killed": 45,
+        "timedOut": 0,
+        "survived": 9,
+        "noCoverage": 12,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.Adpcm": {
+        "killed": 43,
+        "timedOut": 0,
+        "survived": 20,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.DsRomUnpacked": {
+        "killed": 42,
+        "timedOut": 0,
+        "survived": 16,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ObjImporter": {
+        "killed": 48,
+        "timedOut": 0,
+        "survived": 10,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$Cell$OAM$OamImage": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 58,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.RawTexture": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 55,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TexturePatternAnimationSet": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 55,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.G3dFile": {
+        "killed": 28,
+        "timedOut": 0,
+        "survived": 7,
+        "noCoverage": 20,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SkeletalAnimationSet$NodeAnim": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 53,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.DsEnvelope": {
+        "killed": 32,
+        "timedOut": 0,
+        "survived": 10,
+        "noCoverage": 10,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.MemBuf$MemBufReader": {
+        "killed": 42,
+        "timedOut": 0,
+        "survived": 6,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.BinaryWriter": {
+        "killed": 3,
+        "timedOut": 0,
+        "survived": 2,
+        "noCoverage": 47,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.NitroAnimation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 51,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.RawPalette": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 50,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.NitroFont$WidthGroup": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 47,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.NitroFont$FontInfo": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 47,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.NitroFont$CharMap": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 45,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$Cell$CellImage": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 45,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$Cell$OAM": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 42,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet$ColorChannel": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 41,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.SimpleYaml": {
+        "killed": 23,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 17,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.text.BinaryMessage$Message": {
+        "killed": 21,
+        "timedOut": 0,
+        "survived": 5,
+        "noCoverage": 11,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$Cell": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 35,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ModelViewerFrame": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 33,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SkeletalAnimationSet$Track": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 32,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SkeletalAnimationSet$RotTrack": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 27,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.Endianness": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 26,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.VisibilityAnimationSet$Animation": {
+        "killed": 15,
+        "timedOut": 0,
+        "survived": 6,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.GenericNtrFile": {
+        "killed": 6,
+        "timedOut": 0,
+        "survived": 3,
+        "noCoverage": 15,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellAnimation$Animation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 23,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellAnimation$Animation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 23,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.AnimatedGif": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 23,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.Palette$NclrUtils": {
+        "killed": 22,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSet$Texture": {
+        "killed": 14,
+        "timedOut": 0,
+        "survived": 1,
+        "noCoverage": 5,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$ColorAnim": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 19,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.binaries.CodeBinary": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 1,
+        "noCoverage": 16,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.text.BinaryMessage$Message$Escape": {
+        "killed": 5,
+        "timedOut": 0,
+        "survived": 2,
+        "noCoverage": 11,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$AlphaAnim": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 16,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSrtAnimationSet$Channel": {
+        "killed": 11,
+        "timedOut": 0,
+        "survived": 5,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceArchive": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 16,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellBank$CellInfo": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 16,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.MultiCellBank$MultiCell": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 15,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.SkeletalAnimationSet$Animation": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 14,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.text.BinaryMessage$Script": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 13,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.CRC16": {
+        "killed": 13,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$ScaleAnim": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 13,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.Model$Mesh": {
+        "killed": 6,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 6,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.CellBank$Cell$CellAttribute": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 12,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet$ScalarChannel": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 11,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.Model$Material": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 9,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.Sequence": {
+        "killed": 4,
+        "timedOut": 0,
+        "survived": 1,
+        "noCoverage": 3,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceMidi$Sim$1": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 7,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.IndexedImage$NcgrUtils$ChunkManager": {
+        "killed": 7,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ModelViewerFrame$1": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 6,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.images.IndexedImage$NcgrUtils$ScanMode": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 2,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.binaries.Overlay": {
+        "killed": 1,
+        "timedOut": 0,
+        "survived": 2,
+        "noCoverage": 3,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet$MaterialColor": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 6,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSrtAnimationSet$MaterialSrt": {
+        "killed": 6,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.NitroAnimation$Frame": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 6,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.AnimationBuilder$Channel": {
+        "killed": 3,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 2,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.ParticleSet$Gravity": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 5,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.InstrumentBank$NoteRegion": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 3,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TexturePatternAnimationSet$MaterialPattern": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 5,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceMidi": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 4,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.MemBuf": {
+        "killed": 4,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.MidiSequence$Parsed": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 3,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.Model$NodeTransform": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 3,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.InstrumentBank$Instrument": {
+        "killed": 3,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TexturePatternAnimationSet$TexturePalette": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 3,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.NitroHuffman$Node": {
+        "killed": 3,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.Fnt$1": {
+        "killed": 1,
+        "timedOut": 0,
+        "survived": 2,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.Core": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.framework.StringFormatter": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.MaterialColorAnimationSet$1": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 2,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.TextureSet$Palette": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 2,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.SequenceNotes": {
+        "killed": 2,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 0,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.MidiSequence$2": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.MidiSequence$1": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.sound.MidiSequence$3": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.g3d.Model$Srt": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.NintendoDsRom$UNPACKED_FILENAMES": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      },
+      "io.github.turtleisaac.nds4j.DsRomUnpacked$1": {
+        "killed": 0,
+        "timedOut": 0,
+        "survived": 0,
+        "noCoverage": 1,
+        "other": 0
+      }
+    }
+  }
+}

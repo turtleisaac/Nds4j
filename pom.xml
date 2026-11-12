@@ -207,6 +207,68 @@
         </pluginManagement>
         <plugins>
             <!--
+              JaCoCo instruction coverage for the CRAP gate. crapper reads
+              target/site/jacoco/jacoco.xml. Bound to test, so verify still runs it.
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+              PIT stays off the default lifecycle. scripts/quality/mutate.sh
+              runs mutationCoverage. failWhenNoMutations rejects an empty
+              report, which is what a missing compile or a bad class filter
+              looks like.
+            -->
+            <plugin>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-maven</artifactId>
+                <version>1.30.2</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-junit5-plugin</artifactId>
+                        <version>1.2.3</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <targetClasses>
+                        <param>io.github.turtleisaac.nds4j.*</param>
+                    </targetClasses>
+                    <targetTests>
+                        <param>io.github.turtleisaac.nds4j.*</param>
+                    </targetTests>
+                    <excludedClasses>
+                        <param>io.github.turtleisaac.nds4j.*Test</param>
+                        <param>io.github.turtleisaac.nds4j.*Test$*</param>
+                        <param>io.github.turtleisaac.nds4j.*Fixtures</param>
+                        <param>io.github.turtleisaac.nds4j.*Fixtures$*</param>
+                        <param>io.github.turtleisaac.nds4j.TestRoms</param>
+                        <param>io.github.turtleisaac.nds4j.TestRoms$*</param>
+                    </excludedClasses>
+                    <outputFormats>
+                        <outputFormat>XML</outputFormat>
+                    </outputFormats>
+                    <timestampedReports>false</timestampedReports>
+                    <failWhenNoMutations>true</failWhenNoMutations>
+                </configuration>
+            </plugin>
+            <!--
               Eclipse profile in config/eclipse-formatter.xml.
               ratchetFrom keeps verify green without a repository-wide reformat:
               only Java files that differ from origin/main are checked, and
