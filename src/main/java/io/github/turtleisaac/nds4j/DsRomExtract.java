@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -56,6 +57,20 @@ final class DsRomExtract
     private static final byte[] SECURE_AREA_ID = { (byte) 0xFF, (byte) 0xDE, (byte) 0xFF, (byte) 0xE7, (byte) 0xFF, (byte) 0xDE, (byte) 0xFF, (byte) 0xE7 };
     private static final int SECURE_AREA_UNENCRYPTED_THRESHOLD = 256;
     private static final String[] BANNER_LANGUAGES = { "japanese", "english", "french", "german", "italian", "spanish", "chinese", "korean" };
+    private static final Map<Integer, String> AUTOLOAD_KINDS = new HashMap<Integer, String>();
+    private static final Map<Integer, String> BANNER_VERSIONS = new HashMap<Integer, String>();
+
+    static
+    {
+        AUTOLOAD_KINDS.put(0x1FF8000, "Itcm");
+        AUTOLOAD_KINDS.put(0x27E0000, "Dtcm");
+        AUTOLOAD_KINDS.put(0x27C0000, "Dtcm");
+        AUTOLOAD_KINDS.put(0x23C0000, "Dtcm");
+        BANNER_VERSIONS.put(0x0001, "Original");
+        BANNER_VERSIONS.put(0x0002, "China");
+        BANNER_VERSIONS.put(0x0003, "Korea");
+        BANNER_VERSIONS.put(0x0103, "Animated");
+    }
 
     private final byte[] rom;
     private final MemBuf.MemBufReader header;
@@ -96,8 +111,24 @@ final class DsRomExtract
     {
         Arm9 arm9 = readArm9();
         FileTree tree = readFileTree();
-        List<String> pathOrder = tree.computePathOrder();
+        byte[] multiboot = readMultibootSignature();
+        writeYaml(new File(dir, "config.yaml"), configYaml(arm9, multiboot));
+        writeYaml(new File(dir, "header.yaml"), headerYaml());
+        writeLogo(new File(dir, "header_logo.png"));
+        writeArm9(dir, arm9);
+        writeOverlays(new File(dir, "arm9_overlays"), arm9Overlays, arm9);
+        writeArm7(dir);
+        writeOverlays(new File(dir, "arm7_overlays"), arm7Overlays, null);
+        writeBanner(new File(dir, "banner"));
+        tree.writeFiles(new File(dir, "files"));
+        writePathOrder(new File(dir, "path_order.txt"), tree.computePathOrder());
 
+        if (multiboot != null)
+            writeYaml(new File(dir, "multiboot_signature.yaml"), multibootYaml(multiboot));
+    }
+
+    private Map<String, Object> configYaml(Arm9 arm9, byte[] multiboot)
+    {
         Map<String, Object> config = new LinkedHashMap<String, Object>();
         config.put("header", "header.yaml");
         config.put("header_logo", "header_logo.png");
@@ -107,52 +138,52 @@ final class DsRomExtract
         config.put("arm7_config", "arm7/arm7.yaml");
         config.put("itcm", autoloadPaths("arm9/itcm"));
         config.put("dtcm", autoloadPaths("arm9/dtcm"));
-        List<Object> unknownAutoloads = new ArrayList<Object>();
-        for (Autoload autoload : arm9.autoloads)
-        {
-            if (autoload.kind.equals("Unknown"))
-            {
-                Map<String, Object> entry = new LinkedHashMap<String, Object>();
-                entry.put("index", autoload.index);
-                entry.putAll(autoloadPaths("arm9/unk_autoload_" + autoload.index));
-                unknownAutoloads.add(entry);
-            }
-        }
-
+        List<Object> unknownAutoloads = unknownAutoloads(arm9);
         if (!unknownAutoloads.isEmpty())
             config.put("unknown_autoloads", unknownAutoloads);
-        config.put("arm9_overlays", arm9Overlays.isEmpty() ? null : "arm9_overlays/overlays.yaml");
-        config.put("arm7_overlays", arm7Overlays.isEmpty() ? null : "arm7_overlays/overlays.yaml");
+
+        config.put("arm9_overlays", pathIf(!arm9Overlays.isEmpty(), "arm9_overlays/overlays.yaml"));
+        config.put("arm7_overlays", pathIf(!arm7Overlays.isEmpty(), "arm7_overlays/overlays.yaml"));
         config.put("banner", "banner/banner.yaml");
         config.put("files_dir", "files/");
         config.put("path_order", "path_order.txt");
-        config.put("arm9_hmac_sha1_key", arm9.hmacKey == null ? null : "arm9/hmac_sha1_key.bin");
-        byte[] multiboot = readMultibootSignature();
-        config.put("multiboot_signature", multiboot == null ? null : "multiboot_signature.yaml");
+        config.put("arm9_hmac_sha1_key", pathIf(arm9.hmacKey != null, "arm9/hmac_sha1_key.bin"));
+        config.put("multiboot_signature", pathIf(multiboot != null, "multiboot_signature.yaml"));
         config.put("alignment", alignments());
         config.put("padding", paddingValues());
-        writeYaml(new File(dir, "config.yaml"), config);
 
-        writeYaml(new File(dir, "header.yaml"), headerYaml());
-        writeLogo(new File(dir, "header_logo.png"));
-        writeArm9(dir, arm9);
-        if (!arm9Overlays.isEmpty())
-            writeOverlays(new File(dir, "arm9_overlays"), arm9Overlays, arm9);
-        writeArm7(dir);
-        if (!arm7Overlays.isEmpty())
-            writeOverlays(new File(dir, "arm7_overlays"), arm7Overlays, null);
-        writeBanner(new File(dir, "banner"));
-        tree.writeFiles(new File(dir, "files"));
+        return config;
+    }
 
-        StringBuilder order = new StringBuilder();
-        for (String path : pathOrder)
+    private static List<Object> unknownAutoloads(Arm9 arm9)
+    {
+        List<Object> out = new ArrayList<Object>();
+        for (Autoload autoload : arm9.autoloads)
         {
-            order.append(path).append('\n');
+            if (!autoload.kind.equals("Unknown"))
+                continue;
+            Map<String, Object> entry = new LinkedHashMap<String, Object>();
+            entry.put("index", autoload.index);
+            entry.putAll(autoloadPaths("arm9/unk_autoload_" + autoload.index));
+            out.add(entry);
         }
 
-        writeBinary(new File(dir, "path_order.txt"), order.toString().getBytes(StandardCharsets.UTF_8));
-        if (multiboot != null)
-            writeYaml(new File(dir, "multiboot_signature.yaml"), multibootYaml(multiboot));
+        return out;
+    }
+
+    /** A config path, or null (written as {@code null}) when the part it names is absent. */
+    private static String pathIf(boolean present, String path)
+    {
+        return present ? path : null;
+    }
+
+    private static void writePathOrder(File file, List<String> pathOrder) throws IOException
+    {
+        StringBuilder order = new StringBuilder();
+        for (String path : pathOrder)
+            order.append(path).append('\n');
+
+        writeBinary(file, order.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private Map<String, Object> headerYaml()
@@ -210,20 +241,7 @@ final class DsRomExtract
         arm9.baseAddress = u32At(0x28);
         arm9.entryFunction = u32At(0x24);
         arm9.autoloadCallback = u32At(0x70);
-
-        MemBuf.MemBufReader footer = slice(offset + size, 12);
-        int nitrocode = footer.readInt();
-        if (nitrocode != NITROCODE)
-            throw new IOException(String.format("expected nitrocode 0x%08x in ARM9 footer but got 0x%08x", NITROCODE, nitrocode));
-        int footerBuildInfo = footer.readInt();
-        arm9.overlaySignatures = footer.readInt();
-        int headerBuildInfo = u32At(0x88);
-        if (headerBuildInfo == 0)
-            arm9.buildInfo = footerBuildInfo;
-        else if (Integer.compareUnsigned(headerBuildInfo, offset) > 0)
-            arm9.buildInfo = headerBuildInfo - offset;
-        else
-            arm9.buildInfo = headerBuildInfo;
+        readFooter(arm9, offset, size);
 
         byte[] data = Arrays.copyOfRange(rom, offset, offset + size);
         if (isEncrypted(data))
@@ -238,19 +256,47 @@ final class DsRomExtract
         arm9.compressed = buildInfo.readInt() != 0;
         arm9.sdkVersion = buildInfo.readInt();
 
-        if (arm9.compressed)
-        {
-            data = CodeCompression.decompress(data);
-            // compressed_code_end
-            Arrays.fill(data, arm9.buildInfo + 0x14, arm9.buildInfo + 0x18, (byte) 0);
-        }
+        arm9.data = arm9.compressed ? decompress(data, arm9.buildInfo) : data;
+        readAutoloads(arm9, autoloadInfosStart, autoloadInfosEnd, autoloadBlocks);
+        arm9.hmacKey = findHmacKey(arm9.data);
 
-        arm9.data = data;
+        return arm9;
+    }
 
-        int infoCount = (autoloadInfosEnd - autoloadInfosStart) / 12;
-        MemBuf.MemBufReader infos = MemBuf.create(Arrays.copyOfRange(data, autoloadInfosStart - arm9.baseAddress, autoloadInfosEnd - arm9.baseAddress)).reader();
-        int loadOffset = autoloadBlocks - arm9.baseAddress;
-        for (int i = 0; i < infoCount; i++)
+    private void readFooter(Arm9 arm9, int offset, int size) throws IOException
+    {
+        MemBuf.MemBufReader footer = slice(offset + size, 12);
+        int nitrocode = footer.readInt();
+        if (nitrocode != NITROCODE)
+            throw new IOException(String.format("expected nitrocode 0x%08x in ARM9 footer but got 0x%08x", NITROCODE, nitrocode));
+
+        arm9.buildInfo = buildInfoOffset(u32At(0x88), footer.readInt(), offset);
+        arm9.overlaySignatures = footer.readInt();
+    }
+
+    /** The header's build info offset is absolute when it lies past the ARM9 start; the footer's is always relative. */
+    private static int buildInfoOffset(int headerBuildInfo, int footerBuildInfo, int arm9Offset)
+    {
+        if (headerBuildInfo == 0)
+            return footerBuildInfo;
+
+        return Integer.compareUnsigned(headerBuildInfo, arm9Offset) > 0 ? headerBuildInfo - arm9Offset : headerBuildInfo;
+    }
+
+    /** Decompresses the ARM9 and clears the build info's compressed_code_end, as the code no longer is. */
+    private static byte[] decompress(byte[] data, int buildInfo)
+    {
+        byte[] out = CodeCompression.decompress(data);
+        Arrays.fill(out, buildInfo + 0x14, buildInfo + 0x18, (byte) 0);
+
+        return out;
+    }
+
+    private static void readAutoloads(Arm9 arm9, int infosStart, int infosEnd, int blocks)
+    {
+        MemBuf.MemBufReader infos = MemBuf.create(Arrays.copyOfRange(arm9.data, infosStart - arm9.baseAddress, infosEnd - arm9.baseAddress)).reader();
+        int loadOffset = blocks - arm9.baseAddress;
+        for (int i = 0; i < (infosEnd - infosStart) / 12; i++)
         {
             Autoload autoload = new Autoload();
             autoload.index = i;
@@ -258,58 +304,65 @@ final class DsRomExtract
             autoload.codeSize = infos.readInt();
             autoload.bssSize = infos.readInt();
             autoload.kind = autoloadKind(autoload.baseAddress);
-            autoload.code = Arrays.copyOfRange(data, loadOffset, loadOffset + autoload.codeSize);
+            autoload.code = Arrays.copyOfRange(arm9.data, loadOffset, loadOffset + autoload.codeSize);
             loadOffset += autoload.codeSize;
             arm9.autoloads.add(autoload);
         }
-
-        arm9.hmacKey = findHmacKey(data);
-
-        return arm9;
     }
 
     private static String autoloadKind(int baseAddress)
     {
-        switch (baseAddress)
-        {
-            case 0x1FF8000:
-                return "Itcm";
-            case 0x27E0000:
-            case 0x27C0000:
-            case 0x23C0000:
-                return "Dtcm";
-            default:
-                return "Unknown";
-        }
+        String kind = AUTOLOAD_KINDS.get(baseAddress);
+
+        return kind == null ? "Unknown" : kind;
     }
 
     private static boolean isEncrypted(byte[] data)
     {
-        if (data.length >= 8 && Arrays.equals(Arrays.copyOf(data, 8), SECURE_AREA_ID))
+        if (hasSecureAreaId(data))
             return false;
         if (data.length < 0x800)
             return true;
-        int zeroCount = 0;
-        for (int i = 0; i < 0x800; i++)
+
+        return zeroCount(data, 0x800) < SECURE_AREA_UNENCRYPTED_THRESHOLD;
+    }
+
+    private static boolean hasSecureAreaId(byte[] data)
+    {
+        return data.length >= 8 && Arrays.equals(Arrays.copyOf(data, 8), SECURE_AREA_ID);
+    }
+
+    private static int zeroCount(byte[] data, int length)
+    {
+        int count = 0;
+        for (int i = 0; i < length; i++)
         {
             if (data[i] == 0)
-                zeroCount++;
+                count++;
         }
 
-        return zeroCount < SECURE_AREA_UNENCRYPTED_THRESHOLD;
+        return count;
     }
 
     /** The 64-byte key that starts at the second word-aligned nitrocode in the ARM9 program. */
     private static byte[] findHmacKey(byte[] data)
     {
+        int start = secondNitrocode(data);
+
+        return start >= 0 && start + 64 <= data.length ? Arrays.copyOfRange(data, start, start + 64) : null;
+    }
+
+    private static int secondNitrocode(byte[] data)
+    {
+        MemBuf.MemBufReader reader = MemBuf.create(data).reader();
         int matches = 0;
         for (int i = 0; i + 4 <= data.length; i += 4)
         {
-            if (data[i] == 0x21 && data[i + 1] == 0x06 && data[i + 2] == (byte) 0xC0 && data[i + 3] == (byte) 0xDE && ++matches == 2)
-                return i + 64 <= data.length ? Arrays.copyOfRange(data, i, i + 64) : null;
+            if (reader.readInt() == NITROCODE && ++matches == 2)
+                return i;
         }
 
-        return null;
+        return -1;
     }
 
     private void writeArm9(File dir, Arm9 arm9) throws IOException
@@ -333,19 +386,21 @@ final class DsRomExtract
             writeBinary(new File(dir, "arm9/hmac_sha1_key.bin"), arm9.hmacKey);
 
         for (Autoload autoload : arm9.autoloads)
-        {
-            String name = autoload.kind.equals("Itcm") ? "itcm" : autoload.kind.equals("Dtcm") ? "dtcm" : "unk_autoload_" + autoload.index;
-            writeBinary(new File(dir, "arm9/" + name + ".bin"), autoload.code);
-            Map<String, Object> info = new LinkedHashMap<String, Object>();
-            info.put("base_address", unsigned(autoload.baseAddress));
-            info.put("code_size", unsigned(autoload.codeSize));
-            info.put("bss_size", unsigned(autoload.bssSize));
-            if (autoload.kind.equals("Unknown"))
-                info.put("kind", Collections.<String, Object> singletonMap("Unknown", autoload.index));
-            else
-                info.put("kind", autoload.kind);
-            writeYaml(new File(dir, "arm9/" + name + ".yaml"), info);
-        }
+            writeAutoload(dir, autoload);
+    }
+
+    private static void writeAutoload(File dir, Autoload autoload) throws IOException
+    {
+        boolean unknown = autoload.kind.equals("Unknown");
+        String name = unknown ? "unk_autoload_" + autoload.index : autoload.kind.toLowerCase(Locale.ROOT);
+        writeBinary(new File(dir, "arm9/" + name + ".bin"), autoload.code);
+
+        Map<String, Object> info = new LinkedHashMap<String, Object>();
+        info.put("base_address", unsigned(autoload.baseAddress));
+        info.put("code_size", unsigned(autoload.codeSize));
+        info.put("bss_size", unsigned(autoload.bssSize));
+        info.put("kind", unknown ? Collections.<String, Object> singletonMap("Unknown", autoload.index) : autoload.kind);
+        writeYaml(new File(dir, "arm9/" + name + ".yaml"), info);
     }
 
     private void writeArm7(File dir) throws IOException
@@ -370,112 +425,151 @@ final class DsRomExtract
             return out;
         MemBuf.MemBufReader table = slice(offset, size);
         for (int i = 0; i < size / 32; i++)
-        {
-            int[] row = new int[8];
-            for (int j = 0; j < 8; j++)
-            {
-                row[j] = table.readInt();
-            }
-
-            out.add(row);
-        }
+            out.add(readOverlayRow(table));
 
         return out;
+    }
+
+    private static int[] readOverlayRow(MemBuf.MemBufReader table)
+    {
+        int[] row = new int[8];
+        for (int j = 0; j < 8; j++)
+            row[j] = table.readInt();
+
+        return row;
     }
 
     /** Writes {@code overlays.yaml} and the decompressed overlays; {@code arm9} is null for ARM7 overlays. */
     private void writeOverlays(File dir, List<int[]> overlays, Arm9 arm9) throws IOException
     {
-        boolean hasSignatures = arm9 != null && arm9.overlaySignatures != 0 && arm9.overlaySignatures + 20L * overlays.size() <= arm9.data.length;
-        boolean tableSigned = arm9 != null && arm9.overlaySignatures != 0 && arm9.overlaySignatures <= arm9.data.length;
-
+        if (overlays.isEmpty())
+            return;
+        boolean signatures = hasOverlaySignatures(arm9, overlays.size());
         List<Object> configs = new ArrayList<Object>();
         for (int[] row : overlays)
         {
-            boolean compressed = (row[7] & 0x01000000) != 0;
-            boolean flaggedSigned = (row[7] & 0x02000000) != 0;
-            if (flaggedSigned && arm9 == null)
-                throw new IOException("ARM7 overlay " + row[0] + " is signed, which ds-rom does not support");
-
-            Map<String, Object> config = new LinkedHashMap<String, Object>();
-            config.put("id", unsigned(row[0]));
-            config.put("base_address", unsigned(row[1]));
-            config.put("code_size", unsigned(row[2]));
-            config.put("bss_size", unsigned(row[3]));
-            config.put("ctor_start", unsigned(row[4]));
-            config.put("ctor_end", unsigned(row[5]));
-            config.put("file_id", unsigned(row[6]));
-            config.put("compressed", compressed);
-            config.put("signed", flaggedSigned && (hasSignatures || arm9.hmacKey != null));
             String fileName = String.format("ov%03d.bin", row[0]);
-            config.put("file_name", fileName);
-            configs.add(config);
-
-            byte[] data = Arrays.copyOfRange(rom, fatStart[row[6]], fatEnd[row[6]]);
-            if (compressed)
-                data = CodeCompression.decompress(data);
-            writeBinary(new File(dir, fileName), Arrays.copyOf(data, row[2]));
+            configs.add(overlayConfig(row, isSigned(row, arm9, signatures), fileName));
+            writeBinary(new File(dir, fileName), overlayCode(row));
         }
 
         Map<String, Object> table = new LinkedHashMap<String, Object>();
+        boolean tableSigned = isTableSigned(arm9);
         table.put("table_signed", tableSigned);
         if (tableSigned)
             table.put("table_signature", hex(Arrays.copyOfRange(arm9.data, arm9.overlaySignatures - 20, arm9.overlaySignatures)));
+
         table.put("overlays", configs);
         writeYaml(new File(dir, "overlays.yaml"), table);
+    }
+
+    /** Whether the ARM9 holds a 20-byte signature for every overlay; {@code arm9} is null for ARM7 overlays. */
+    private static boolean hasOverlaySignatures(Arm9 arm9, int count)
+    {
+        return isTableSigned(arm9) && arm9.overlaySignatures + 20L * count <= arm9.data.length;
+    }
+
+    private static boolean isTableSigned(Arm9 arm9)
+    {
+        return arm9 != null && arm9.overlaySignatures != 0 && arm9.overlaySignatures <= arm9.data.length;
+    }
+
+    private static boolean isSigned(int[] row, Arm9 arm9, boolean signatures) throws IOException
+    {
+        if ((row[7] & 0x02000000) == 0)
+            return false;
+        if (arm9 == null)
+            throw new IOException("ARM7 overlay " + row[0] + " is signed, which ds-rom does not support");
+
+        return signatures || arm9.hmacKey != null;
+    }
+
+    private static Map<String, Object> overlayConfig(int[] row, boolean signed, String fileName)
+    {
+        Map<String, Object> config = new LinkedHashMap<String, Object>();
+        config.put("id", unsigned(row[0]));
+        config.put("base_address", unsigned(row[1]));
+        config.put("code_size", unsigned(row[2]));
+        config.put("bss_size", unsigned(row[3]));
+        config.put("ctor_start", unsigned(row[4]));
+        config.put("ctor_end", unsigned(row[5]));
+        config.put("file_id", unsigned(row[6]));
+        config.put("compressed", isCompressed(row));
+        config.put("signed", signed);
+        config.put("file_name", fileName);
+
+        return config;
+    }
+
+    private static boolean isCompressed(int[] row)
+    {
+        return (row[7] & 0x01000000) != 0;
+    }
+
+    private byte[] overlayCode(int[] row)
+    {
+        byte[] data = Arrays.copyOfRange(rom, fatStart[row[6]], fatEnd[row[6]]);
+
+        return Arrays.copyOf(isCompressed(row) ? CodeCompression.decompress(data) : data, row[2]);
     }
 
     private void writeBanner(File dir) throws IOException
     {
         int offset = u32At(0x68);
         int version = u16At(offset);
-        String versionName;
-        switch (version)
-        {
-            case 0x0001:
-                versionName = "Original";
-                break;
-            case 0x0002:
-                versionName = "China";
-                break;
-            case 0x0003:
-                versionName = "Korea";
-                break;
-            case 0x0103:
-                versionName = "Animated";
-                break;
-            default:
-                throw new IOException("unknown banner version 0x" + Integer.toHexString(version));
-        }
-
-        int languages = version >= 0x0003 ? 8 : version >= 0x0002 ? 7 : 6;
-        Map<String, Object> titles = new LinkedHashMap<String, Object>();
-        for (int i = 0; i < languages; i++)
-        {
-            titles.put(BANNER_LANGUAGES[i], bannerTitle(offset + 0x240 + i * 0x100));
-        }
+        String versionName = BANNER_VERSIONS.get(version);
+        if (versionName == null)
+            throw new IOException("unknown banner version 0x" + Integer.toHexString(version));
 
         Map<String, Object> images = new LinkedHashMap<String, Object>();
         images.put("bitmap_path", "bitmap.png");
         images.put("palette_path", "palette.png");
         Map<String, Object> banner = new LinkedHashMap<String, Object>();
         banner.put("version", versionName);
-        banner.put("title", titles);
+        banner.put("title", bannerTitles(offset, new IconBanner(Arrays.copyOfRange(rom, offset, offset + 0x20)).getLanguageCount()));
         banner.put("images", images);
         writeYaml(new File(dir, "banner.yaml"), banner);
 
+        int[] palette = bannerPalette(offset);
+        writePng(new File(dir, "bitmap.png"), bannerBitmap(offset, palette));
+        writePng(new File(dir, "palette.png"), paletteImage(palette));
+    }
+
+    private Map<String, Object> bannerTitles(int offset, int languages)
+    {
+        Map<String, Object> titles = new LinkedHashMap<String, Object>();
+        for (int i = 0; i < languages; i++)
+            titles.put(BANNER_LANGUAGES[i], bannerTitle(offset + 0x240 + i * 0x100));
+
+        return titles;
+    }
+
+    /** The banner's BGR555 palette as ARGB; colour 0 is transparent. */
+    private int[] bannerPalette(int offset)
+    {
         int[] palette = new int[16];
-        BufferedImage paletteImage = new BufferedImage(16, 1, BufferedImage.TYPE_INT_ARGB);
         for (int i = 0; i < 16; i++)
         {
             int color = u16At(offset + 0x220 + i * 2);
-            int r = (color & 31) << 3;
-            int g = ((color >> 5) & 31) << 3;
-            int b = ((color >> 10) & 31) << 3;
-            palette[i] = (i > 0 ? 0xFF000000 : 0) | (r << 16) | (g << 8) | b;
-            paletteImage.setRGB(i, 0, palette[i]);
+            int rgb = ((color & 31) << 19) | (((color >> 5) & 31) << 11) | (((color >> 10) & 31) << 3);
+            palette[i] = i > 0 ? 0xFF000000 | rgb : rgb;
         }
 
+        return palette;
+    }
+
+    private static BufferedImage paletteImage(int[] palette)
+    {
+        BufferedImage image = new BufferedImage(16, 1, BufferedImage.TYPE_INT_ARGB);
+        for (int i = 0; i < 16; i++)
+            image.setRGB(i, 0, palette[i]);
+
+        return image;
+    }
+
+    /** Unpacks the 32x32 bitmap from its 8x8 tiles of 4-bit palette indices. */
+    private BufferedImage bannerBitmap(int offset, int[] palette)
+    {
         BufferedImage bitmap = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 32; y++)
         {
@@ -486,8 +580,7 @@ final class DsRomExtract
             }
         }
 
-        writePng(new File(dir, "bitmap.png"), bitmap);
-        writePng(new File(dir, "palette.png"), paletteImage);
+        return bitmap;
     }
 
     /** UTF-16 title up to the first NUL or unpaired surrogate. */
@@ -528,7 +621,7 @@ final class DsRomExtract
 
     private Map<String, Object> alignments()
     {
-        Set<Integer> overlayFiles = overlayFileIds();
+        List<Integer> files = nonOverlayFiles();
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("arm9", alignment(u32At(0x20)));
         out.put("arm9_overlay_table", alignment(u32At(0x50)));
@@ -539,31 +632,28 @@ final class DsRomExtract
         out.put("file_name_table", alignment(u32At(0x40)));
         out.put("file_allocation_table", alignment(u32At(0x48)));
         out.put("banner", alignment(u32At(0x68)));
-        long minStart = Long.MAX_VALUE;
-        int fileAlignment = Integer.MAX_VALUE;
-        for (int i = 0; i < fatStart.length; i++)
-        {
-            if (overlayFiles.contains(i))
-                continue;
-            minStart = Math.min(minStart, Integer.toUnsignedLong(fatStart[i]));
-            fileAlignment = Math.min(fileAlignment, alignment(fatStart[i]));
-        }
-
-        out.put("file_image_block", minStart == Long.MAX_VALUE ? DEFAULT_ALIGNMENT : alignment((int) minStart));
-        out.put("file", fileAlignment == Integer.MAX_VALUE ? DEFAULT_ALIGNMENT : fileAlignment);
+        out.put("file_image_block", files.isEmpty() ? DEFAULT_ALIGNMENT : alignment(fatStart[files.get(0)]));
+        out.put("file", minAlignment(files));
 
         return out;
     }
 
-    private int overlayAlignment(List<int[]> overlays)
+    private int minAlignment(List<Integer> files)
     {
         int min = Integer.MAX_VALUE;
-        for (int[] row : overlays)
-        {
-            min = Math.min(min, alignment(fatStart[row[6]]));
-        }
+        for (int file : files)
+            min = Math.min(min, alignment(fatStart[file]));
 
         return min == Integer.MAX_VALUE ? DEFAULT_ALIGNMENT : min;
+    }
+
+    private int overlayAlignment(List<int[]> overlays)
+    {
+        List<Integer> files = new ArrayList<Integer>();
+        for (int[] row : overlays)
+            files.add(row[6]);
+
+        return minAlignment(files);
     }
 
     /** 0x200 when the next section starts on a 0x200 boundary, else 4. */
@@ -600,21 +690,36 @@ final class DsRomExtract
     {
         List<Integer> files = new ArrayList<Integer>();
         for (int[] row : overlays)
-        {
             files.add(row[0]);
-        }
 
         sortByStart(files);
-        for (int i = 1; i < files.size(); i++)
-        {
-            if (fatEnd[files.get(i - 1)] != fatStart[files.get(i)])
-                return byteBefore(fatStart[files.get(i)]);
-        }
+        int gap = firstGap(files);
 
-        return DEFAULT_PADDING;
+        return gap < 0 ? DEFAULT_PADDING : byteBefore(fatStart[files.get(gap)]);
     }
 
     private int fileImagePadding()
+    {
+        List<Integer> files = nonOverlayFiles();
+        int gap = firstGap(files);
+
+        return gap < 0 ? DEFAULT_PADDING : rom[fatEnd[files.get(gap - 1)]] & 0xFF;
+    }
+
+    /** The index of the first file that does not start where the one before it ends, or -1. */
+    private int firstGap(List<Integer> files)
+    {
+        for (int i = 1; i < files.size(); i++)
+        {
+            if (fatEnd[files.get(i - 1)] != fatStart[files.get(i)])
+                return i;
+        }
+
+        return -1;
+    }
+
+    /** The files that are not overlays, ordered by where they start. */
+    private List<Integer> nonOverlayFiles()
     {
         Set<Integer> overlayFiles = overlayFileIds();
         List<Integer> files = new ArrayList<Integer>();
@@ -625,13 +730,8 @@ final class DsRomExtract
         }
 
         sortByStart(files);
-        for (int i = 1; i < files.size(); i++)
-        {
-            if (fatEnd[files.get(i - 1)] != fatStart[files.get(i)])
-                return rom[fatEnd[files.get(i - 1)]] & 0xFF;
-        }
 
-        return DEFAULT_PADDING;
+        return files;
     }
 
     private void sortByStart(List<Integer> files)
@@ -647,16 +747,11 @@ final class DsRomExtract
 
     private Set<Integer> overlayFileIds()
     {
+        List<int[]> overlays = new ArrayList<int[]>(arm9Overlays);
+        overlays.addAll(arm7Overlays);
         Set<Integer> out = new TreeSet<Integer>();
-        for (int[] row : arm9Overlays)
-        {
+        for (int[] row : overlays)
             out.add(row[6]);
-        }
-
-        for (int[] row : arm7Overlays)
-        {
-            out.add(row[6]);
-        }
 
         return out;
     }
@@ -814,6 +909,14 @@ final class DsRomExtract
         }
     }
 
+    private static final Comparator<PathOrder> BY_OFFSET = new Comparator<PathOrder>() {
+        @Override
+        public int compare(PathOrder a, PathOrder b)
+        {
+            return Long.compare(a.offset, b.offset);
+        }
+    };
+
     private static final class PathOrder
     {
         final int id;
@@ -881,75 +984,75 @@ final class DsRomExtract
             }
         }
 
-        /** Port of ds-rom's {@code FileSystem::compute_path_order}. */
+        /** Port of ds-rom's {@code FileSystem::compute_path_order}: files by offset, runs that fill a sorted folder merged into it. */
         List<String> computePathOrder()
         {
             List<PathOrder> paths = new ArrayList<PathOrder>();
             collectPaths("", dirs.get(ROOT_DIR_ID), paths);
-            Collections.sort(paths, new Comparator<PathOrder>() {
-                @Override
-                public int compare(PathOrder a, PathOrder b)
-                {
-                    return Long.compare(a.offset, b.offset);
-                }
-            });
+            Collections.sort(paths, BY_OFFSET);
 
-            int childrenStart = 0;
-            while (childrenStart < paths.size())
-            {
-                int parentId = paths.get(childrenStart).parentId;
-                if (parentId == 0)
-                {
-                    childrenStart++;
-                    continue;
-                }
-
-                int childrenEnd = childrenStart;
-                while (childrenEnd < paths.size() && paths.get(childrenEnd).parentId == parentId)
-                {
-                    childrenEnd++;
-                }
-
-                while (childrenStart > 0 && paths.get(childrenStart - 1).parentId == parentId)
-                {
-                    childrenStart--;
-                }
-
-                Dir parent = dirs.get(parentId);
-                Set<Integer> visited = new HashSet<Integer>();
-                for (int i = 0; i < childrenStart; i++)
-                {
-                    visited.add(paths.get(i).id);
-                }
-
-                int unvisitedChildren = 0;
-                for (int child : parent.children)
-                {
-                    if (!visited.contains(child))
-                        unvisitedChildren++;
-                }
-
-                if (childrenEnd - childrenStart == unvisitedChildren && isSorted(paths.subList(childrenStart, childrenEnd)))
-                {
-                    PathOrder first = paths.get(childrenStart);
-                    int slash = first.pathName.lastIndexOf('/');
-                    String pathName = slash <= 0 ? "/" : first.pathName.substring(0, slash);
-                    paths.subList(childrenStart, childrenEnd).clear();
-                    paths.add(childrenStart, new PathOrder(parentId, parent.parentId, pathName, first.offset));
-                }
-                else
-                {
-                    childrenStart = childrenEnd;
-                }
-            }
+            int start = 0;
+            while (start < paths.size())
+                start = mergeRunAt(paths, start);
 
             List<String> out = new ArrayList<String>(paths.size());
             for (PathOrder path : paths)
-            {
                 out.add(path.pathName);
-            }
 
             return out;
+        }
+
+        /** Merges the run of siblings around {@code start} into their folder if it can; returns where to look next. */
+        private int mergeRunAt(List<PathOrder> paths, int start)
+        {
+            int parentId = paths.get(start).parentId;
+            if (parentId == 0)
+                return start + 1;
+
+            int end = runEnd(paths, start, parentId);
+            int runStart = runStart(paths, start, parentId);
+            if (!coversFolder(paths, runStart, end, dirs.get(parentId)))
+                return end;
+
+            PathOrder first = paths.get(runStart);
+            paths.subList(runStart, end).clear();
+            paths.add(runStart, new PathOrder(parentId, dirs.get(parentId).parentId, parentPath(first.pathName), first.offset));
+
+            return runStart;
+        }
+
+        private int runEnd(List<PathOrder> paths, int start, int parentId)
+        {
+            int end = start;
+            while (end < paths.size() && paths.get(end).parentId == parentId)
+                end++;
+
+            return end;
+        }
+
+        private int runStart(List<PathOrder> paths, int start, int parentId)
+        {
+            while (start > 0 && paths.get(start - 1).parentId == parentId)
+                start--;
+
+            return start;
+        }
+
+        /** Whether {@code paths[start, end)} is every child of {@code parent} not already listed, in name order. */
+        private boolean coversFolder(List<PathOrder> paths, int start, int end, Dir parent)
+        {
+            Set<Integer> listed = new HashSet<Integer>();
+            for (PathOrder path : paths.subList(0, start))
+                listed.add(path.id);
+
+            int unlisted = 0;
+            for (int child : parent.children)
+            {
+                if (!listed.contains(child))
+                    unlisted++;
+            }
+
+            return end - start == unlisted && isSorted(paths.subList(start, end));
         }
 
         private void collectPaths(String path, Dir parent, List<PathOrder> out)
@@ -986,10 +1089,21 @@ final class DsRomExtract
         }
     }
 
-    private static int compareUtf8(String a, String b)
+    private static String parentPath(String path)
     {
-        byte[] x = a.getBytes(StandardCharsets.UTF_8);
-        byte[] y = b.getBytes(StandardCharsets.UTF_8);
+        int slash = path.lastIndexOf('/');
+
+        return slash <= 0 ? "/" : path.substring(0, slash);
+    }
+
+    static int compareUtf8(String a, String b)
+    {
+        return compareBytes(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Unsigned lexicographic order, shorter first on a common prefix. */
+    static int compareBytes(byte[] x, byte[] y)
+    {
         for (int i = 0; i < Math.min(x.length, y.length); i++)
         {
             if (x[i] != y[i])

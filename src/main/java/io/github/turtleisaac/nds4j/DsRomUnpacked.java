@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -57,6 +58,21 @@ final class DsRomUnpacked
     // Where NintendoDsRom.save places the ARM9, which the header's build info offset is relative to.
     private static final int SAVED_ARM9_OFFSET = 0x4000;
     private static final String[] BANNER_LANGUAGES = { "japanese", "english", "french", "german", "italian", "spanish", "chinese", "korean" };
+    private static final Map<String, Integer> BANNER_VERSIONS = new HashMap<String, Integer>();
+    private static final Map<Integer, Integer> BANNER_SIZES = new HashMap<Integer, Integer>();
+
+    // dsrom build numbers a folder's files before its subfolders, each group in case-insensitive Shift-JIS order.
+    private static final Comparator<File> FNT_ORDER = DsRomUnpacked::compareFntEntries;
+    private static final Comparator<String> UTF8_ORDER = DsRomExtract::compareUtf8;
+
+    static
+    {
+        BANNER_VERSIONS.put("Original", 1);
+        BANNER_VERSIONS.put("China", 2);
+        BANNER_SIZES.put(1, 0x840);
+        BANNER_SIZES.put(2, 0x940);
+        BANNER_SIZES.put(3, 0x1240);
+    }
 
     private DsRomUnpacked()
     {
@@ -64,284 +80,67 @@ final class DsRomUnpacked
 
     static boolean isLayout(File dir)
     {
-        if (dir == null || !dir.isDirectory())
-            return false;
-        if (new File(dir, CONFIG_YAML).isFile())
-            return true;
-        if (!new File(dir, HEADER_YAML).isFile())
-            return false;
+        return dir != null && dir.isDirectory() && (new File(dir, CONFIG_YAML).isFile() || isHeaderOnlyLayout(dir));
+    }
 
-        return new File(dir, DEFAULT_FILES_DIR).isDirectory() || new File(dir, DEFAULT_ARM9).isFile();
+    private static boolean isHeaderOnlyLayout(File dir)
+    {
+        return new File(dir, HEADER_YAML).isFile() && (new File(dir, DEFAULT_FILES_DIR).isDirectory() || new File(dir, DEFAULT_ARM9).isFile());
     }
 
     static NintendoDsRom load(File dir)
     {
         Map<String, Object> config = readYamlMap(new File(dir, CONFIG_YAML));
-        String filesRel = SimpleYaml.getString(config, "files_dir", DEFAULT_FILES_DIR);
-        if (filesRel.endsWith("/") || filesRel.endsWith("\\"))
-            filesRel = filesRel.substring(0, filesRel.length() - 1);
-
         NintendoDsRom rom = new NintendoDsRom();
         rom.reserved1 = new byte[7];
         rom.capacityFromSize = true;
-        Map<String, Object> header = readYamlMap(new File(dir, SimpleYaml.getString(config, "header", HEADER_YAML)));
+
+        Map<String, Object> header = readYamlMap(configured(dir, config, "header", HEADER_YAML));
         loadHeader(rom, header);
-        Object logo = config.get("header_logo");
-        if (logo != null)
-            rom.nintendoLogo = NintendoLogo.compress(readLogo(new File(dir, SimpleYaml.asString(logo))));
+        loadLogo(rom, dir, config);
+        loadArm9Section(rom, dir, config, header);
+        loadArm7Section(rom, dir, config);
+        loadBanner(rom, dir, config);
+        loadMultiboot(rom, dir, config);
+        loadFileSystem(rom, dir, config);
 
-        File arm9File = new File(dir, SimpleYaml.getString(config, "arm9_bin", DEFAULT_ARM9));
-        if (!arm9File.isFile())
-            throw new RuntimeException("ds-rom extract is missing ARM9 binary: " + arm9File.getAbsolutePath());
-        Map<String, Object> arm9cfg = readYamlMap(new File(dir, SimpleYaml.getString(config, "arm9_config", DEFAULT_ARM9_YAML)));
-        rom.arm9LoadAddress = SimpleYaml.getInt(arm9cfg, "base_address", rom.arm9LoadAddress);
-        rom.arm9EntryAddress = SimpleYaml.getInt(arm9cfg, "entry_function", rom.arm9EntryAddress);
-        rom.arm9Autoload = SimpleYaml.getInt(arm9cfg, "autoload_callback", rom.arm9Autoload);
-        rom.arm9 = loadArm9(dir, config, arm9cfg, Buffer.readFile(arm9File.getAbsolutePath()), rom.arm9LoadAddress);
-        rom.arm9Length = rom.arm9.length;
-        if (arm9cfg.containsKey("build_info"))
-        {
-            int buildInfo = SimpleYaml.getInt(arm9cfg, "build_info", 0);
-            MemBuf footer = MemBuf.create();
-            footer.writer().writeInt(DsRomExtract.NITROCODE).writeInt(buildInfo).writeInt(SimpleYaml.getInt(arm9cfg, "overlay_signatures", 0));
-            byte[] footerBytes = footer.reader().getBuffer();
-            rom.arm9PostData = new int[footerBytes.length];
-            for (int i = 0; i < footerBytes.length; i++)
-            {
-                rom.arm9PostData[i] = footerBytes[i] & 0xFF;
-            }
-
-            if (SimpleYaml.getBoolean(header, "has_arm9_build_info_offset", false))
-                putInt(rom.padding_088h, 0, SAVED_ARM9_OFFSET + buildInfo);
-        }
-
-        File arm7File = new File(dir, SimpleYaml.getString(config, "arm7_bin", DEFAULT_ARM7));
-        if (!arm7File.isFile())
-            throw new RuntimeException("ds-rom extract is missing ARM7 binary: " + arm7File.getAbsolutePath());
-        rom.arm7 = Buffer.readFile(arm7File.getAbsolutePath());
-        rom.arm7Length = rom.arm7.length;
-        Map<String, Object> arm7cfg = readYamlMap(new File(dir, SimpleYaml.getString(config, "arm7_config", DEFAULT_ARM7_YAML)));
-        rom.arm7LoadAddress = SimpleYaml.getInt(arm7cfg, "base_address", rom.arm7LoadAddress);
-        rom.arm7EntryAddress = SimpleYaml.getInt(arm7cfg, "entry_function", rom.arm7EntryAddress);
-        rom.arm7Autoload = SimpleYaml.getInt(arm7cfg, "autoload_callback", rom.arm7Autoload);
-
-        Object banner = config.get("banner");
-        if (banner != null && new File(dir, SimpleYaml.asString(banner)).isFile())
-            rom.iconBanner = loadBanner(new File(dir, SimpleYaml.asString(banner)));
-        Object multiboot = config.get("multiboot_signature");
-        if (multiboot != null)
-            rom.rsaSignature = loadMultibootSignature(readYamlMap(new File(dir, SimpleYaml.asString(multiboot))));
-
-        List<OverlayEntry> arm9Overlays = loadOverlays(dir, config.get("arm9_overlays"), DEFAULT_ARM9_OVERLAYS);
-        List<OverlayEntry> arm7Overlays = loadOverlays(dir, config.get("arm7_overlays"), DEFAULT_ARM7_OVERLAYS);
-        rom.y9 = buildOverlayTable(arm9Overlays);
-        rom.y9Length = rom.y9.length;
-        rom.y7 = buildOverlayTable(arm7Overlays);
-        rom.y7Length = rom.y7.length;
-
-        File filesDir = new File(dir, filesRel);
-        if (!filesDir.isDirectory())
-            throw new RuntimeException("ds-rom extract is missing files/ directory: " + filesDir.getAbsolutePath());
-
-        List<OverlayEntry> allOverlays = new ArrayList<OverlayEntry>(arm9Overlays);
-        allOverlays.addAll(arm7Overlays);
-        int maxOverlayFileId = -1;
-        for (OverlayEntry ov : allOverlays)
-        {
-            maxOverlayFileId = Math.max(maxOverlayFileId, ov.fileId);
-        }
-
-        int numFiles = maxOverlayFileId + 1 + Fnt.calculateNumFiles(filesDir);
-        rom.files = new ArrayList<byte[]>();
-        for (int i = 0; i < numFiles; i++)
-        {
-            rom.files.add(null);
-        }
-
-        for (OverlayEntry ov : allOverlays)
-        {
-            if (ov.fileId < 0 || ov.fileId >= rom.files.size())
-                throw new RuntimeException("overlay file_id " + ov.fileId + " is outside the file table");
-            if (!ov.bin.isFile())
-                throw new RuntimeException("ds-rom overlay binary missing: " + ov.bin.getAbsolutePath());
-            rom.files.set(ov.fileId, Buffer.readFile(ov.bin.getAbsolutePath()));
-        }
-
-        rom.filenames = loadFolder(filesDir, rom.files);
-        if (rom.files.contains(null))
-            throw new RuntimeException("Internal file table not properly filled");
-
-        MemBuf fntBuf = Fnt.save(rom.filenames);
-        rom.fnt = fntBuf.reader().getBuffer();
-        rom.fntLength = rom.fnt.length;
-
-        File pathOrder = new File(dir, SimpleYaml.getString(config, "path_order", "path_order.txt"));
-        if (pathOrder.isFile())
-            rom.sortedFileIDs = fileOrder(rom.filenames, new String(Buffer.readFile(pathOrder.getAbsolutePath()), StandardCharsets.UTF_8).split("\n"));
         return rom;
-    }
-
-    /** Reads {@code dir} into the next free file ids in the order {@code dsrom build} numbers files and folders. */
-    private static Fnt.Folder loadFolder(File dir, ArrayList<byte[]> files)
-    {
-        Fnt.Folder folder = new Fnt.Folder(dir.getName());
-        List<File> children = new ArrayList<File>();
-        for (File child : Objects.requireNonNull(dir.listFiles()))
-        {
-            if (!child.isHidden())
-                children.add(child);
-        }
-
-        Collections.sort(children, new Comparator<File>() {
-            @Override
-            public int compare(File a, File b)
-            {
-                if (a.isDirectory() != b.isDirectory())
-                    return a.isDirectory() ? 1 : -1;
-
-                return compareBytes(fntSortKey(a.getName()), fntSortKey(b.getName()));
-            }
-        });
-        folder.firstId = files.indexOf(null) < 0 ? files.size() : files.indexOf(null);
-        for (File child : children)
-        {
-            if (child.isDirectory())
-                continue;
-            int id = files.indexOf(null);
-            if (id < 0)
-                throw new RuntimeException("No available file IDs to allocate.");
-            folder.files.add(child.getName());
-            files.set(id, Buffer.readFile(child.getAbsolutePath()));
-        }
-
-        for (File child : children)
-        {
-            if (child.isDirectory())
-                folder.folders.put(child.getName(), loadFolder(child, files));
-        }
-
-        return folder;
-    }
-
-    /** Shift-JIS bytes lowercased byte by byte, the strcasecmp-like key ds-rom sorts FNT entries by. */
-    private static byte[] fntSortKey(String name)
-    {
-        byte[] bytes;
-        try
-        {
-            bytes = name.getBytes(Charset.forName("windows-31j"));
-        }
-        catch (IllegalArgumentException e)
-        {
-            bytes = name.getBytes(StandardCharsets.UTF_8);
-        }
-
-        for (int i = 0; i < bytes.length; i++)
-        {
-            if (bytes[i] >= 'A' && bytes[i] <= 'Z')
-                bytes[i] += 'a' - 'A';
-        }
-
-        return bytes;
-    }
-
-    /** The order {@code dsrom build} lays files out in: each path_order entry, a folder's unvisited files by name. */
-    private static ArrayList<Integer> fileOrder(Fnt.Folder root, String[] pathOrder)
-    {
-        ArrayList<Integer> order = new ArrayList<Integer>();
-        Set<Integer> visitedFiles = new HashSet<Integer>();
-        Set<Fnt.Folder> visitedFolders = Collections.newSetFromMap(new IdentityHashMap<Fnt.Folder, Boolean>());
-        for (String line : pathOrder)
-        {
-            String path = line.startsWith("/") ? line.substring(1) : line;
-            if (path.trim().isEmpty())
-            {
-                addFolderFiles(root, order, visitedFiles, visitedFolders);
-                continue;
-            }
-
-            Fnt.Folder parent = root;
-            String[] parts = path.split("/");
-            for (int i = 0; i < parts.length - 1 && parent != null; i++)
-            {
-                parent = parent.getFolders().get(parts[i]);
-            }
-
-            if (parent == null)
-                continue;
-            String last = parts[parts.length - 1];
-            if (parent.getFolders().containsKey(last))
-                addFolderFiles(parent.getFolders().get(last), order, visitedFiles, visitedFolders);
-            else if (parent.getFiles().contains(last) && visitedFiles.add(parent.getFirstId() + parent.getFiles().indexOf(last)))
-                order.add(parent.getFirstId() + parent.getFiles().indexOf(last));
-        }
-
-        return order;
-    }
-
-    private static void addFolderFiles(Fnt.Folder folder, List<Integer> order, Set<Integer> visitedFiles, Set<Fnt.Folder> visitedFolders)
-    {
-        if (!visitedFolders.add(folder))
-            return;
-        List<String> names = new ArrayList<String>(folder.getFiles());
-        names.addAll(folder.getFolders().keySet());
-        Collections.sort(names, new Comparator<String>() {
-            @Override
-            public int compare(String a, String b)
-            {
-                return compareUtf8(a, b);
-            }
-        });
-        for (String name : names)
-        {
-            Fnt.Folder sub = folder.getFolders().get(name);
-            if (sub != null)
-            {
-                addFolderFiles(sub, order, visitedFiles, visitedFolders);
-                continue;
-            }
-
-            int id = folder.getFirstId() + folder.getFiles().indexOf(name);
-            if (visitedFiles.add(id))
-                order.add(id);
-        }
-    }
-
-    private static int compareUtf8(String a, String b)
-    {
-        return compareBytes(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static int compareBytes(byte[] x, byte[] y)
-    {
-        for (int i = 0; i < Math.min(x.length, y.length); i++)
-        {
-            if (x[i] != y[i])
-                return (x[i] & 0xFF) - (y[i] & 0xFF);
-        }
-
-        return x.length - y.length;
     }
 
     /** Writes {@code rom} to {@code dir} as {@code dsrom extract} would extract the ROM {@code rom} saves to. */
     static void save(NintendoDsRom rom, File dir) throws IOException
     {
-        if (dir.exists() && dir.isDirectory() && Objects.requireNonNull(dir.listFiles()).length != 0)
+        if (isNonEmptyDir(dir))
             throw new IOException("Unable to write ds-rom extract, target folder already exists");
-        else if (!dir.exists() && !dir.mkdirs())
+        if (!dir.isDirectory() && !dir.mkdirs())
             throw new IOException("Failed to create ds-rom extract directory, check write perms.");
+
         DsRomExtract.write(rom.save(false), dir);
+    }
+
+    private static boolean isNonEmptyDir(File dir)
+    {
+        return dir.isDirectory() && Objects.requireNonNull(dir.listFiles()).length != 0;
+    }
+
+    private static File configured(File dir, Map<String, Object> config, String key, String fallback)
+    {
+        return new File(dir, SimpleYaml.getString(config, key, fallback));
+    }
+
+    private static File requireFile(File file, String what)
+    {
+        if (!file.isFile())
+            throw new RuntimeException("ds-rom extract is missing " + what + ": " + file.getAbsolutePath());
+
+        return file;
     }
 
     private static void loadHeader(NintendoDsRom rom, Map<String, Object> header)
     {
         rom.title = SimpleYaml.getString(header, "title", rom.title);
-        String gamecode = SimpleYaml.getString(header, "gamecode", rom.gameCode);
-        if (gamecode != null && !gamecode.isEmpty())
-            rom.gameCode = gamecode.length() >= 4 ? gamecode.substring(0, 4) : gamecode;
-        String maker = SimpleYaml.getString(header, "makercode", rom.developerCode);
-        if (maker != null)
-            rom.developerCode = maker.length() >= 2 ? maker.substring(0, 2) : maker;
+        rom.gameCode = truncate(SimpleYaml.getString(header, "gamecode", rom.gameCode), 4);
+        rom.developerCode = truncate(SimpleYaml.getString(header, "makercode", rom.developerCode), 2);
         rom.unitCode = SimpleYaml.getInt(header, "unitcode", rom.unitCode);
         rom.encryptionSeed = SimpleYaml.getInt(header, "seed_select", rom.encryptionSeed);
         rom.systemRegion = SimpleYaml.getInt(header, "ds_flags", rom.systemRegion);
@@ -350,18 +149,88 @@ final class DsRomUnpacked
         rom.normalCardControlRegisterSettings = SimpleYaml.getInt(header, "normal_cmd_setting", rom.normalCardControlRegisterSettings);
         rom.secureCardControlRegisterSettings = SimpleYaml.getInt(header, "key1_cmd_setting", rom.secureCardControlRegisterSettings);
         rom.secureTransferTimeout = (short) SimpleYaml.getInt(header, "secure_area_delay", rom.secureTransferTimeout);
-        putShort(rom.padding_088h, 0x94 - 0x88, SimpleYaml.getInt(header, "rom_nand_end", 0));
-        putShort(rom.padding_088h, 0x96 - 0x88, SimpleYaml.getInt(header, "rw_nand_end", 0));
+
+        MemBuf nandEnds = MemBuf.create();
+        nandEnds.writer().writeShort((short) SimpleYaml.getInt(header, "rom_nand_end", 0)).writeShort((short) SimpleYaml.getInt(header, "rw_nand_end", 0));
+        patch(rom.padding_088h, 0x94 - 0x88, nandEnds);
 
         Object postDsi = header.get("ds_post_dsi");
-        if (postDsi == null)
-            return;
-        Map<String, Object> fields = SimpleYaml.asMap(postDsi);
-        putInt(rom.padding_16Ch, 0x1BC - 0x16C, SimpleYaml.getInt(fields, "dsi_flags_2", 0));
-        putBytes(rom.padding_200h, 0x33C - 0x200, fields.get("sha1_hmac_banner"));
-        putBytes(rom.padding_200h, 0x378 - 0x200, fields.get("sha1_hmac_unk1"));
-        putBytes(rom.padding_200h, 0x38C - 0x200, fields.get("sha1_hmac_unk2"));
-        putBytes(rom.padding_200h, 0xF80 - 0x200, fields.get("rsa_sha1"));
+        if (postDsi != null)
+            loadPostDsiHeader(rom, SimpleYaml.asMap(postDsi));
+    }
+
+    private static String truncate(String value, int length)
+    {
+        return value.length() > length ? value.substring(0, length) : value;
+    }
+
+    private static void loadPostDsiHeader(NintendoDsRom rom, Map<String, Object> fields)
+    {
+        MemBuf flags = MemBuf.create();
+        flags.writer().writeInt(SimpleYaml.getInt(fields, "dsi_flags_2", 0));
+        patch(rom.padding_16Ch, 0x1BC - 0x16C, flags);
+
+        patchList(rom.padding_200h, 0x33C - 0x200, fields.get("sha1_hmac_banner"));
+        patchList(rom.padding_200h, 0x378 - 0x200, fields.get("sha1_hmac_unk1"));
+        patchList(rom.padding_200h, 0x38C - 0x200, fields.get("sha1_hmac_unk2"));
+        patchList(rom.padding_200h, 0xF80 - 0x200, fields.get("rsa_sha1"));
+    }
+
+    private static void loadLogo(NintendoDsRom rom, File dir, Map<String, Object> config)
+    {
+        Object logo = config.get("header_logo");
+        if (logo != null)
+            rom.nintendoLogo = NintendoLogo.compress(readLogo(new File(dir, SimpleYaml.asString(logo))));
+    }
+
+    private static void loadArm9Section(NintendoDsRom rom, File dir, Map<String, Object> config, Map<String, Object> header)
+    {
+        File arm9File = requireFile(configured(dir, config, "arm9_bin", DEFAULT_ARM9), "ARM9 binary");
+        Map<String, Object> arm9cfg = readYamlMap(configured(dir, config, "arm9_config", DEFAULT_ARM9_YAML));
+        rom.arm9LoadAddress = SimpleYaml.getInt(arm9cfg, "base_address", rom.arm9LoadAddress);
+        rom.arm9EntryAddress = SimpleYaml.getInt(arm9cfg, "entry_function", rom.arm9EntryAddress);
+        rom.arm9Autoload = SimpleYaml.getInt(arm9cfg, "autoload_callback", rom.arm9Autoload);
+        rom.arm9 = loadArm9(dir, config, arm9cfg, Buffer.readFile(arm9File.getAbsolutePath()), rom.arm9LoadAddress);
+        rom.arm9Length = rom.arm9.length;
+
+        if (arm9cfg.containsKey("build_info"))
+            loadArm9Footer(rom, arm9cfg, header);
+    }
+
+    private static void loadArm9Footer(NintendoDsRom rom, Map<String, Object> arm9cfg, Map<String, Object> header)
+    {
+        int buildInfo = SimpleYaml.getInt(arm9cfg, "build_info", 0);
+        MemBuf footer = MemBuf.create();
+        footer.writer().writeInt(DsRomExtract.NITROCODE).writeInt(buildInfo).writeInt(SimpleYaml.getInt(arm9cfg, "overlay_signatures", 0));
+        rom.arm9PostData = unsignedBytes(footer.reader().getBuffer());
+
+        if (SimpleYaml.getBoolean(header, "has_arm9_build_info_offset", false))
+        {
+            MemBuf offset = MemBuf.create();
+            offset.writer().writeInt(SAVED_ARM9_OFFSET + buildInfo);
+            patch(rom.padding_088h, 0, offset);
+        }
+    }
+
+    private static int[] unsignedBytes(byte[] bytes)
+    {
+        int[] out = new int[bytes.length];
+        for (int i = 0; i < bytes.length; i++)
+            out[i] = bytes[i] & 0xFF;
+
+        return out;
+    }
+
+    private static void loadArm7Section(NintendoDsRom rom, File dir, Map<String, Object> config)
+    {
+        File arm7File = requireFile(configured(dir, config, "arm7_bin", DEFAULT_ARM7), "ARM7 binary");
+        rom.arm7 = Buffer.readFile(arm7File.getAbsolutePath());
+        rom.arm7Length = rom.arm7.length;
+
+        Map<String, Object> arm7cfg = readYamlMap(configured(dir, config, "arm7_config", DEFAULT_ARM7_YAML));
+        rom.arm7LoadAddress = SimpleYaml.getInt(arm7cfg, "base_address", rom.arm7LoadAddress);
+        rom.arm7EntryAddress = SimpleYaml.getInt(arm7cfg, "entry_function", rom.arm7EntryAddress);
+        rom.arm7Autoload = SimpleYaml.getInt(arm7cfg, "autoload_callback", rom.arm7Autoload);
     }
 
     /** Re-appends the autoloads and their info table to the ARM9 code and points the build info at them. */
@@ -370,40 +239,16 @@ final class DsRomUnpacked
         if (!arm9cfg.containsKey("build_info") || !arm9cfg.containsKey("bss_start"))
             return code;
 
-        List<Autoload> autoloads = new ArrayList<Autoload>();
-        addAutoload(dir, config.get("itcm"), 0, autoloads);
-        addAutoload(dir, config.get("dtcm"), 1, autoloads);
-        Object unknown = config.get("unknown_autoloads");
-        if (unknown != null)
-        {
-            for (Object entry : SimpleYaml.asList(unknown))
-            {
-                addAutoload(dir, entry, 2 + SimpleYaml.getInt(SimpleYaml.asMap(entry), "index", 0), autoloads);
-            }
-        }
-
-        Collections.sort(autoloads, new Comparator<Autoload>() {
-            @Override
-            public int compare(Autoload a, Autoload b)
-            {
-                return Integer.compare(a.order, b.order);
-            }
-        });
-
-        MemBuf buf = MemBuf.create();
+        MemBuf buf = MemBuf.create(code);
         MemBuf.MemBufWriter writer = buf.writer();
-        writer.write(code);
+        List<Autoload> autoloads = collectAutoloads(dir, config);
         int autoloadBlocks = baseAddress + writer.getPosition();
         for (Autoload autoload : autoloads)
-        {
             writer.write(autoload.code);
-        }
 
         int infosStart = baseAddress + writer.getPosition();
         for (Autoload autoload : autoloads)
-        {
             writer.writeInt(autoload.baseAddress).writeInt(autoload.codeSize).writeInt(autoload.bssSize);
-        }
 
         int infosEnd = baseAddress + writer.getPosition();
         writer.setPosition(SimpleYaml.getInt(arm9cfg, "build_info", 0));
@@ -417,6 +262,21 @@ final class DsRomUnpacked
         return buf.reader().getBuffer();
     }
 
+    /** ITCM, then DTCM, then the unknown autoloads by index: the order the info table lists them in. */
+    private static List<Autoload> collectAutoloads(File dir, Map<String, Object> config)
+    {
+        List<Autoload> autoloads = new ArrayList<Autoload>();
+        addAutoload(dir, config.get("itcm"), 0, autoloads);
+        addAutoload(dir, config.get("dtcm"), 1, autoloads);
+        Object unknown = config.get("unknown_autoloads");
+        for (Object entry : unknown == null ? Collections.emptyList() : SimpleYaml.asList(unknown))
+            addAutoload(dir, entry, 2 + SimpleYaml.getInt(SimpleYaml.asMap(entry), "index", 0), autoloads);
+
+        Collections.sort(autoloads, Comparator.comparingInt(autoload -> autoload.order));
+
+        return autoloads;
+    }
+
     private static void addAutoload(File dir, Object paths, int order, List<Autoload> out)
     {
         if (paths == null)
@@ -426,6 +286,7 @@ final class DsRomUnpacked
         File yaml = new File(dir, SimpleYaml.getString(map, "config", ""));
         if (!bin.isFile() || !yaml.isFile())
             return;
+
         Map<String, Object> info = readYamlMap(yaml);
         Autoload autoload = new Autoload();
         autoload.order = order;
@@ -439,30 +300,54 @@ final class DsRomUnpacked
     private static boolean[][] readLogo(File file)
     {
         BufferedImage image = readPng(file);
-        if (image.getWidth() != NintendoLogo.WIDTH || image.getHeight() != NintendoLogo.HEIGHT)
-            throw new RuntimeException("header logo must be 104x16 pixels: " + file.getAbsolutePath());
+        requireSize(image, NintendoLogo.WIDTH, NintendoLogo.HEIGHT, file);
         boolean[][] pixels = new boolean[NintendoLogo.HEIGHT][NintendoLogo.WIDTH];
         for (int y = 0; y < NintendoLogo.HEIGHT; y++)
         {
             for (int x = 0; x < NintendoLogo.WIDTH; x++)
-            {
                 pixels[y][x] = (image.getRGB(x, y) & 0xFFFFFF) == 0;
-            }
         }
 
         return pixels;
     }
 
+    private static void requireSize(BufferedImage image, int width, int height, File file)
+    {
+        if (image.getWidth() != width || image.getHeight() != height)
+            throw new RuntimeException(String.format("%s must be %dx%d pixels", file.getAbsolutePath(), width, height));
+    }
+
+    private static void loadBanner(NintendoDsRom rom, File dir, Map<String, Object> config)
+    {
+        File banner = configured(dir, config, "banner", "");
+        if (banner.isFile())
+            rom.iconBanner = readBanner(banner);
+    }
+
     /** Builds the raw banner; an animated (DSi) banner comes back as version 3, as its animation is not extracted. */
-    private static byte[] loadBanner(File yaml)
+    private static byte[] readBanner(File yaml)
     {
         Map<String, Object> banner = readYamlMap(yaml);
-        String version = SimpleYaml.getString(banner, "version", "Original");
-        int versionNumber = "China".equals(version) ? 2 : "Original".equals(version) ? 1 : 3;
-        byte[] data = new byte[versionNumber == 1 ? 0x840 : versionNumber == 2 ? 0x940 : 0xA40];
-        putShort(data, 0, versionNumber);
+        Integer known = BANNER_VERSIONS.get(SimpleYaml.getString(banner, "version", "Original"));
+        int version = known == null ? 3 : known;
+        byte[] data = new byte[BANNER_SIZES.get(version)];
+        data[0] = (byte) version;
+        writeTitles(data, SimpleYaml.asMap(banner.get("title")));
 
-        Map<String, Object> titles = SimpleYaml.asMap(banner.get("title"));
+        Map<String, Object> images = SimpleYaml.asMap(banner.get("images"));
+        File dir = yaml.getParentFile();
+        BufferedImage palette = readPng(new File(dir, SimpleYaml.getString(images, "palette_path", "palette.png")));
+        BufferedImage bitmap = readPng(new File(dir, SimpleYaml.getString(images, "bitmap_path", "bitmap.png")));
+        requireSize(palette, 16, 1, dir);
+        requireSize(bitmap, 32, 32, dir);
+        System.arraycopy(encodeBitmap(bitmap, palette), 0, data, 0x20, 0x200);
+        patch(data, 0x220, encodePalette(palette));
+
+        return new IconBanner(data).toBytes();
+    }
+
+    private static void writeTitles(byte[] data, Map<String, Object> titles)
+    {
         for (int i = 0; i < BANNER_LANGUAGES.length; i++)
         {
             String title = SimpleYaml.getString(titles, BANNER_LANGUAGES[i], null);
@@ -472,30 +357,31 @@ final class DsRomUnpacked
             byte[] utf16 = title.getBytes(StandardCharsets.UTF_16LE);
             System.arraycopy(utf16, 0, data, offset, Math.min(utf16.length, 0x100));
         }
+    }
 
-        Map<String, Object> images = SimpleYaml.asMap(banner.get("images"));
-        File dir = yaml.getParentFile();
-        BufferedImage palette = readPng(new File(dir, SimpleYaml.getString(images, "palette_path", "palette.png")));
-        BufferedImage bitmap = readPng(new File(dir, SimpleYaml.getString(images, "bitmap_path", "bitmap.png")));
-        if (palette.getWidth() != 16 || palette.getHeight() != 1 || bitmap.getWidth() != 32 || bitmap.getHeight() != 32)
-            throw new RuntimeException("banner bitmap must be 32x32 and its palette 16x1: " + dir.getAbsolutePath());
+    private static MemBuf encodePalette(BufferedImage palette)
+    {
+        MemBuf out = MemBuf.create();
         for (int i = 0; i < 16; i++)
         {
             int rgb = palette.getRGB(i, 0);
-            putShort(data, 0x220 + i * 2, ((rgb >> 19) & 31) | (((rgb >> 11) & 31) << 5) | (((rgb >> 3) & 31) << 10));
+            out.writer().writeShort((short) (((rgb >> 19) & 31) | (((rgb >> 11) & 31) << 5) | (((rgb >> 3) & 31) << 10)));
         }
 
+        return out;
+    }
+
+    /** Packs the 32x32 bitmap into 8x8 tiles of 4-bit palette indices. */
+    private static byte[] encodeBitmap(BufferedImage bitmap, BufferedImage palette)
+    {
+        byte[] out = new byte[0x200];
         for (int y = 0; y < 32; y++)
         {
             for (int x = 0; x < 32; x++)
-            {
-                int index = paletteIndex(bitmap.getRGB(x, y), palette);
-                int at = 0x20 + (y / 8 * 0x80) + (x / 8 * 0x20) + (y % 8 * 4) + (x / 2 % 4);
-                data[at] |= (byte) (index << ((x % 2) * 4));
-            }
+                out[(y / 8 * 0x80) + (x / 8 * 0x20) + (y % 8 * 4) + (x / 2 % 4)] |= (byte) (paletteIndex(bitmap.getRGB(x, y), palette) << ((x % 2) * 4));
         }
 
-        return new IconBanner(data).toBytes();
+        return out;
     }
 
     private static int paletteIndex(int argb, BufferedImage palette)
@@ -511,27 +397,187 @@ final class DsRomUnpacked
         throw new RuntimeException(String.format("banner pixel color %08x is not in its palette", argb));
     }
 
+    private static void loadMultiboot(NintendoDsRom rom, File dir, Map<String, Object> config)
+    {
+        Object multiboot = config.get("multiboot_signature");
+        if (multiboot != null)
+            rom.rsaSignature = readMultibootSignature(readYamlMap(new File(dir, SimpleYaml.asString(multiboot))));
+    }
+
     /** Rebuilds the 0x88-byte signature block that sits at the end of the ROM. */
-    private static byte[] loadMultibootSignature(Map<String, Object> yaml)
+    private static byte[] readMultibootSignature(Map<String, Object> yaml)
     {
         Object rsa = yaml.get("rsa_signature");
         if (!(rsa instanceof byte[]) || ((byte[]) rsa).length != 0x80)
             throw new RuntimeException("multiboot signature needs a 128-byte !!binary rsa_signature");
+
         MemBuf buf = MemBuf.create();
         buf.writer().writeInt(SimpleYaml.getInt(yaml, "magic", 0)).write((byte[]) rsa).writeInt(SimpleYaml.getInt(yaml, "key_seed", 0));
 
         return buf.reader().getBuffer();
     }
 
+    private static void loadFileSystem(NintendoDsRom rom, File dir, Map<String, Object> config)
+    {
+        List<OverlayEntry> arm9Overlays = loadOverlays(dir, config.get("arm9_overlays"), DEFAULT_ARM9_OVERLAYS);
+        List<OverlayEntry> arm7Overlays = loadOverlays(dir, config.get("arm7_overlays"), DEFAULT_ARM7_OVERLAYS);
+        rom.y9 = buildOverlayTable(arm9Overlays);
+        rom.y9Length = rom.y9.length;
+        rom.y7 = buildOverlayTable(arm7Overlays);
+        rom.y7Length = rom.y7.length;
+
+        File filesDir = filesDir(dir, config);
+        List<OverlayEntry> overlays = new ArrayList<OverlayEntry>(arm9Overlays);
+        overlays.addAll(arm7Overlays);
+        rom.files = emptyFileTable(maxFileId(overlays) + 1 + Fnt.calculateNumFiles(filesDir));
+        for (OverlayEntry overlay : overlays)
+            rom.files.set(overlay.fileId, readOverlay(overlay, rom.files.size()));
+
+        rom.filenames = loadFolder(filesDir, rom.files);
+        if (rom.files.contains(null))
+            throw new RuntimeException("Internal file table not properly filled");
+
+        rom.fnt = Fnt.save(rom.filenames).reader().getBuffer();
+        rom.fntLength = rom.fnt.length;
+        File pathOrder = configured(dir, config, "path_order", "path_order.txt");
+        if (pathOrder.isFile())
+            rom.sortedFileIDs = new FileOrder(rom.filenames).of(new String(Buffer.readFile(pathOrder.getAbsolutePath()), StandardCharsets.UTF_8).split("\n"));
+    }
+
+    private static File filesDir(File dir, Map<String, Object> config)
+    {
+        String rel = SimpleYaml.getString(config, "files_dir", DEFAULT_FILES_DIR);
+        File filesDir = new File(dir, rel.replaceAll("[/\\\\]$", ""));
+        if (!filesDir.isDirectory())
+            throw new RuntimeException("ds-rom extract is missing files/ directory: " + filesDir.getAbsolutePath());
+
+        return filesDir;
+    }
+
+    private static int maxFileId(List<OverlayEntry> overlays)
+    {
+        int max = -1;
+        for (OverlayEntry overlay : overlays)
+            max = Math.max(max, overlay.fileId);
+
+        return max;
+    }
+
+    private static ArrayList<byte[]> emptyFileTable(int size)
+    {
+        return new ArrayList<byte[]>(Collections.<byte[]> nCopies(size, null));
+    }
+
+    private static byte[] readOverlay(OverlayEntry overlay, int fileCount)
+    {
+        if (overlay.fileId < 0 || overlay.fileId >= fileCount)
+            throw new RuntimeException("overlay file_id " + overlay.fileId + " is outside the file table");
+
+        return Buffer.readFile(requireFile(overlay.bin, "overlay binary").getAbsolutePath());
+    }
+
+    /** Reads {@code dir} into the next free file ids in the order {@code dsrom build} numbers files and folders. */
+    private static Fnt.Folder loadFolder(File dir, ArrayList<byte[]> files)
+    {
+        Fnt.Folder folder = new Fnt.Folder(dir.getName());
+        List<File> children = visibleChildren(dir);
+        Collections.sort(children, FNT_ORDER);
+        folder.firstId = files.indexOf(null) < 0 ? files.size() : files.indexOf(null);
+        for (File child : children)
+            addChild(folder, child, files);
+
+        return folder;
+    }
+
+    private static List<File> visibleChildren(File dir)
+    {
+        List<File> children = new ArrayList<File>();
+        for (File child : Objects.requireNonNull(dir.listFiles()))
+        {
+            if (!child.isHidden())
+                children.add(child);
+        }
+
+        return children;
+    }
+
+    private static void addChild(Fnt.Folder folder, File child, ArrayList<byte[]> files)
+    {
+        if (child.isDirectory())
+        {
+            folder.folders.put(child.getName(), loadFolder(child, files));
+            return;
+        }
+
+        int id = files.indexOf(null);
+        if (id < 0)
+            throw new RuntimeException("No available file IDs to allocate.");
+        folder.files.add(child.getName());
+        files.set(id, Buffer.readFile(child.getAbsolutePath()));
+    }
+
+    private static int compareFntEntries(File a, File b)
+    {
+        if (a.isDirectory() != b.isDirectory())
+            return a.isDirectory() ? 1 : -1;
+
+        return DsRomExtract.compareBytes(fntSortKey(a.getName()), fntSortKey(b.getName()));
+    }
+
+    /** Shift-JIS bytes lowercased byte by byte, the strcasecmp-like key ds-rom sorts FNT entries by. */
+    private static byte[] fntSortKey(String name)
+    {
+        byte[] bytes = shiftJis(name);
+        for (int i = 0; i < bytes.length; i++)
+        {
+            if (bytes[i] >= 'A' && bytes[i] <= 'Z')
+                bytes[i] += 'a' - 'A';
+        }
+
+        return bytes;
+    }
+
+    private static byte[] shiftJis(String name)
+    {
+        try
+        {
+            return name.getBytes(Charset.forName("windows-31j"));
+        }
+        catch (IllegalArgumentException e)
+        {
+            return name.getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    private static void patch(byte[] target, int offset, MemBuf bytes)
+    {
+        byte[] data = bytes.reader().getBuffer();
+        System.arraycopy(data, 0, target, offset, data.length);
+    }
+
+    private static void patchList(byte[] target, int offset, Object list)
+    {
+        if (list == null)
+            return;
+        List<Object> values = SimpleYaml.asList(list);
+        for (int i = 0; i < values.size(); i++)
+            target[offset + i] = (byte) SimpleYaml.asInt(values.get(i));
+    }
+
+    private static Map<String, Object> readYamlMap(File file)
+    {
+        if (!file.isFile())
+            return Collections.emptyMap();
+        Object parsed = SimpleYaml.parse(new String(Buffer.readFile(file.getAbsolutePath()), StandardCharsets.UTF_8));
+
+        return parsed == null ? Collections.<String, Object> emptyMap() : SimpleYaml.asMap(parsed);
+    }
+
     private static BufferedImage readPng(File file)
     {
         try
         {
-            BufferedImage image = ImageIO.read(file);
-            if (image == null)
-                throw new RuntimeException("not a readable image: " + file.getAbsolutePath());
-
-            return image;
+            return Objects.requireNonNull(ImageIO.read(file), "not a readable image: " + file.getAbsolutePath());
         }
         catch (IOException e)
         {
@@ -539,103 +585,107 @@ final class DsRomUnpacked
         }
     }
 
-    private static void putShort(byte[] data, int offset, int value)
-    {
-        data[offset] = (byte) value;
-        data[offset + 1] = (byte) (value >> 8);
-    }
-
-    private static void putInt(byte[] data, int offset, int value)
-    {
-        putShort(data, offset, value);
-        putShort(data, offset + 2, value >> 16);
-    }
-
-    private static void putBytes(byte[] data, int offset, Object list)
-    {
-        if (list == null)
-            return;
-        List<Object> values = SimpleYaml.asList(list);
-        for (int i = 0; i < values.size(); i++)
-        {
-            data[offset + i] = (byte) SimpleYaml.asInt(values.get(i));
-        }
-    }
-
-    private static Map<String, Object> readYamlMap(File file)
-    {
-        if (file == null || !file.isFile())
-            return Collections.emptyMap();
-        byte[] bytes = Buffer.readFile(file.getAbsolutePath());
-        Object parsed = SimpleYaml.parse(new String(bytes, StandardCharsets.UTF_8));
-        if (parsed == null)
-            return Collections.emptyMap();
-        return SimpleYaml.asMap(parsed);
-    }
-
     private static List<OverlayEntry> loadOverlays(File root, Object configured, String defaultRel)
     {
-        String rel = null;
-        if (configured instanceof String)
-            rel = (String) configured;
-        else if (configured == null && new File(root, defaultRel).isFile())
-            rel = defaultRel;
-        if (rel == null || rel.isEmpty())
+        File yaml = new File(root, configured == null ? defaultRel : String.valueOf(configured));
+        Object overlays = readYamlMap(yaml).get("overlays");
+        if (overlays == null)
             return Collections.emptyList();
 
-        File yaml = new File(root, rel);
-        if (!yaml.isFile())
-            return Collections.emptyList();
-        File overlayDir = yaml.getParentFile() == null ? root : yaml.getParentFile();
-        Object overlaysObj = readYamlMap(yaml).get("overlays");
-        if (overlaysObj == null)
-            return Collections.emptyList();
-        List<Object> overlays = SimpleYaml.asList(overlaysObj);
-        List<OverlayEntry> out = new ArrayList<OverlayEntry>(overlays.size());
-        for (int i = 0; i < overlays.size(); i++)
-        {
-            Map<String, Object> m = SimpleYaml.asMap(overlays.get(i));
-            OverlayEntry e = new OverlayEntry();
-            e.id = SimpleYaml.getInt(m, "id", i);
-            e.baseAddress = SimpleYaml.getInt(m, "base_address", 0);
-            e.codeSize = SimpleYaml.getInt(m, "code_size", 0);
-            e.bssSize = SimpleYaml.getInt(m, "bss_size", 0);
-            e.ctorStart = SimpleYaml.getInt(m, "ctor_start", 0);
-            e.ctorEnd = SimpleYaml.getInt(m, "ctor_end", 0);
-            e.fileId = SimpleYaml.getInt(m, "file_id", e.id);
-            e.signed = SimpleYaml.getBoolean(m, "signed", false);
-            e.bin = new File(overlayDir, SimpleYaml.getString(m, "file_name", String.format("ov%03d.bin", e.id)));
-            out.add(e);
-        }
+        List<Object> entries = SimpleYaml.asList(overlays);
+        List<OverlayEntry> out = new ArrayList<OverlayEntry>(entries.size());
+        for (int i = 0; i < entries.size(); i++)
+            out.add(new OverlayEntry(SimpleYaml.asMap(entries.get(i)), i, yaml.getParentFile()));
 
-        Collections.sort(out, new Comparator<OverlayEntry>() {
-            @Override
-            public int compare(OverlayEntry a, OverlayEntry b)
-            {
-                return Integer.compare(a.id, b.id);
-            }
-        });
+        Collections.sort(out, Comparator.comparingInt(overlay -> overlay.id));
+
         return out;
     }
 
     private static byte[] buildOverlayTable(List<OverlayEntry> overlays)
     {
         MemBuf buf = MemBuf.create();
-        MemBuf.MemBufWriter w = buf.writer();
+        MemBuf.MemBufWriter writer = buf.writer();
         for (OverlayEntry e : overlays)
         {
-            w.writeInt(e.id);
-            w.writeInt(e.baseAddress);
-            w.writeInt(e.codeSize);
-            w.writeInt(e.bssSize);
-            w.writeInt(e.ctorStart);
-            w.writeInt(e.ctorEnd);
-            w.writeInt(e.fileId);
+            writer.writeInt(e.id).writeInt(e.baseAddress).writeInt(e.codeSize).writeInt(e.bssSize);
+            writer.writeInt(e.ctorStart).writeInt(e.ctorEnd).writeInt(e.fileId);
             // Overlay bins are stored decompressed, so the compressed flag and size stay clear.
-            w.writeInt(e.signed ? 0x02000000 : 0);
+            writer.writeInt(e.signed ? 0x02000000 : 0);
         }
 
         return buf.reader().getBuffer();
+    }
+
+    /** The order {@code dsrom build} lays files out in: each path_order entry, a folder's unvisited files by name. */
+    private static final class FileOrder
+    {
+        final Fnt.Folder root;
+        final ArrayList<Integer> order = new ArrayList<Integer>();
+        final Set<Integer> visitedFiles = new HashSet<Integer>();
+        final Set<Fnt.Folder> visitedFolders = Collections.newSetFromMap(new IdentityHashMap<Fnt.Folder, Boolean>());
+
+        FileOrder(Fnt.Folder root)
+        {
+            this.root = root;
+        }
+
+        ArrayList<Integer> of(String[] pathOrder)
+        {
+            for (String line : pathOrder)
+                addPath(line.startsWith("/") ? line.substring(1) : line);
+
+            return order;
+        }
+
+        private void addPath(String path)
+        {
+            if (path.trim().isEmpty())
+            {
+                addFolder(root);
+                return;
+            }
+
+            String[] parts = path.split("/");
+            Fnt.Folder parent = parentOf(parts);
+            if (parent != null)
+                addEntry(parent, parts[parts.length - 1]);
+        }
+
+        private Fnt.Folder parentOf(String[] parts)
+        {
+            Fnt.Folder parent = root;
+            for (int i = 0; i < parts.length - 1 && parent != null; i++)
+                parent = parent.getFolders().get(parts[i]);
+
+            return parent;
+        }
+
+        private void addEntry(Fnt.Folder parent, String name)
+        {
+            Fnt.Folder sub = parent.getFolders().get(name);
+            if (sub != null)
+                addFolder(sub);
+            else if (parent.getFiles().contains(name))
+                addFile(parent.getFirstId() + parent.getFiles().indexOf(name));
+        }
+
+        private void addFolder(Fnt.Folder folder)
+        {
+            if (!visitedFolders.add(folder))
+                return;
+            List<String> names = new ArrayList<String>(folder.getFiles());
+            names.addAll(folder.getFolders().keySet());
+            Collections.sort(names, UTF8_ORDER);
+            for (String name : names)
+                addEntry(folder, name);
+        }
+
+        private void addFile(int id)
+        {
+            if (visitedFiles.add(id))
+                order.add(id);
+        }
     }
 
     private static final class Autoload
@@ -649,14 +699,27 @@ final class DsRomUnpacked
 
     private static final class OverlayEntry
     {
-        int id;
-        int baseAddress;
-        int codeSize;
-        int bssSize;
-        int ctorStart;
-        int ctorEnd;
-        int fileId;
-        boolean signed;
-        File bin;
+        final int id;
+        final int baseAddress;
+        final int codeSize;
+        final int bssSize;
+        final int ctorStart;
+        final int ctorEnd;
+        final int fileId;
+        final boolean signed;
+        final File bin;
+
+        OverlayEntry(Map<String, Object> m, int index, File dir)
+        {
+            id = SimpleYaml.getInt(m, "id", index);
+            baseAddress = SimpleYaml.getInt(m, "base_address", 0);
+            codeSize = SimpleYaml.getInt(m, "code_size", 0);
+            bssSize = SimpleYaml.getInt(m, "bss_size", 0);
+            ctorStart = SimpleYaml.getInt(m, "ctor_start", 0);
+            ctorEnd = SimpleYaml.getInt(m, "ctor_end", 0);
+            fileId = SimpleYaml.getInt(m, "file_id", id);
+            signed = SimpleYaml.getBoolean(m, "signed", false);
+            bin = new File(dir, SimpleYaml.getString(m, "file_name", String.format("ov%03d.bin", id)));
+        }
     }
 }
