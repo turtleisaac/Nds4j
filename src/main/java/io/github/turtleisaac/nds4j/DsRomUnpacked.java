@@ -50,13 +50,18 @@ final class DsRomUnpacked
     static final String DEFAULT_ARM7_OVERLAYS = "arm7_overlays/overlays.yaml";
     static final String DEFAULT_FILES_DIR = "files";
 
-    private DsRomUnpacked() {}
+    private DsRomUnpacked()
+    {
+    }
 
     static boolean isLayout(File dir)
     {
-        if (dir == null || !dir.isDirectory()) return false;
-        if (new File(dir, CONFIG_YAML).isFile()) return true;
-        if (!new File(dir, HEADER_YAML).isFile()) return false;
+        if (dir == null || !dir.isDirectory())
+            return false;
+        if (new File(dir, CONFIG_YAML).isFile())
+            return true;
+        if (!new File(dir, HEADER_YAML).isFile())
+            return false;
         return new File(dir, DEFAULT_FILES_DIR).isDirectory()
                 || new File(dir, DEFAULT_ARM9).isFile();
     }
@@ -83,7 +88,8 @@ final class DsRomUnpacked
         if (gamecode != null && !gamecode.isEmpty())
             rom.gameCode = gamecode.length() >= 4 ? gamecode.substring(0, 4) : gamecode;
         String maker = SimpleYaml.getString(header, "makercode", rom.developerCode);
-        if (maker != null) rom.developerCode = maker.length() >= 2 ? maker.substring(0, 2) : maker;
+        if (maker != null)
+            rom.developerCode = maker.length() >= 2 ? maker.substring(0, 2) : maker;
         rom.unitCode = SimpleYaml.getInt(header, "unitcode", rom.unitCode);
         rom.encryptionSeed = SimpleYaml.getInt(header, "seed_select", rom.encryptionSeed);
         rom.romVersion = SimpleYaml.getInt(header, "rom_version", rom.romVersion);
@@ -136,7 +142,8 @@ final class DsRomUnpacked
 
         int dataFiles = Fnt.calculateNumFiles(filesDir);
         int numFiles = Math.max(maxOverlayFileId + 1, 0) + dataFiles;
-        if (numFiles < dataFiles) numFiles = dataFiles;
+        if (numFiles < dataFiles)
+            numFiles = dataFiles;
         rom.files = new ArrayList<byte[]>();
         for (int i = 0; i < numFiles; i++)
             rom.files.add(null);
@@ -168,7 +175,8 @@ final class DsRomUnpacked
         byte[] bytes = Buffer.readFile(file.getAbsolutePath());
         String text = new String(bytes, StandardCharsets.UTF_8);
         Object parsed = SimpleYaml.parse(text);
-        if (parsed == null) return Collections.emptyMap();
+        if (parsed == null)
+            return Collections.emptyMap();
         return SimpleYaml.asMap(parsed);
     }
 
@@ -180,16 +188,20 @@ final class DsRomUnpacked
         else if (configured == null)
         {
             File fallback = new File(root, defaultRel);
-            if (fallback.isFile()) rel = defaultRel;
+            if (fallback.isFile())
+                rel = defaultRel;
         }
-        if (rel == null || rel.isEmpty()) return Collections.emptyList();
+        if (rel == null || rel.isEmpty())
+            return Collections.emptyList();
 
         File yaml = new File(root, rel);
-        if (!yaml.isFile()) return Collections.emptyList();
+        if (!yaml.isFile())
+            return Collections.emptyList();
         File overlayDir = yaml.getParentFile() == null ? root : yaml.getParentFile();
         Map<String, Object> table = readYamlMap(yaml);
         Object overlaysObj = table.get("overlays");
-        if (overlaysObj == null) return Collections.emptyList();
+        if (overlaysObj == null)
+            return Collections.emptyList();
         List<Object> overlays = SimpleYaml.asList(overlaysObj);
         List<OverlayEntry> out = new ArrayList<OverlayEntry>(overlays.size());
         for (int i = 0; i < overlays.size(); i++)
@@ -208,8 +220,7 @@ final class DsRomUnpacked
             e.bin = new File(overlayDir, name);
             out.add(e);
         }
-        Collections.sort(out, new Comparator<OverlayEntry>()
-        {
+        Collections.sort(out, new Comparator<OverlayEntry>() {
             @Override
             public int compare(OverlayEntry a, OverlayEntry b)
             {
@@ -221,7 +232,8 @@ final class DsRomUnpacked
 
     private static byte[] buildOverlayTable(List<OverlayEntry> overlays)
     {
-        if (overlays == null || overlays.isEmpty()) return new byte[0];
+        if (overlays == null || overlays.isEmpty())
+            return new byte[0];
         MemBuf buf = MemBuf.create();
         MemBuf.MemBufWriter w = buf.writer();
         for (int i = 0; i < overlays.size(); i++)

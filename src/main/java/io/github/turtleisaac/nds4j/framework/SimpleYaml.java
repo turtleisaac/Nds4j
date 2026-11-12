@@ -32,11 +32,14 @@ import java.util.Map;
  */
 public final class SimpleYaml
 {
-    private SimpleYaml() {}
+    private SimpleYaml()
+    {
+    }
 
     public static Object parse(String text)
     {
-        if (text == null) return null;
+        if (text == null)
+            return null;
         Parser p = new Parser(text);
         Object value = p.parseBlock(-1);
         return value == null ? new LinkedHashMap<String, Object>() : value;
@@ -45,26 +48,30 @@ public final class SimpleYaml
     @SuppressWarnings("unchecked")
     public static Map<String, Object> asMap(Object value)
     {
-        if (value instanceof Map) return (Map<String, Object>) value;
+        if (value instanceof Map)
+            return (Map<String, Object>) value;
         throw new IllegalArgumentException("expected a YAML mapping, got " + typeName(value));
     }
 
     @SuppressWarnings("unchecked")
     public static List<Object> asList(Object value)
     {
-        if (value instanceof List) return (List<Object>) value;
+        if (value instanceof List)
+            return (List<Object>) value;
         throw new IllegalArgumentException("expected a YAML sequence, got " + typeName(value));
     }
 
     public static String asString(Object value)
     {
-        if (value == null) return null;
+        if (value == null)
+            return null;
         return String.valueOf(value);
     }
 
     public static int asInt(Object value)
     {
-        if (value instanceof Number) return ((Number) value).intValue();
+        if (value instanceof Number)
+            return ((Number) value).intValue();
         if (value instanceof String)
         {
             String s = ((String) value).trim();
@@ -77,12 +84,15 @@ public final class SimpleYaml
 
     public static boolean asBoolean(Object value)
     {
-        if (value instanceof Boolean) return (Boolean) value;
+        if (value instanceof Boolean)
+            return (Boolean) value;
         if (value instanceof String)
         {
             String s = ((String) value).trim().toLowerCase();
-            if ("true".equals(s) || "yes".equals(s) || "on".equals(s)) return true;
-            if ("false".equals(s) || "no".equals(s) || "off".equals(s)) return false;
+            if ("true".equals(s) || "yes".equals(s) || "on".equals(s))
+                return true;
+            if ("false".equals(s) || "no".equals(s) || "off".equals(s))
+                return false;
         }
         throw new IllegalArgumentException("expected a boolean, got " + typeName(value));
     }
@@ -128,10 +138,13 @@ public final class SimpleYaml
         Object parseBlock(int parentIndent)
         {
             skipEmpty();
-            if (i >= lines.length) return null;
+            if (i >= lines.length)
+                return null;
             int indent = indentOf(lines[i]);
-            if (indent <= parentIndent) return null;
-            if (isListItem(lines[i], indent)) return parseList(indent);
+            if (indent <= parentIndent)
+                return null;
+            if (isListItem(lines[i], indent))
+                return parseList(indent);
             return parseMap(indent);
         }
 
@@ -141,12 +154,15 @@ public final class SimpleYaml
             while (i < lines.length)
             {
                 skipEmpty();
-                if (i >= lines.length) break;
+                if (i >= lines.length)
+                    break;
                 int here = indentOf(lines[i]);
-                if (here < indent) break;
+                if (here < indent)
+                    break;
                 if (here > indent)
                     throw new IllegalArgumentException("unexpected indent at line " + (i + 1) + ": " + lines[i]);
-                if (isListItem(lines[i], here)) break;
+                if (isListItem(lines[i], here))
+                    break;
 
                 String raw = stripComment(lines[i].substring(here));
                 int colon = indexOfKeyColon(raw);
@@ -184,10 +200,13 @@ public final class SimpleYaml
             while (i < lines.length)
             {
                 skipEmpty();
-                if (i >= lines.length) break;
+                if (i >= lines.length)
+                    break;
                 int here = indentOf(lines[i]);
-                if (here < indent) break;
-                if (!isListItem(lines[i], here)) break;
+                if (here < indent)
+                    break;
+                if (!isListItem(lines[i], here))
+                    break;
 
                 String raw = stripComment(lines[i].substring(here + 1).trim());
                 i++;
@@ -250,7 +269,8 @@ public final class SimpleYaml
         private static int indentOf(String line)
         {
             int n = 0;
-            while (n < line.length() && line.charAt(n) == ' ') n++;
+            while (n < line.length() && line.charAt(n) == ' ')
+                n++;
             return n;
         }
 
@@ -260,9 +280,12 @@ public final class SimpleYaml
             for (int i = 0; i < s.length(); i++)
             {
                 char c = s.charAt(i);
-                if (c == '\'' && !inDouble) inSingle = !inSingle;
-                else if (c == '"' && !inSingle) inDouble = !inDouble;
-                else if (c == '#' && !inSingle && !inDouble) return s.substring(0, i).trim();
+                if (c == '\'' && !inDouble)
+                    inSingle = !inSingle;
+                else if (c == '"' && !inSingle)
+                    inDouble = !inDouble;
+                else if (c == '#' && !inSingle && !inDouble)
+                    return s.substring(0, i).trim();
             }
             return s.trim();
         }
@@ -273,8 +296,10 @@ public final class SimpleYaml
             for (int i = 0; i < s.length(); i++)
             {
                 char c = s.charAt(i);
-                if (c == '\'' && !inDouble) inSingle = !inSingle;
-                else if (c == '"' && !inSingle) inDouble = !inDouble;
+                if (c == '\'' && !inDouble)
+                    inSingle = !inSingle;
+                else if (c == '"' && !inSingle)
+                    inDouble = !inDouble;
                 else if (c == ':' && !inSingle && !inDouble)
                     return i;
             }
@@ -288,24 +313,39 @@ public final class SimpleYaml
             if ((s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2)
                     || (s.startsWith("'") && s.endsWith("'") && s.length() >= 2))
                 return unescape(s.substring(1, s.length() - 1), s.charAt(0) == '"');
-            if ("true".equals(s) || "True".equals(s) || "TRUE".equals(s)) return Boolean.TRUE;
-            if ("false".equals(s) || "False".equals(s) || "FALSE".equals(s)) return Boolean.FALSE;
+            if ("true".equals(s) || "True".equals(s) || "TRUE".equals(s))
+                return Boolean.TRUE;
+            if ("false".equals(s) || "False".equals(s) || "FALSE".equals(s))
+                return Boolean.FALSE;
             if (s.startsWith("0x") || s.startsWith("0X"))
             {
-                try { return Long.parseLong(s.substring(2), 16); }
-                catch (NumberFormatException ignored) { return s; }
+                try
+                {
+                    return Long.parseLong(s.substring(2), 16);
+                }
+                catch (NumberFormatException ignored)
+                {
+                    return s;
+                }
             }
             if (s.matches("-?\\d+"))
             {
-                try { return Long.parseLong(s); }
-                catch (NumberFormatException ignored) { return s; }
+                try
+                {
+                    return Long.parseLong(s);
+                }
+                catch (NumberFormatException ignored)
+                {
+                    return s;
+                }
             }
             return s;
         }
 
         private static String unescape(String s, boolean doubleQuoted)
         {
-            if (!doubleQuoted) return s.replace("''", "'");
+            if (!doubleQuoted)
+                return s.replace("''", "'");
             StringBuilder out = new StringBuilder(s.length());
             for (int i = 0; i < s.length(); i++)
             {
@@ -315,15 +355,28 @@ public final class SimpleYaml
                     char n = s.charAt(++i);
                     switch (n)
                     {
-                        case 'n': out.append('\n'); break;
-                        case 't': out.append('\t'); break;
-                        case 'r': out.append('\r'); break;
-                        case '\\': out.append('\\'); break;
-                        case '"': out.append('"'); break;
-                        default: out.append(n); break;
+                        case 'n':
+                            out.append('\n');
+                            break;
+                        case 't':
+                            out.append('\t');
+                            break;
+                        case 'r':
+                            out.append('\r');
+                            break;
+                        case '\\':
+                            out.append('\\');
+                            break;
+                        case '"':
+                            out.append('"');
+                            break;
+                        default:
+                            out.append(n);
+                            break;
                     }
                 }
-                else out.append(c);
+                else
+                    out.append(c);
             }
             return out.toString();
         }

@@ -119,8 +119,8 @@ public class NintendoDsRom
     // content) is captured verbatim here and re-emitted at its original offset on save, so a DSi ROM keeps
     // its DSi content instead of having it dropped. See the DSi accessors and the extended-header parse.
     boolean dsi;
-    byte[] dsiRegion = new byte[0];   // the TWL data region, captured verbatim
-    int dsiRegionOffset;              // absolute file offset where dsiRegion begins
+    byte[] dsiRegion = new byte[0]; // the TWL data region, captured verbatim
+    int dsiRegionOffset; // absolute file offset where dsiRegion begins
     // parsed extended-header fields (for accessors; the authoritative bytes remain in the paddings)
     int arm9iRomOffset, arm9iEntryAddress, arm9iLoadAddress, arm9iSize;
     int arm7iRomOffset, arm7iEntryAddress, arm7iLoadAddress, arm7iSize;
@@ -227,7 +227,7 @@ public class NintendoDsRom
 
         int[] extraData;
         while (reader.getPosition() >= 0 && reader.getPosition() + 12 <= fileLength
-                && Arrays.equals(new int[] {0x21, 0x06, 0xC0, 0xDE}, (extraData = reader.readBytesI(4)) ))
+                && Arrays.equals(new int[] { 0x21, 0x06, 0xC0, 0xDE }, (extraData = reader.readBytesI(4))))
         {
             arm9PostData.addAll(Arrays.stream(extraData).boxed().collect(Collectors.toList()));
             arm9PostData.addAll(Arrays.stream(reader.readBytesI(8)).boxed().collect(Collectors.toList()));
@@ -261,21 +261,30 @@ public class NintendoDsRom
             return;
         dsi = true;
         reader.setPosition(0x1C0);
-        arm9iRomOffset = reader.readInt(); arm9iEntryAddress = reader.readInt();
-        arm9iLoadAddress = reader.readInt(); arm9iSize = reader.readInt();
-        arm7iRomOffset = reader.readInt(); arm7iEntryAddress = reader.readInt();
-        arm7iLoadAddress = reader.readInt(); arm7iSize = reader.readInt();
-        int digestNtrOffset = reader.readInt(); reader.readInt();       // 0x1E0: NTR digest region off/len
-        int digestTwlOffset = reader.readInt(); reader.readInt();       // 0x1E8: TWL digest region off/len
-        int digestSectorHtOffset = reader.readInt(); reader.readInt();  // 0x1F0: sector hashtable off/len
-        int digestBlockHtOffset = reader.readInt(); reader.readInt();   // 0x1F8: block hashtable off/len
+        arm9iRomOffset = reader.readInt();
+        arm9iEntryAddress = reader.readInt();
+        arm9iLoadAddress = reader.readInt();
+        arm9iSize = reader.readInt();
+        arm7iRomOffset = reader.readInt();
+        arm7iEntryAddress = reader.readInt();
+        arm7iLoadAddress = reader.readInt();
+        arm7iSize = reader.readInt();
+        int digestNtrOffset = reader.readInt();
+        reader.readInt(); // 0x1E0: NTR digest region off/len
+        int digestTwlOffset = reader.readInt();
+        reader.readInt(); // 0x1E8: TWL digest region off/len
+        int digestSectorHtOffset = reader.readInt();
+        reader.readInt(); // 0x1F0: sector hashtable off/len
+        int digestBlockHtOffset = reader.readInt();
+        reader.readInt(); // 0x1F8: block hashtable off/len
         reader.setPosition(0x230);
         twlTitleId = reader.readUInt32() | (reader.readUInt32() << 32);
 
         // the TWL data region starts at the earliest DSi section that lies past the NTR content
         int start = Integer.MAX_VALUE;
-        for (int off : new int[]{arm9iRomOffset, arm7iRomOffset, digestSectorHtOffset, digestBlockHtOffset})
-            if (off > arm9Offset && off < fileLength) start = Math.min(start, off);
+        for (int off : new int[] { arm9iRomOffset, arm7iRomOffset, digestSectorHtOffset, digestBlockHtOffset })
+            if (off > arm9Offset && off < fileLength)
+                start = Math.min(start, off);
         if (start == Integer.MAX_VALUE)
         {
             dsiRegion = new byte[0];
@@ -295,41 +304,49 @@ public class NintendoDsRom
         encryptionSeed = reader.readByte();
         deviceCapacity = reader.readBytes(1)[0];
         reserved1 = reader.readBytes(7);
-        reserved2 = (byte)reader.readByte();
+        reserved2 = (byte) reader.readByte();
         systemRegion = reader.readByte();
         romVersion = reader.readByte();
         autoStartFlag = reader.readByte();
 
         arm9Offset = reader.readInt();
-        if(arm9Offset < 0x4000) {
+        if (arm9Offset < 0x4000)
+        {
             throw new RuntimeException("Invalid ROM Header: ARM9 Offset");
         }
         arm9EntryAddress = reader.readInt();
-        if(!(arm9EntryAddress >= 0x2000000 && arm9EntryAddress <= 0x23BFE00)) {
+        if (!(arm9EntryAddress >= 0x2000000 && arm9EntryAddress <= 0x23BFE00))
+        {
             throw new RuntimeException("Invalid ROM Header: ARM9 Entry Address");
         }
         arm9LoadAddress = reader.readInt();
-        if(!(arm9LoadAddress >= 0x2000000 && arm9LoadAddress <= 0x23BFE00)) {
+        if (!(arm9LoadAddress >= 0x2000000 && arm9LoadAddress <= 0x23BFE00))
+        {
             throw new RuntimeException("Invalid ROM Header: ARM9 RAM Address");
         }
         arm9Length = reader.readInt();
-        if(arm9Length > 0x3BFE00) {
+        if (arm9Length > 0x3BFE00)
+        {
             throw new RuntimeException("Invalid ROM Header: ARM9 Size");
         }
         arm7Offset = reader.readInt();
-        if(arm7Offset < 0x8000) {
+        if (arm7Offset < 0x8000)
+        {
             throw new RuntimeException("Invalid ROM Header: ARM7 Offset");
         }
         arm7EntryAddress = reader.readInt();
-        if(!((arm7EntryAddress >= 0x2000000 && arm7EntryAddress <= 0x23BFE00) || (arm7EntryAddress >= 0x37F8000 && arm7EntryAddress <= 0x3807E00))) {
+        if (!((arm7EntryAddress >= 0x2000000 && arm7EntryAddress <= 0x23BFE00) || (arm7EntryAddress >= 0x37F8000 && arm7EntryAddress <= 0x3807E00)))
+        {
             throw new RuntimeException("Invalid ROM Header: ARM7 Entry Address");
         }
         arm7LoadAddress = reader.readInt();
-        if(!((arm7LoadAddress >= 0x2000000 && arm7LoadAddress <= 0x23BFE00) || (arm7LoadAddress >= 0x37F8000 && arm7LoadAddress <= 0x3807E00))) {
+        if (!((arm7LoadAddress >= 0x2000000 && arm7LoadAddress <= 0x23BFE00) || (arm7LoadAddress >= 0x37F8000 && arm7LoadAddress <= 0x3807E00)))
+        {
             throw new RuntimeException("Invalid ROM Header: ARM7 Load Address");
         }
         arm7Length = reader.readInt();
-        if(arm7Length > 0x3BFE0) {
+        if (arm7Length > 0x3BFE0)
+        {
             throw new RuntimeException("Invalid ROM Header: ARM7 Size");
         }
 
@@ -582,7 +599,7 @@ public class NintendoDsRom
             MemBuf iconBannerBuf = MemBuf.create();
             iconBannerBuf.writer().write(iconBanner);
 
-            int version = ( (int) iconBannerBuf.reader().readShort()) & 0xFFFF;
+            int version = ((int) iconBannerBuf.reader().readShort()) & 0xFFFF;
             int iconBannerLength;
             if (ICON_BANNER_LENGTHS.get(version) == null)
                 iconBannerLength = ICON_BANNER_LENGTHS.get(1);
@@ -617,7 +634,7 @@ public class NintendoDsRom
 
         // write the rest of the files
         Integer f;
-        while((f = getNextFile(fileOffsets)) != null)
+        while ((f = getNextFile(fileOffsets)) != null)
         {
             // align before instead of after, so that there's no extra padding after the last file
             align(writer, 0x200, (byte) 0xff);
@@ -635,7 +652,7 @@ public class NintendoDsRom
             assert (fileOffsets.containsKey(i));
             startOffset = fileOffsets.get(i);
             endOffset = startOffset + file.length;
-            writer.setPosition(fatOffset + 8*i);
+            writer.setPosition(fatOffset + 8 * i);
             writer.writeInt(startOffset);
             writer.writeInt(endOffset);
         }
@@ -806,19 +823,14 @@ public class NintendoDsRom
         return null;
     }
 
-    public enum UNPACKED_FILENAMES {
-        ARM9("arm9.bin"),
-        ARM7("arm7.bin"),
-        Y9("y9.bin"),
-        Y7("y7.bin"),
-        HEADER("header.bin"),
-        BANNER("banner.bin"),
-        OVERLAY("overlay"),
-        DATA("data");
+    public enum UNPACKED_FILENAMES
+    {
+        ARM9("arm9.bin"), ARM7("arm7.bin"), Y9("y9.bin"), Y7("y7.bin"), HEADER("header.bin"), BANNER("banner.bin"), OVERLAY("overlay"), DATA("data");
 
         final String name;
 
-        UNPACKED_FILENAMES(String s) {
+        UNPACKED_FILENAMES(String s)
+        {
             name = s;
         }
 
@@ -835,7 +847,7 @@ public class NintendoDsRom
     {
         title = "";
         gameCode = "####";
-        developerCode = new String(new byte[] {0, 0}, 0, 2);
+        developerCode = new String(new byte[] { 0, 0 }, 0, 2);
         unitCode = 0;
         encryptionSeed = 0;
         deviceCapacity = 9;
@@ -858,10 +870,10 @@ public class NintendoDsRom
         secureTransferTimeout = 0x0D7E;
         arm9Autoload = 0;
         arm7Autoload = 0;
-        secureDisable = new byte[] {0, 0, 0, 0, 0, 0, 0, 0};
+        secureDisable = new byte[] { 0, 0, 0, 0, 0, 0, 0, 0 };
 
         //0x38 bytes
-        padding_088h = new byte[] {0x38};
+        padding_088h = new byte[] { 0x38 };
 
         nintendoLogo = new byte[] {
                 (byte) 0x24, (byte) 0xFF, (byte) 0xAE, (byte) 0x51, (byte) 0x69, (byte) 0x9A, (byte) 0xA2,
@@ -881,7 +893,7 @@ public class NintendoDsRom
                 (byte) 0xBB, (byte) 0x3E, (byte) 0x03, (byte) 0x44, (byte) 0x78, (byte) 0x00, (byte) 0x90, (byte) 0xCB, (byte) 0x88,
                 (byte) 0x11, (byte) 0x3A, (byte) 0x94, (byte) 0x65, (byte) 0xC0, (byte) 0x7C, (byte) 0x63, (byte) 0x87, (byte) 0xF0,
                 (byte) 0x3C, (byte) 0xAF, (byte) 0xD6, (byte) 0x25, (byte) 0xE4, (byte) 0x8B, (byte) 0x38, (byte) 0x0A, (byte) 0xAC,
-                (byte) 0x72, (byte) 0x21, (byte) 0xD4, (byte) 0xF8, (byte) 0x07};
+                (byte) 0x72, (byte) 0x21, (byte) 0xD4, (byte) 0xF8, (byte) 0x07 };
 
         debugRomAddress = 0;
         padding_16Ch = new byte[0x94];
@@ -921,8 +933,10 @@ public class NintendoDsRom
      */
     public static boolean looksLikeUnpackedRom(File dir)
     {
-        if (dir == null || !dir.isDirectory()) return false;
-        if (new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile()) return true;
+        if (dir == null || !dir.isDirectory())
+            return false;
+        if (new File(dir, UNPACKED_FILENAMES.HEADER.name).isFile())
+            return true;
         return DsRomUnpacked.isLayout(dir);
     }
 
@@ -1097,33 +1111,54 @@ public class NintendoDsRom
     }
 
     /** @return the header unit code: {@code 0} = NDS, {@code 2} = NDS+DSi hybrid, {@code 3} = DSi-exclusive. */
-    public int getUnitCode() { return unitCode; }
+    public int getUnitCode()
+    {
+        return unitCode;
+    }
 
     /**
      * @return whether this is a DSi-enhanced or DSi-exclusive (TWL) ROM &mdash; i.e. it carries the extended
      *         header and a TWL data region ({@link #getArm9i()}/{@link #getArm7i()} and digest tables).
      */
-    public boolean isDsiEnhanced() { return dsi; }
+    public boolean isDsiEnhanced()
+    {
+        return dsi;
+    }
 
     /** @return the TWL title id (from the extended header), or {@code 0} for a plain NDS ROM. */
-    public long getTwlTitleId() { return twlTitleId; }
+    public long getTwlTitleId()
+    {
+        return twlTitleId;
+    }
 
     /** @return the ARM9i load address (where the DSi loads {@link #getArm9i()}), or {@code 0} if not DSi. */
-    public int getArm9iLoadAddress() { return arm9iLoadAddress; }
+    public int getArm9iLoadAddress()
+    {
+        return arm9iLoadAddress;
+    }
     /** @return the ARM7i load address (where the DSi loads {@link #getArm7i()}), or {@code 0} if not DSi. */
-    public int getArm7iLoadAddress() { return arm7iLoadAddress; }
+    public int getArm7iLoadAddress()
+    {
+        return arm7iLoadAddress;
+    }
 
     /**
      * @return a copy of the ARM9i binary (the DSi-mode ARM9 executable), or {@code null} if this ROM has no
      *         TWL region present (a plain NDS ROM, or a DSi ROM trimmed to its NTR part).
      */
-    public byte[] getArm9i() { return dsiSection(arm9iRomOffset, arm9iSize); }
+    public byte[] getArm9i()
+    {
+        return dsiSection(arm9iRomOffset, arm9iSize);
+    }
 
     /**
      * @return a copy of the ARM7i binary (the DSi-mode ARM7 executable), or {@code null} if this ROM has no
      *         TWL region present.
      */
-    public byte[] getArm7i() { return dsiSection(arm7iRomOffset, arm7iSize); }
+    public byte[] getArm7i()
+    {
+        return dsiSection(arm7iRomOffset, arm7iSize);
+    }
 
     // a copy of a TWL section that lives inside the captured DSi region, or null if it isn't present
     private byte[] dsiSection(int offset, int size)

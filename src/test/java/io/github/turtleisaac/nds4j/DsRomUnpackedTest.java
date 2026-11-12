@@ -28,7 +28,7 @@ class DsRomUnpackedTest
         {
             Path nds4j = tmp.resolve("nds4j");
             Files.createDirectories(nds4j);
-            Files.write(nds4j.resolve("header.bin"), new byte[] {1});
+            Files.write(nds4j.resolve("header.bin"), new byte[] { 1 });
             assertThat(NintendoDsRom.looksLikeUnpackedRom(nds4j.toFile())).isTrue();
 
             Path dsrom = tmp.resolve("dsrom");
@@ -116,14 +116,13 @@ class DsRomUnpackedTest
         Files.createDirectories(root.resolve("arm7"));
         Files.createDirectories(root.resolve("arm9_overlays"));
         Files.createDirectories(root.resolve("files"));
-        Files.write(root.resolve("config.yaml"), (
-                "header: header.yaml\n"
-                        + "arm9_bin: arm9/arm9.bin\n"
-                        + "arm7_bin: arm7/arm7.bin\n"
-                        + "arm9_config: arm9/arm9.yaml\n"
-                        + "arm7_config: arm7/arm7.yaml\n"
-                        + "arm9_overlays: arm9_overlays/overlays.yaml\n"
-                        + "files_dir: files/\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config.yaml"), ("header: header.yaml\n"
+                + "arm9_bin: arm9/arm9.bin\n"
+                + "arm7_bin: arm7/arm7.bin\n"
+                + "arm9_config: arm9/arm9.yaml\n"
+                + "arm7_config: arm7/arm7.yaml\n"
+                + "arm9_overlays: arm9_overlays/overlays.yaml\n"
+                + "files_dir: files/\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("header.yaml"),
                 "title: TEST GAME\ngamecode: TEST\nmakercode: \"01\"\n".getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("arm9/arm9.bin"), new byte[256]);
@@ -132,19 +131,18 @@ class DsRomUnpackedTest
                 "base_address: 0x2000000\nentry_function: 0x2000800\n".getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("arm7/arm7.yaml"),
                 "base_address: 0x2380000\nentry_function: 0x2380000\n".getBytes(StandardCharsets.UTF_8));
-        Files.write(root.resolve("arm9_overlays/overlays.yaml"), (
-                "table_signed: false\n"
-                        + "overlays:\n"
-                        + "- id: 0\n"
-                        + "  base_address: 0x02100000\n"
-                        + "  code_size: 4\n"
-                        + "  bss_size: 0\n"
-                        + "  ctor_start: 0\n"
-                        + "  ctor_end: 0\n"
-                        + "  file_id: 0\n"
-                        + "  compressed: false\n"
-                        + "  file_name: ov000.bin\n").getBytes(StandardCharsets.UTF_8));
-        Files.write(root.resolve("arm9_overlays/ov000.bin"), new byte[] {1, 2, 3, 4});
+        Files.write(root.resolve("arm9_overlays/overlays.yaml"), ("table_signed: false\n"
+                + "overlays:\n"
+                + "- id: 0\n"
+                + "  base_address: 0x02100000\n"
+                + "  code_size: 4\n"
+                + "  bss_size: 0\n"
+                + "  ctor_start: 0\n"
+                + "  ctor_end: 0\n"
+                + "  file_id: 0\n"
+                + "  compressed: false\n"
+                + "  file_name: ov000.bin\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("arm9_overlays/ov000.bin"), new byte[] { 1, 2, 3, 4 });
         Files.write(root.resolve("files/hello.txt"), "hello".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -183,14 +181,13 @@ class DsRomUnpackedTest
             Files.copy(src, dest.resolve("arm9_overlays").resolve(String.format("ov%03d.bin", id)));
         }
         Files.write(dest.resolve("arm9_overlays/overlays.yaml"), ov.toString().getBytes(StandardCharsets.UTF_8));
-        Files.write(dest.resolve("config.yaml"), (
-                "header: header.yaml\n"
-                        + "arm9_bin: arm9/arm9.bin\n"
-                        + "arm7_bin: arm7/arm7.bin\n"
-                        + "arm9_config: arm9/arm9.yaml\n"
-                        + "arm7_config: arm7/arm7.yaml\n"
-                        + "arm9_overlays: arm9_overlays/overlays.yaml\n"
-                        + "files_dir: files/\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(dest.resolve("config.yaml"), ("header: header.yaml\n"
+                + "arm9_bin: arm9/arm9.bin\n"
+                + "arm7_bin: arm7/arm7.bin\n"
+                + "arm9_config: arm9/arm9.yaml\n"
+                + "arm7_config: arm7/arm7.yaml\n"
+                + "arm9_overlays: arm9_overlays/overlays.yaml\n"
+                + "files_dir: files/\n").getBytes(StandardCharsets.UTF_8));
     }
 
     private static String overlayBinName(Path overlayDir, int index, int count) throws IOException
@@ -226,7 +223,8 @@ class DsRomUnpackedTest
             try
             {
                 Path rel = dest.resolve(src.relativize(p).toString());
-                if (Files.isDirectory(p)) Files.createDirectories(rel);
+                if (Files.isDirectory(p))
+                    Files.createDirectories(rel);
                 else
                 {
                     Files.createDirectories(rel.getParent());
@@ -242,12 +240,17 @@ class DsRomUnpackedTest
 
     private static void deleteTree(Path root) throws IOException
     {
-        if (root == null || !Files.exists(root)) return;
+        if (root == null || !Files.exists(root))
+            return;
         Files.walk(root)
                 .sorted((a, b) -> b.getNameCount() - a.getNameCount())
                 .forEach(p -> {
-                    try { Files.deleteIfExists(p); }
-                    catch (IOException ignored) {}
+                    try
+                    {
+                        Files.deleteIfExists(p);
+                    }
+                    catch (IOException ignored)
+                    {}
                 });
     }
 }
