@@ -106,7 +106,8 @@ public class CellBank extends GenericNtrFile
         //cell bank data
         String cellBankMagic = reader.readString(4); // 0x10
 
-        if (!cellBankMagic.equals("KBEC")) {
+        if (!cellBankMagic.equals("KBEC"))
+        {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -133,11 +134,11 @@ public class CellBank extends GenericNtrFile
             maxPartitionSize = reader.readInt();
             firstPartitionDataOffset = reader.readInt();
             reader.skip(firstPartitionDataOffset - 8);
-            for (int i= 0; i < numBanks; i++)
+            for (int i = 0; i < numBanks; i++)
             {
                 int partitionOffset = reader.readInt();
                 int partitionSize = reader.readInt();
-                partitionData[i] = new int[] {partitionOffset, partitionSize};
+                partitionData[i] = new int[] { partitionOffset, partitionSize };
             }
         }
 
@@ -148,7 +149,8 @@ public class CellBank extends GenericNtrFile
 
             String tacuMagic = reader.readString(4);
 
-            if (!tacuMagic.equals("TACU")) {
+            if (!tacuMagic.equals("TACU"))
+            {
                 throw new RuntimeException("Not a valid RECN file.");
             }
 
@@ -207,9 +209,9 @@ public class CellBank extends GenericNtrFile
             storedPos = reader.getPosition();
 
             if (bankType == 0)
-                reader.setPosition(reader.getPosition() + (numBanks - (i+1)) * 8 + cellOffset);
+                reader.setPosition(reader.getPosition() + (numBanks - (i + 1)) * 8 + cellOffset);
             else
-                reader.setPosition(reader.getPosition() + (numBanks - (i+1)) * 0x10 + cellOffset);
+                reader.setPosition(reader.getPosition() + (numBanks - (i + 1)) * 0x10 + cellOffset);
 
             // read OAMs
             for (int x = 0; x < cellCount; x++)
@@ -260,7 +262,8 @@ public class CellBank extends GenericNtrFile
         //label data
         String labelMagic = reader.readString(4); // 0x10
 
-        if (!labelMagic.equals("LBAL")) {
+        if (!labelMagic.equals("LBAL"))
+        {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -303,7 +306,8 @@ public class CellBank extends GenericNtrFile
         //uext data
         String uextMagic = reader.readString(4); // (note: this isn't guaranteed to be 4-byte aligned)
 
-        if (!uextMagic.equals("TXEU")) {
+        if (!uextMagic.equals("TXEU"))
+        {
             throw new RuntimeException("Not a valid RECN file.");
         }
 
@@ -388,7 +392,8 @@ public class CellBank extends GenericNtrFile
     /**
      * Internal private class for actions relating to reading/writing NCER files
      */
-    private static class NcerUtils {
+    private static class NcerUtils
+    {
         private static final int oamSize = OAM_SIZE;
 
         private static void writeCell(MemBuf.MemBufWriter writer, Cell cell, int oamCount, int bankType)
@@ -651,6 +656,7 @@ public class CellBank extends GenericNtrFile
             int dx = oam.xCoord + offX - bounds.x, dy = oam.yCoord + offY - bounds.y;
             int sub = (bitDepth == 4 && oam.palette >= 0 && oam.palette < subCount) ? oam.palette : 0;
             int base = sub * subSize;
+            int count = Math.min(subSize, colors.length - base);
 
             int[][] grid = new int[h][w];
             for (int y = 0; y < h; y++)
@@ -658,21 +664,22 @@ public class CellBank extends GenericNtrFile
                 for (int x = 0; x < w; x++)
                 {
                     int sx = dx + x, sy = dy + y;
-                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) { grid[y][x] = 0; continue; }
-                    int argb = image.getRGB(sx, sy);
-                    if (((argb >>> 24) & 0xFF) == 0) { grid[y][x] = 0; continue; } // transparent -> index 0
-                    int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-                    int bestIdx = 0;
-                    long bestD = Long.MAX_VALUE;
-                    for (int c = 0; c < subSize && base + c < colors.length; c++)
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight())
                     {
-                        Color col = colors[base + c];
-                        long dr = r - col.getRed(), dg = g - col.getGreen(), db = b - col.getBlue();
-                        long d = dr * dr + dg * dg + db * db;
-                        if (d < bestD) { bestD = d; bestIdx = c; }
+                        grid[y][x] = 0;
+                        continue;
                     }
+                    int argb = image.getRGB(sx, sy);
+                    // transparent -> index 0
+                    if (((argb >>> 24) & 0xFF) == 0)
+                    {
+                        grid[y][x] = 0;
+                        continue;
+                    }
+                    int bestIdx = ColorMatch.nearestIndex(colors, base, count, argb, oamImages[k].getPixelValue(x, y));
                     grid[y][x] = bestIdx;
-                    if (bestD != 0) unmatched++;
+                    if (ColorMatch.distanceSq(colors[base + bestIdx], argb) != 0)
+                        unmatched++;
                 }
             }
             oamImages[k].setPixels(grid);
@@ -712,7 +719,8 @@ public class CellBank extends GenericNtrFile
 
         // Gather each sub-palette's opaque colors from the OAMs that draw with it.
         java.util.List<java.util.LinkedHashSet<Integer>> perSub = new java.util.ArrayList<>();
-        for (int i = 0; i < subCount; i++) perSub.add(new java.util.LinkedHashSet<Integer>());
+        for (int i = 0; i < subCount; i++)
+            perSub.add(new java.util.LinkedHashSet<Integer>());
         for (Cell.OAM oam : cell.oams)
         {
             if (isOamDisabled(oam))
@@ -726,9 +734,11 @@ public class CellBank extends GenericNtrFile
                 for (int x = 0; x < sz[0]; x++)
                 {
                     int sx = dx + x, sy = dy + y;
-                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight()) continue;
+                    if (sx < 0 || sy < 0 || sx >= image.getWidth() || sy >= image.getHeight())
+                        continue;
                     int argb = image.getRGB(sx, sy);
-                    if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette color
+                    if (((argb >>> 24) & 0xFF) == 0)
+                        continue; // transparent -> index 0, not a palette color
                     perSub.get(sub).add(argb & 0xFFFFFF);
                 }
         }
@@ -740,17 +750,20 @@ public class CellBank extends GenericNtrFile
         for (int p = 0; p < subCount; p++)
         {
             java.util.LinkedHashSet<Integer> set = perSub.get(p);
-            if (set.isEmpty()) continue;
+            if (set.isEmpty())
+                continue;
             java.util.List<Color> quant;
             if (set.size() <= cap)
             {
                 quant = new java.util.ArrayList<>();
-                for (int rgb : set) quant.add(new Color(rgb));
+                for (int rgb : set)
+                    quant.add(new Color(rgb));
             }
             else
             {
                 java.util.List<int[]> rgbs = new java.util.ArrayList<>();
-                for (int rgb : set) rgbs.add(new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF});
+                for (int rgb : set)
+                    rgbs.add(new int[] { (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF });
                 quant = IndexedImage.medianCut(rgbs, cap);
             }
             colors[p * subSize] = Color.MAGENTA; // rendered transparent when index-0 transparency is on
@@ -841,7 +854,8 @@ public class CellBank extends GenericNtrFile
      * An individual "Cell", or "Bank" within an NCER.
      * In theory, this represents one assembled image.
      */
-    public class Cell {
+    public class Cell
+    {
         String name;
         int tacuData;
 
@@ -999,7 +1013,8 @@ public class CellBank extends GenericNtrFile
             return result;
         }
 
-        class CellAttribute {
+        class CellAttribute
+        {
             boolean hFlip;
             boolean vFlip;
             boolean hvFlip;
@@ -1036,7 +1051,8 @@ public class CellBank extends GenericNtrFile
          * This represents the sub-images that make up a Cell/Bank, or more accurately,
          * the data used to generate them from an NCGR (<code>IndexedImage</code>).
          */
-        public class OAM {
+        public class OAM
+        {
             // attr0
             int yCoord;
             boolean rotation;
@@ -1078,69 +1094,147 @@ public class CellBank extends GenericNtrFile
             }
 
             /** @return this OAM's y position, as a signed offset from the cell origin */
-            public int getYCoord() { return yCoord; }
+            public int getYCoord()
+            {
+                return yCoord;
+            }
             /** @param yCoord this OAM's y position, as a signed offset from the cell origin */
-            public void setYCoord(int yCoord) { this.yCoord = yCoord; }
+            public void setYCoord(int yCoord)
+            {
+                this.yCoord = yCoord;
+            }
 
             /** @return this OAM's x position, as a signed offset from the cell origin */
-            public int getXCoord() { return xCoord; }
+            public int getXCoord()
+            {
+                return xCoord;
+            }
             /** @param xCoord this OAM's x position, as a signed offset from the cell origin */
-            public void setXCoord(int xCoord) { this.xCoord = xCoord; }
+            public void setXCoord(int xCoord)
+            {
+                this.xCoord = xCoord;
+            }
 
             /** @return this OAM's shape index (0 square, 1 wide, 2 tall), which with the size selects its dimensions */
-            public int getShape() { return shape; }
+            public int getShape()
+            {
+                return shape;
+            }
             /** @param shape this OAM's shape index (0 square, 1 wide, 2 tall) */
-            public void setShape(int shape) { this.shape = shape; }
+            public void setShape(int shape)
+            {
+                this.shape = shape;
+            }
 
             /** @return this OAM's size index (0-3), which with the shape selects its dimensions */
-            public int getSize() { return size; }
+            public int getSize()
+            {
+                return size;
+            }
             /** @param size this OAM's size index (0-3) */
-            public void setSize(int size) { this.size = size; }
+            public void setSize(int size)
+            {
+                this.size = size;
+            }
 
             /** @return the tile offset into the NCGR this OAM draws from */
-            public int getTileOffset() { return tileOffset; }
+            public int getTileOffset()
+            {
+                return tileOffset;
+            }
             /** @param tileOffset the tile offset into the NCGR this OAM draws from */
-            public void setTileOffset(int tileOffset) { this.tileOffset = tileOffset; }
+            public void setTileOffset(int tileOffset)
+            {
+                this.tileOffset = tileOffset;
+            }
 
             /** @return the 16-color sub-palette index this OAM uses */
-            public int getPalette() { return palette; }
+            public int getPalette()
+            {
+                return palette;
+            }
             /** @param palette the 16-color sub-palette index this OAM uses */
-            public void setPalette(int palette) { this.palette = palette; }
+            public void setPalette(int palette)
+            {
+                this.palette = palette;
+            }
 
             /** @return this OAM's priority (0-3) */
-            public int getPriority() { return priority; }
+            public int getPriority()
+            {
+                return priority;
+            }
             /** @param priority this OAM's priority (0-3) */
-            public void setPriority(int priority) { this.priority = priority; }
+            public void setPriority(int priority)
+            {
+                this.priority = priority;
+            }
 
             /** @return this OAM's graphics mode (0 normal, 1 semi-transparent, 2 window) */
-            public int getMode() { return mode; }
+            public int getMode()
+            {
+                return mode;
+            }
             /** @param mode this OAM's graphics mode (0 normal, 1 semi-transparent, 2 window) */
-            public void setMode(int mode) { this.mode = mode; }
+            public void setMode(int mode)
+            {
+                this.mode = mode;
+            }
 
             /** @return whether this OAM uses mosaic */
-            public boolean isMosaic() { return mosaic; }
+            public boolean isMosaic()
+            {
+                return mosaic;
+            }
             /** @param mosaic whether this OAM uses mosaic */
-            public void setMosaic(boolean mosaic) { this.mosaic = mosaic; }
+            public void setMosaic(boolean mosaic)
+            {
+                this.mosaic = mosaic;
+            }
 
             /** @return the color count of this OAM's tiles (16 or 256) */
-            public int getColors() { return colors; }
+            public int getColors()
+            {
+                return colors;
+            }
             /** @param colors the color count of this OAM's tiles (16 or 256) */
-            public void setColors(int colors) { this.colors = colors; }
+            public void setColors(int colors)
+            {
+                this.colors = colors;
+            }
 
             /** @return whether this OAM is affine (rotation/scaling) rather than a plain sprite */
-            public boolean isRotation() { return rotation; }
+            public boolean isRotation()
+            {
+                return rotation;
+            }
             /** @param rotation whether this OAM is affine (rotation/scaling) rather than a plain sprite */
-            public void setRotation(boolean rotation) { this.rotation = rotation; }
+            public void setRotation(boolean rotation)
+            {
+                this.rotation = rotation;
+            }
 
             /** @return for an affine OAM, whether double-size is set; for a plain OAM, whether it is disabled */
-            public boolean isSizeDisable() { return sizeDisable; }
+            public boolean isSizeDisable()
+            {
+                return sizeDisable;
+            }
             /** @param sizeDisable for an affine OAM, whether double-size is set; for a plain OAM, whether it is disabled */
-            public void setSizeDisable(boolean sizeDisable) { this.sizeDisable = sizeDisable; }
+            public void setSizeDisable(boolean sizeDisable)
+            {
+                this.sizeDisable = sizeDisable;
+            }
 
             /** @return the affine (rotation/scaling) parameter set index this OAM uses */
-            public int getRotationScaling() { return rotationScaling; }
+            public int getRotationScaling()
+            {
+                return rotationScaling;
+            }
             /** @param rotationScaling the affine (rotation/scaling) parameter set index this OAM uses */
-            public void setRotationScaling(int rotationScaling) { this.rotationScaling = rotationScaling; }
+            public void setRotationScaling(int rotationScaling)
+            {
+                this.rotationScaling = rotationScaling;
+            }
 
             public OamImage getImage(int i, int[] index)
             {
@@ -1370,7 +1464,8 @@ public class CellBank extends GenericNtrFile
         /**
          * This is a visual representation of a given <code>Cell</code> within its parent NCGR (<code>IndexedImage</code>).
          */
-        public class CellImage {
+        public class CellImage
+        {
             private IndexedImage cellImage;
             private boolean update;
             private OAM.OamImage[] oamImages;
@@ -1494,13 +1589,13 @@ public class CellBank extends GenericNtrFile
     //format is (width, height)
     protected static final int[][][] oamSize = new int[][][] {
             { // square
-                    {8, 8}, {16, 16}, {32, 32}, {64, 64}
+                    { 8, 8 }, { 16, 16 }, { 32, 32 }, { 64, 64 }
             },
             { // horizontal
-                    {16, 8}, {32, 8}, {32, 16}, {64, 32}
+                    { 16, 8 }, { 32, 8 }, { 32, 16 }, { 64, 32 }
             },
             { // vertical
-                    {8, 16}, {8, 32}, {16, 32}, {32, 64}
+                    { 8, 16 }, { 8, 32 }, { 16, 32 }, { 32, 64 }
             }
     };
 
@@ -1521,7 +1616,7 @@ public class CellBank extends GenericNtrFile
     {
         int[] base = getOamSize(oam);
         if (oam.rotation && oam.sizeDisable)
-            return new int[]{base[0] * 2, base[1] * 2};
+            return new int[] { base[0] * 2, base[1] * 2 };
         return base;
     }
 
