@@ -1005,6 +1005,7 @@ public class IndexedImage extends GenericNtrFile
                     pixels[y][x] = 0;
                     continue;
                 }
+
                 int best = ColorMatch.nearestIndex(pal, 0, limit, argb, pixels[y][x]);
                 if (ColorMatch.distanceSq(pal[best], argb) != 0)
                     unmatched++;

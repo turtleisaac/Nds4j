@@ -669,6 +669,7 @@ public class CellBank extends GenericNtrFile
                         grid[y][x] = 0;
                         continue;
                     }
+
                     int argb = image.getRGB(sx, sy);
                     // transparent -> index 0
                     if (((argb >>> 24) & 0xFF) == 0)
@@ -676,6 +677,7 @@ public class CellBank extends GenericNtrFile
                         grid[y][x] = 0;
                         continue;
                     }
+
                     int bestIdx = ColorMatch.nearestIndex(colors, base, count, argb, oamImages[k].getPixelValue(x, y));
                     grid[y][x] = bestIdx;
                     if (ColorMatch.distanceSq(colors[base + bestIdx], argb) != 0)
