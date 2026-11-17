@@ -837,10 +837,64 @@ public class CellBank extends GenericNtrFile
         return mappingType;
     }
 
-    /** Byte offset of an OAM character name. The name counts in CEBK boundary steps, for 4bpp and 8bpp. */
+    /** Byte offset of a 1D OAM character name. The name counts in CEBK boundary steps, for 4bpp and 8bpp. */
     static int tileByteOffset(int tileOffset, int mappingType, int partitionOffset)
     {
         return (tileOffset << mappingType) * 32 + partitionOffset;
+    }
+
+    /** Column of a 2D character name, in 8x8 tiles. An 8bpp name counts two numbers per tile. */
+    static int gridColumn(int tileOffset, int bitDepth)
+    {
+        return (gridName(tileOffset, bitDepth) % 32) / gridStep(bitDepth);
+    }
+
+    /** Row of a 2D character name. Each row is 32 character names. */
+    static int gridRow(int tileOffset, int bitDepth)
+    {
+        return gridName(tileOffset, bitDepth) / 32;
+    }
+
+    /** Column where this object starts, including a VRAM-transfer partition. */
+    static int gridSourceColumn(int tileOffset, int bitDepth, int partitionOffset, int tilesWide)
+    {
+        return gridColumn(tileOffset, bitDepth) + partitionTiles(bitDepth, partitionOffset) % tilesWide;
+    }
+
+    /** Row where this object starts, including a VRAM-transfer partition. */
+    static int gridSourceRow(int tileOffset, int bitDepth, int partitionOffset, int tilesWide)
+    {
+        return gridRow(tileOffset, bitDepth) + partitionTiles(bitDepth, partitionOffset) / tilesWide;
+    }
+
+    /** Returns the character name, clearing the low bit at 8bpp. */
+    private static int gridName(int tileOffset, int bitDepth)
+    {
+        if (bitDepth == 8)
+            return tileOffset & ~1;
+
+        return tileOffset;
+    }
+
+    /** Returns how many character names one 8x8 tile occupies. */
+    private static int gridStep(int bitDepth)
+    {
+        if (bitDepth == 8)
+            return 2;
+
+        return 1;
+    }
+
+    /** Returns the tile count covered by a VRAM-transfer partition. */
+    private static int partitionTiles(int bitDepth, int partitionOffset)
+    {
+        return partitionOffset / tileBytes(bitDepth);
+    }
+
+    /** @return the bytes in one 8x8 tile at this depth */
+    static int tileBytes(int bitDepth)
+    {
+        return gridStep(bitDepth) * 32;
     }
 
     /**
@@ -1410,9 +1464,28 @@ public class CellBank extends GenericNtrFile
                 /** Reads this OAM's tiles from the NCGR at its character-name offset. */
                 private void copyTiledSprite()
                 {
+                    if (mappingType == 4)
+                        copyGridSprite();
+                    else
+                        copyLinearSprite();
+                }
+
+                /** Reads a 1D object as a consecutive run of tiles. */
+                private void copyLinearSprite()
+                {
                     byte[] imageData = tilesOf(image);
                     int startByte = tileByteOffset(tileOffset, mappingType, partitionOffset);
                     decodeTiles(imageData, oamImage, startByte);
+                }
+
+                /** Reads a 2D object as a rectangle on the sheet. Rows are 32 character names apart. */
+                private void copyGridSprite()
+                {
+                    int wide = Math.max(1, image.getWidth() / 8);
+                    int srcX = gridSourceColumn(tileOffset, image.getBitDepth(), partitionOffset, wide) * 8;
+                    int srcY = gridSourceRow(tileOffset, image.getBitDepth(), partitionOffset, wide) * 8;
+                    for (int row = 0; row < storedHeight; row++)
+                        copyLineBufferRow(srcX, srcY, row);
                 }
 
                 /** @return the image packed as 4bpp or 8bpp character tiles */
@@ -1447,12 +1520,64 @@ public class CellBank extends GenericNtrFile
                     if (image.getScanMode() == IndexedImage.NcgrUtils.ScanMode.LINE_BUFFER)
                         throw new RuntimeException("Editing a LINE_BUFFER (bitmap-sheet) NCGR's OAMs isn't supported yet");
 
+                    saveTiles();
+                }
+
+                /** Writes this object back into the NCGR, as a rectangle for 2D mapping and a run for 1D. */
+                private void saveTiles()
+                {
+                    if (mappingType == 4)
+                    {
+                        saveGridSprite();
+                        return;
+                    }
+
+                    saveLinearSprite();
+                }
+
+                /** Writes a 1D object back as a consecutive run of tiles. */
+                private void saveLinearSprite()
+                {
                     oamImage.setBitDepth(image.getBitDepth());
                     byte[] cellData = tilesOf(oamImage);
                     byte[] imageData = tilesOf(image);
                     int startByte = tileByteOffset(tileOffset, mappingType, partitionOffset);
                     System.arraycopy(cellData, 0, imageData, startByte, cellData.length);
                     decodeTiles(imageData, image, 0);
+                }
+
+                /** Writes a 2D object back onto its rectangle of the sheet. */
+                private void saveGridSprite()
+                {
+                    byte[] cellData = tilesOf(oamImage);
+                    byte[] imageData = tilesOf(image);
+                    int wide = Math.max(1, image.getWidth() / 8);
+                    int cols = storedWidth / 8;
+                    int bytes = tileBytes(image.getBitDepth());
+                    for (int row = 0; row < storedHeight / 8; row++)
+                        saveGridTileRow(cellData, imageData, wide, cols, bytes, row);
+
+                    decodeTiles(imageData, image, 0);
+                }
+
+                /** Writes one tile row of a 2D object into the sheet. */
+                private void saveGridTileRow(byte[] cellData, byte[] imageData, int wide, int cols, int bytes, int row)
+                {
+                    for (int col = 0; col < cols; col++)
+                        saveGridTile(cellData, imageData, wide, cols, bytes, col, row);
+                }
+
+                /** Writes one 8x8 of a 2D object, skipping a tile that leaves the sheet. */
+                private void saveGridTile(byte[] cellData, byte[] imageData, int wide, int cols, int bytes, int col, int row)
+                {
+                    int fileCol = gridSourceColumn(tileOffset, image.getBitDepth(), partitionOffset, wide) + col;
+                    int fileRow = gridSourceRow(tileOffset, image.getBitDepth(), partitionOffset, wide) + row;
+                    if (fileCol >= wide || fileRow >= image.getHeight() / 8)
+                        return;
+
+                    int from = (row * cols + col) * bytes;
+                    int to = (fileRow * wide + fileCol) * bytes;
+                    System.arraycopy(cellData, from, imageData, to, bytes);
                 }
 
                 /**
