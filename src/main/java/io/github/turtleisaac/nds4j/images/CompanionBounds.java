@@ -54,17 +54,11 @@ final class CompanionBounds
         int bytesPerTile = depth == 8 ? 64 : 32;
         int[] box = CellBank.oamSize[oam.getShape()][oam.getSize()];
         int need = (box[0] / 8) * (box[1] / 8) * bytesPerTile;
-        int startByte = tileStart(oam.getTileOffset(), mappingType, depth, partitionOffset);
+        int startByte = CellBank.tileByteOffset(oam.getTileOffset(), mappingType, partitionOffset);
         int available = image.getNumTiles() * bytesPerTile;
 
         if (startByte < 0 || available < need || startByte > available - need)
             throw new IncompatibleCompanionException(IncompatibleCompanionException.Kind.NCGR);
-    }
-
-    // Same start the renderer uses: (tileOffset << mappingType) * (bitDepth * 8) + partition.
-    private static int tileStart(int tileOffset, int mappingType, int depth, int partitionOffset)
-    {
-        return (tileOffset << (byte) mappingType) * (depth * 8) + partitionOffset;
     }
 
     // GBATEK OBJ Attribute 2 bits 12-15 select a 16-color block. 8bpp ignores them.
