@@ -122,6 +122,10 @@ Nitro-specific format detail:
 * Retail Generation IV Pokémon ROMs (Diamond/Pearl/Platinum/HeartGold/SoulSilver), used to
   reverse-engineer and validate the `NRCS` screen block; byte-exact round-trip was confirmed
   against every RCSN file in all five titles.
+* [DS Technical Reference (GBATEK)](https://problemkaputt.de/gbatek.htm)
+  * [LCD I/O BG Control](https://problemkaputt.de/gbatek.htm#lcdiobgcontrol) — text BG screen
+    size. A map wider or taller than 256 px is stored as 256x256 screen blocks (SC0|SC1,
+    SC0 over SC1, or SC0 SC1 / SC2 SC3), each block 32x32 entries in row-major order.
 * [ROMhacking.net NDS File Formats](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm)
   * [Nintendo Screen Resource (NSCR/RCSN)](https://www.romhacking.net/documents/%5B469%5Dnds_formats.htm#NSCR) <sup>unused</sup>
 * [lowlines' Documents Page](http://llref.emutalk.net/docs/) <sup>unused</sup>

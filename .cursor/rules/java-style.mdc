@@ -105,7 +105,7 @@ assertThat(folder.getIdOf("Alpha"))
 
 ## Comments and binary I/O
 
-A javadoc is one summary line, plus `@param`, `@return`, or `@throws` only when they add something the signature does not. Most methods have no javadoc. Inline notes stay short.
+Every method gets a javadoc, including private helpers and test methods. A javadoc is one concise summary of what the method does, plus `@param`, `@return`, or `@throws` only when they add something the signature does not. When the behavior comes from a spec or another real source, link that source. Leave its tables, sizes, and layouts out of the javadoc. A short single-line comment sits above a chunk of code inside a function. Inline notes stay short.
 
 Structured bytes go through `MemBuf`. `Buffer` and `BinaryWriter` are the older Nds4j exceptions.
 
