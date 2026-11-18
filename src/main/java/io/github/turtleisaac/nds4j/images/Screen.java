@@ -34,10 +34,10 @@ import java.util.Objects;
 /**
  * An object representation of an NSCR file (a tilemap "screen").
  * <p>
- * An NSCR ("RCSN") is a background layer: a grid of 8x8 tile cells laid out left-to-right,
- * top-to-bottom. Each cell is a 16-bit entry that names a tile in a companion {@link IndexedImage}
- * (NCGR), the palette to draw it with, and whether to flip it. The screen is meaningless without
- * that NCGR and an {@link Palette} (NCLR) to supply the colors.
+ * An NSCR ("RCSN") is a background layer: a grid of 8x8 tile cells. Each cell is a 16-bit
+ * entry that names a tile in a companion {@link IndexedImage} (NCGR), the palette to draw it
+ * with, and whether to flip it. The screen is meaningless without that NCGR and an
+ * {@link Palette} (NCLR) to supply the colors.
  * <p>
  * Entries are exposed as a raw {@code short[]}; the bitfields of an individual entry can be read and
  * written with {@link #getTileIndex(int)}, {@link #getPaletteIndex(int)},
@@ -53,7 +53,8 @@ public class Screen extends GenericNtrFile
     // so it is preserved raw to keep an unedited screen byte-for-byte identical.
     private long screenFormat;
 
-    // One 16-bit entry per 8x8 tile cell, in reading order (row-major). Bit layout:
+    // One 16-bit entry per 8x8 tile cell, in text BG screen-block order (GBATEK LCD I/O BG Control).
+    // Bit layout:
     //   bits 0-9   tile index into the companion NCGR
     //   bit 10     horizontal flip
     //   bit 11     vertical flip
@@ -65,6 +66,9 @@ public class Screen extends GenericNtrFile
     private static final int V_FLIP_BIT = 0x0800;
     private static final int PALETTE_SHIFT = 12;
     private static final int PALETTE_MASK = 0xF;
+
+    // One hardware screen block: 32x32 entries, 256x256 px, 2 KB.
+    private static final int SCREEN_BLOCK_TILES = 32;
 
     /**
      * Generates an object representation of an NSCR file
@@ -208,7 +212,7 @@ public class Screen extends GenericNtrFile
     }
 
     /**
-     * Gets a copy of this screen's raw 16-bit tile entries, in row-major order.
+     * Gets a copy of this screen's raw 16-bit tile entries, in file order.
      * @return a <code>short[]</code>
      */
     public short[] getEntries()
@@ -366,7 +370,7 @@ public class Screen extends GenericNtrFile
      * Renders a single 8x8 tile entry (transparent on color index 0), as it appears on the screen.
      * @param ncgr the tile graphics this screen indexes into
      * @param palette the colors to draw the tile with
-     * @param entryIndex the index of the entry, in row-major order
+     * @param entryIndex the index of the entry, in file order
      * @return an 8x8 <code>BufferedImage</code> with an alpha channel
      */
     public BufferedImage getTileImage(IndexedImage ncgr, Palette palette, int entryIndex)
@@ -376,19 +380,130 @@ public class Screen extends GenericNtrFile
         return tile;
     }
 
+    /**
+     * Draws this screen, placing each file entry at its screen-block pixel.
+     * @param transparent whether color index 0 is left clear
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
     private BufferedImage render(IndexedImage ncgr, Palette palette, boolean transparent)
     {
         int type = transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
         BufferedImage output = new BufferedImage(width, height, type);
+        int[] tile = new int[2];
 
-        int columns = width / 8;
+        // File order is screen-block order, so the pixel comes from locateEntry.
         for (int i = 0; i < entries.length; i++)
         {
-            int col = i % columns;
-            int row = i / columns;
-            drawEntry(output, ncgr, palette, i, col * 8, row * 8, transparent);
+            locateEntry(i, tile);
+            drawEntry(output, ncgr, palette, i, tile[0] * 8, tile[1] * 8, transparent);
         }
+
         return output;
+    }
+
+    /**
+     * Returns the file index of the tile at ({@code tileX}, {@code tileY}) on this screen.
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private int entryIndex(int tileX, int tileY)
+    {
+        return entryIndex(tileX, tileY, width, height);
+    }
+
+    /**
+     * Returns the file index of tile ({@code tileX}, {@code tileY}) in a text BG of the given pixel size.
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private static int entryIndex(int tileX, int tileY, int pixelWidth, int pixelHeight)
+    {
+        int tilesWide = pixelWidth / 8;
+        int tilesHigh = pixelHeight / 8;
+        int blockColumn = tileX / SCREEN_BLOCK_TILES;
+        int blockRow = tileY / SCREEN_BLOCK_TILES;
+
+        // Earlier blocks, then the offset inside this 32-wide block.
+        int index = entriesBefore(blockColumn, blockRow, tilesWide, tilesHigh);
+        int blockWidth = blockSpan(tilesWide, blockColumn);
+
+        return index + (tileY % SCREEN_BLOCK_TILES) * blockWidth + (tileX % SCREEN_BLOCK_TILES);
+    }
+
+    /**
+     * Returns how many file entries sit before the screen block at ({@code blockColumn}, {@code blockRow}).
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private static int entriesBefore(int blockColumn, int blockRow, int tilesWide, int tilesHigh)
+    {
+        int index = 0;
+        int consumedRows = 0;
+
+        // Whole block rows above this one. Each row spans the full map width.
+        for (int row = 0; row < blockRow; row++)
+        {
+            int rowHeight = Math.min(SCREEN_BLOCK_TILES, tilesHigh - consumedRows);
+            index += rowHeight * tilesWide;
+            consumedRows += rowHeight;
+        }
+
+        // Blocks to the left in this row. A short row is only as tall as the tiles it has.
+        int rowHeight = Math.min(SCREEN_BLOCK_TILES, tilesHigh - consumedRows);
+        for (int column = 0; column < blockColumn; column++)
+            index += rowHeight * blockSpan(tilesWide, column);
+
+        return index;
+    }
+
+    /**
+     * Returns the tile count of screen block {@code block} along one edge of a {@code tiles}-long map.
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private static int blockSpan(int tiles, int block)
+    {
+        return Math.min(SCREEN_BLOCK_TILES, tiles - block * SCREEN_BLOCK_TILES);
+    }
+
+    /**
+     * Writes the tile column and row of file entry {@code index} into {@code tile}.
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private void locateEntry(int index, int[] tile)
+    {
+        int tilesWide = width / 8;
+        int tilesHigh = height / 8;
+        int cursor = 0;
+        int consumedRows = 0;
+        int blockRow = 0;
+
+        // Walk screen blocks in file order until this entry falls inside one.
+        while (consumedRows < tilesHigh)
+        {
+            int rowHeight = Math.min(SCREEN_BLOCK_TILES, tilesHigh - consumedRows);
+            int consumedColumns = 0;
+            int blockColumn = 0;
+            while (consumedColumns < tilesWide)
+            {
+                int blockWidth = blockSpan(tilesWide, blockColumn);
+                int size = rowHeight * blockWidth;
+                if (index < cursor + size)
+                {
+                    int inside = index - cursor;
+                    tile[0] = blockColumn * SCREEN_BLOCK_TILES + inside % blockWidth;
+                    tile[1] = blockRow * SCREEN_BLOCK_TILES + inside / blockWidth;
+                    return;
+                }
+
+                cursor += size;
+                consumedColumns += blockWidth;
+                blockColumn++;
+            }
+
+            consumedRows += rowHeight;
+            blockRow++;
+        }
+
+        // An index past the last block stays at tile (0, 0).
+        tile[0] = 0;
+        tile[1] = 0;
     }
 
     // Draws entry i into dest with its top-left corner at (destX, destY). Shared by the whole-screen and
@@ -446,8 +561,8 @@ public class Screen extends GenericNtrFile
         if (screenX < 0 || screenX >= width || screenY < 0 || screenY >= height)
             throw new RuntimeException(String.format("Pixel (%d, %d) is outside this %dx%d screen.", screenX, screenY, width, height));
 
-        int columns = width / 8;
-        int i = (screenY / 8) * columns + (screenX / 8);
+        // The file index follows the text BG screen blocks, including the flip flags below.
+        int i = entryIndex(screenX / 8, screenY / 8);
         int tilesPerRow = ncgr.getWidth() / 8;
         int tileIndex = getTileIndex(i);
         int tileCol = tileIndex % tilesPerRow;
@@ -532,117 +647,24 @@ public class Screen extends GenericNtrFile
         return decompose(image, templateNcgr, rebuilt, dedupFlips);
     }
 
+    /**
+     * Rebuilds this screen's entries from {@code image} and returns the deduplicated tileset.
+     */
     private ImportResult decompose(BufferedImage image, IndexedImage templateNcgr, Palette palette, boolean dedupFlips)
     {
-        int bitDepth = templateNcgr.getBitDepth();
-        if (bitDepth != 4 && bitDepth != 8)
-            throw new RuntimeException("The template NCGR has no usable bit depth (" + bitDepth + ").");
-
+        int bitDepth = requireScreenBitDepth(templateNcgr);
         int w = image.getWidth();
         int h = image.getHeight();
-        if (w % 8 != 0 || h % 8 != 0)
-            throw new RuntimeException(String.format("The image is %dx%d; a screen needs both dimensions to be multiples of 8.", w, h));
+        requireTileGrid(w, h);
 
-        int columns = w / 8;
-        int rows = h / 8;
+        // One entry per cell, stored in screen-block order, sharing identical tiles.
+        List<int[]> tiles = new ArrayList<>();
+        Map<String, Integer> tileLookup = new HashMap<>();
+        short[] newEntries = new short[(w / 8) * (h / 8)];
+        int unmatched = fillEntries(image, palette, bitDepth, dedupFlips, tiles, tileLookup, newEntries);
 
-        Color[] colors = palette.getColors();
-        int subSize = bitDepth == 4 ? 16 : 256;
-        int numSubPals = Math.max(1, colors.length / subSize);
-
-        List<int[]> tiles = new ArrayList<>();          // each tile: int[64] raw values, row-major
-        Map<String, Integer> tileLookup = new HashMap<>(); // identity serialisation -> tile ordinal
-        short[] newEntries = new short[columns * rows];
-        int unmatched = 0;
-
-        int[] argb = new int[64];
-        for (int cellRow = 0; cellRow < rows; cellRow++)
-        {
-            for (int cellCol = 0; cellCol < columns; cellCol++)
-            {
-                for (int y = 0; y < 8; y++)
-                    for (int x = 0; x < 8; x++)
-                        argb[y * 8 + x] = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
-
-                // Pick the sub-palette that fits this cell best (least total nearest-color error).
-                int bestSub = 0;
-                int[] bestVals = null;
-                long bestErr = Long.MAX_VALUE;
-                int bestUnmatched = 0;
-                for (int p = 0; p < numSubPals; p++)
-                {
-                    int base = p * subSize;
-                    int[] vals = new int[64];
-                    long err = 0;
-                    int un = 0;
-                    for (int k = 0; k < 64; k++)
-                    {
-                        if (((argb[k] >>> 24) & 0xFF) == 0) // fully transparent -> index 0
-                        {
-                            vals[k] = 0;
-                            continue;
-                        }
-                        int r = (argb[k] >> 16) & 0xFF, g = (argb[k] >> 8) & 0xFF, b = argb[k] & 0xFF;
-                        int bestIdx = 0;
-                        long bestD = Long.MAX_VALUE;
-                        for (int c = 0; c < subSize && base + c < colors.length; c++)
-                        {
-                            long d = colorDistanceSq(r, g, b, colors[base + c]);
-                            if (d < bestD) { bestD = d; bestIdx = c; }
-                        }
-                        vals[k] = bestIdx;
-                        err += bestD;
-                        if (bestD != 0) un++;
-                    }
-                    if (err < bestErr) { bestErr = err; bestSub = p; bestVals = vals; bestUnmatched = un; }
-                }
-                unmatched += bestUnmatched;
-
-                // Share this tile with an existing one, trying the four flip orientations.
-                int ordinal = -1;
-                boolean hFlip = false, vFlip = false;
-                boolean[] options = dedupFlips ? new boolean[]{false, true} : new boolean[]{false};
-                search:
-                for (boolean tryV : options)
-                    for (boolean tryH : options)
-                    {
-                        Integer ord = tileLookup.get(serializeTile(flipTile(bestVals, tryH, tryV)));
-                        if (ord != null) { ordinal = ord; hFlip = tryH; vFlip = tryV; break search; }
-                    }
-                if (ordinal < 0)
-                {
-                    ordinal = tiles.size();
-                    tiles.add(bestVals);
-                    tileLookup.put(serializeTile(bestVals), ordinal);
-                }
-                if (ordinal > TILE_INDEX_MASK)
-                    throw new RuntimeException("The image needs more than " + (TILE_INDEX_MASK + 1)
-                            + " unique tiles, which a screen's 10-bit tile index can't address.");
-
-                int entry = (ordinal & TILE_INDEX_MASK)
-                        | (hFlip ? H_FLIP_BIT : 0)
-                        | (vFlip ? V_FLIP_BIT : 0)
-                        | ((bestSub & PALETTE_MASK) << PALETTE_SHIFT);
-                newEntries[cellRow * columns + cellCol] = (short) entry;
-            }
-        }
-
-        // Lay the unique tiles out at the template's storage width (tiles-per-row) into a fresh NCGR.
-        int tilesPerRow = Math.max(1, templateNcgr.getWidth() / 8);
-        int outTileRows = Math.max(1, (tiles.size() + tilesPerRow - 1) / tilesPerRow);
-        IndexedImage ncgr = new IndexedImage(outTileRows * 8, tilesPerRow * 8, bitDepth, palette);
-        for (int t = 0; t < tiles.size(); t++)
-        {
-            int tc = t % tilesPerRow, tr = t / tilesPerRow;
-            int[] tile = tiles.get(t);
-            for (int y = 0; y < 8; y++)
-                for (int x = 0; x < 8; x++)
-                    ncgr.setPixelValue(tc * 8 + x, tr * 8 + y, tile[y * 8 + x]);
-        }
-        ncgr.setNumTiles(tiles.size());   // write exactly the unique tiles (trailing grid cells are padding)
-        ncgr.setMappingType(32);          // 32 = the header carries explicit tile dimensions
-
-        // Commit the rebuilt tilemap onto this screen (screenFormat preserved).
+        // Keep the new tilemap on this screen. screenFormat stays as it was.
+        IndexedImage ncgr = layOutTiles(tiles, templateNcgr, bitDepth, palette);
         this.entries = newEntries;
         this.width = w;
         this.height = h;
@@ -650,10 +672,243 @@ public class Screen extends GenericNtrFile
         return new ImportResult(ncgr, palette, tiles.size(), unmatched);
     }
 
-    // Builds a palette that fits the image, for applyImageRebuildingPalette. 8bpp: one median-cut palette
-    // of up to 256 colors. 4bpp: greedily pack each cell's colors into up to numSubPalettes 16-color
-    // sub-palettes (a cell must fit one sub-palette, mirroring the DS constraint), quantising a sub-palette
-    // down with median-cut only if it overflows. The sub-palettes are concatenated into one Palette.
+    /**
+     * Returns the template's bit depth, or throws when it is neither 4 nor 8.
+     */
+    private static int requireScreenBitDepth(IndexedImage templateNcgr)
+    {
+        int bitDepth = templateNcgr.getBitDepth();
+        if (bitDepth != 4 && bitDepth != 8)
+            throw new RuntimeException("The template NCGR has no usable bit depth (" + bitDepth + ").");
+
+        return bitDepth;
+    }
+
+    /**
+     * Throws when {@code w} or {@code h} is not a multiple of a tile.
+     */
+    private static void requireTileGrid(int w, int h)
+    {
+        if (w % 8 != 0 || h % 8 != 0)
+            throw new RuntimeException(String.format("The image is %dx%d; a screen needs both dimensions to be multiples of 8.", w, h));
+    }
+
+    /**
+     * Writes one screen entry per cell and returns how many pixels missed the palette.
+     */
+    private int fillEntries(BufferedImage image, Palette palette, int bitDepth, boolean dedupFlips, List<int[]> tiles, Map<String, Integer> tileLookup, short[] newEntries)
+    {
+        int columns = image.getWidth() / 8;
+        int rows = image.getHeight() / 8;
+        int unmatched = 0;
+        for (int cellRow = 0; cellRow < rows; cellRow++)
+        {
+            for (int cellCol = 0; cellCol < columns; cellCol++)
+                unmatched += storeCell(image, palette, bitDepth, dedupFlips, tiles, tileLookup, newEntries, cellCol, cellRow);
+        }
+
+        return unmatched;
+    }
+
+    /**
+     * Stores the cell at ({@code cellCol}, {@code cellRow}) and returns its unmatched-pixel count.
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdiobgcontrol">GBATEK LCD I/O BG Control</a>
+     */
+    private int storeCell(BufferedImage image, Palette palette, int bitDepth, boolean dedupFlips, List<int[]> tiles, Map<String, Integer> tileLookup, short[] newEntries, int cellCol, int cellRow)
+    {
+        int[] values = new int[64];
+        int[] fit = fitCell(readCell(image, cellCol, cellRow), palette, bitDepth, values);
+        boolean[] flips = new boolean[2];
+        int ordinal = findTile(values, dedupFlips, tiles, tileLookup, flips);
+
+        // fit[0] is the sub-palette. flips is horizontal, then vertical.
+        newEntries[entryIndex(cellCol, cellRow, image.getWidth(), image.getHeight())] = packEntry(ordinal, flips[0], flips[1], fit[0]);
+
+        return fit[1];
+    }
+
+    /**
+     * Returns the 64 ARGB pixels of the cell at ({@code cellCol}, {@code cellRow}), row-major.
+     */
+    private static int[] readCell(BufferedImage image, int cellCol, int cellRow)
+    {
+        int[] argb = new int[64];
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+                argb[y * 8 + x] = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
+        }
+
+        return argb;
+    }
+
+    /**
+     * Chooses the closest sub-palette, writes the raw tile into {@code values}, and returns the sub-palette and unmatched count.
+     */
+    private static int[] fitCell(int[] argb, Palette palette, int bitDepth, int[] values)
+    {
+        Color[] colors = palette.getColors();
+        int subSize = bitDepth == 4 ? 16 : 256;
+        int numSubPals = Math.max(1, colors.length / subSize);
+        int bestSub = 0;
+        int[] bestVals = null;
+        long bestErr = Long.MAX_VALUE;
+        int bestUnmatched = 0;
+
+        // The winning sub-palette is the one whose nearest-color error is smallest.
+        for (int p = 0; p < numSubPals; p++)
+        {
+            int[] candidate = new int[64];
+            long[] error = new long[1];
+            int unmatched = quantizeCell(argb, colors, p * subSize, subSize, candidate, error);
+            if (error[0] < bestErr)
+            {
+                bestErr = error[0];
+                bestSub = p;
+                bestVals = candidate;
+                bestUnmatched = unmatched;
+            }
+        }
+
+        System.arraycopy(bestVals, 0, values, 0, 64);
+        return new int[] { bestSub, bestUnmatched };
+    }
+
+    /**
+     * Writes one cell's palette indexes into {@code values} and returns the unmatched-pixel count.
+     */
+    private static int quantizeCell(int[] argb, Color[] colors, int base, int subSize, int[] values, long[] error)
+    {
+        long err = 0;
+        int unmatched = 0;
+        for (int k = 0; k < 64; k++)
+        {
+            if (((argb[k] >>> 24) & 0xFF) == 0)
+            {
+                values[k] = 0;
+                continue;
+            }
+
+            long[] distance = new long[1];
+            values[k] = nearestColor(argb[k], colors, base, subSize, distance);
+            err += distance[0];
+            if (distance[0] != 0)
+                unmatched++;
+        }
+
+        error[0] = err;
+        return unmatched;
+    }
+
+    /**
+     * Returns the closest color index in the sub-palette at {@code base} and writes its distance.
+     */
+    private static int nearestColor(int argb, Color[] colors, int base, int subSize, long[] distance)
+    {
+        int red = (argb >> 16) & 0xFF;
+        int green = (argb >> 8) & 0xFF;
+        int blue = argb & 0xFF;
+        int bestIdx = 0;
+        long bestD = Long.MAX_VALUE;
+        for (int c = 0; c < subSize && base + c < colors.length; c++)
+        {
+            long d = colorDistanceSq(red, green, blue, colors[base + c]);
+            if (d < bestD)
+            {
+                bestD = d;
+                bestIdx = c;
+            }
+        }
+
+        distance[0] = bestD;
+        return bestIdx;
+    }
+
+    /**
+     * Returns the stored ordinal of {@code values} and writes its flip flags into {@code flips}.
+     */
+    private static int findTile(int[] values, boolean dedupFlips, List<int[]> tiles, Map<String, Integer> tileLookup, boolean[] flips)
+    {
+        int ordinal = -1;
+        boolean hFlip = false;
+        boolean vFlip = false;
+        boolean[] options = dedupFlips ? new boolean[] { false, true } : new boolean[] { false };
+
+        // Try the unflipped tile first, then each mirror the dedup flag allows.
+        search: for (boolean tryV : options)
+        {
+            for (boolean tryH : options)
+            {
+                Integer found = tileLookup.get(serializeTile(flipTile(values, tryH, tryV)));
+                if (found != null)
+                {
+                    ordinal = found;
+                    hFlip = tryH;
+                    vFlip = tryV;
+                    break search;
+                }
+            }
+        }
+
+        // A cell that matches nothing becomes the next unique tile.
+        if (ordinal < 0)
+        {
+            ordinal = tiles.size();
+            tiles.add(values);
+            tileLookup.put(serializeTile(values), ordinal);
+        }
+
+        if (ordinal > TILE_INDEX_MASK)
+            throw new RuntimeException("The image needs more than " + (TILE_INDEX_MASK + 1)
+                    + " unique tiles, which a screen's 10-bit tile index can't address.");
+
+        flips[0] = hFlip;
+        flips[1] = vFlip;
+        return ordinal;
+    }
+
+    /**
+     * Packs a tile ordinal, its flip flags, and a sub-palette into one screen entry.
+     */
+    private static short packEntry(int ordinal, boolean hFlip, boolean vFlip, int subPalette)
+    {
+        int entry = (ordinal & TILE_INDEX_MASK)
+                | (hFlip ? H_FLIP_BIT : 0)
+                | (vFlip ? V_FLIP_BIT : 0)
+                | ((subPalette & PALETTE_MASK) << PALETTE_SHIFT);
+        return (short) entry;
+    }
+
+    /**
+     * Places {@code tiles} into a new NCGR at the template's tiles-per-row.
+     */
+    private static IndexedImage layOutTiles(List<int[]> tiles, IndexedImage templateNcgr, int bitDepth, Palette palette)
+    {
+        int tilesPerRow = Math.max(1, templateNcgr.getWidth() / 8);
+        int outTileRows = Math.max(1, (tiles.size() + tilesPerRow - 1) / tilesPerRow);
+        IndexedImage ncgr = new IndexedImage(outTileRows * 8, tilesPerRow * 8, bitDepth, palette);
+        for (int t = 0; t < tiles.size(); t++)
+        {
+            int tileColumn = t % tilesPerRow;
+            int tileRow = t / tilesPerRow;
+            int[] tile = tiles.get(t);
+            for (int y = 0; y < 8; y++)
+            {
+                for (int x = 0; x < 8; x++)
+                    ncgr.setPixelValue(tileColumn * 8 + x, tileRow * 8 + y, tile[y * 8 + x]);
+            }
+        }
+
+        // 32: the NCGR header carries explicit tile dimensions. Trailing grid cells are padding.
+        ncgr.setNumTiles(tiles.size());
+        ncgr.setMappingType(32);
+
+        return ncgr;
+    }
+
+    /**
+     * Builds a palette that fits the image for {@link #applyImageRebuildingPalette}.
+     */
     private static Palette buildPalette(BufferedImage image, int bitDepth, int numSubPalettes)
     {
         if (bitDepth != 4 && bitDepth != 8)
@@ -669,8 +924,9 @@ public class Screen extends GenericNtrFile
                 for (int x = 0; x < w; x++)
                 {
                     int argb = image.getRGB(x, y);
-                    if (((argb >>> 24) & 0xFF) == 0) continue;
-                    opaque.add(new int[]{(argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF});
+                    if (((argb >>> 24) & 0xFF) == 0)
+                        continue;
+                    opaque.add(new int[] { (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF });
                 }
             List<Color> cut = IndexedImage.medianCut(opaque, 256);
             Color[] colors = new Color[256];
@@ -691,10 +947,12 @@ public class Screen extends GenericNtrFile
                     for (int x = 0; x < 8; x++)
                     {
                         int argb = image.getRGB(cellCol * 8 + x, cellRow * 8 + y);
-                        if (((argb >>> 24) & 0xFF) == 0) continue; // transparent -> index 0, not a palette color
+                        if (((argb >>> 24) & 0xFF) == 0)
+                            continue; // transparent -> index 0, not a palette color
                         cell.add(argb & 0xFFFFFF);
                     }
-                if (cell.isEmpty()) continue;
+                if (cell.isEmpty())
+                    continue;
 
                 // Join the first bucket this cell fits within 16 colors; else open a new bucket; else the
                 // bucket whose union is smallest (it may overflow 16 and get quantised at the end).
@@ -703,8 +961,16 @@ public class Screen extends GenericNtrFile
                 {
                     java.util.LinkedHashSet<Integer> merged = new java.util.LinkedHashSet<>(buckets.get(b));
                     merged.addAll(cell);
-                    if (merged.size() <= 16) { fit = b; break; }
-                    if (merged.size() < bestUnion) { bestUnion = merged.size(); best = b; }
+                    if (merged.size() <= 16)
+                    {
+                        fit = b;
+                        break;
+                    }
+                    if (merged.size() < bestUnion)
+                    {
+                        bestUnion = merged.size();
+                        best = b;
+                    }
                 }
                 if (fit >= 0)
                     buckets.get(fit).addAll(cell);
@@ -731,7 +997,7 @@ public class Screen extends GenericNtrFile
             {
                 List<int[]> rgbs = new ArrayList<>();
                 for (int rgb : packed)
-                    rgbs.add(new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF});
+                    rgbs.add(new int[] { (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF });
                 sub = IndexedImage.medianCut(rgbs, 16);
             }
             for (int i = 0; i < 16 && i < sub.size(); i++)
