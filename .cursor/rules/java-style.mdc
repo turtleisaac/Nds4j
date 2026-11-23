@@ -1,38 +1,20 @@
 ---
-description: Java style taken from turtleisaac's pre-2026 Nds4j, PokEditor, and PokEditor-Core
+description: Java style for Nds4j sources and tests
 globs: "**/*.java"
 alwaysApply: false
 ---
 
 # Java style
 
-The target is the style of code written for the split library stack, not PokEditor v2 and not the files copied out of it unchanged.
+Code should read like a person wrote it. Name an intermediate result instead of packing several calls, conditions, or side effects into one expression. Do not nest or chain ternaries. A single simple ternary stays on one line.
 
-PokEditor v2 (2021–2023, `com.turtleisaac.pokeditor`) was already mostly Allman in the editors, but `if(` and `for(` were the habit: about 42% of `if`s had a space. The third-party DSPRE reader under `com.jackhack96` was end-of-line braces and was rewritten, not kept. When that monolith was split, the new files (Nds4j parsers, PokEditor-Core, Nds4j-ToolUI) kept Allman and put the space in: new Nds4j files are 92% `if (` and 96% `for (`, new PokEditor-Core files 98% and 98%, and every hand-written ToolUI `if` and `for` has the space. `PersonalEditor.java` in v2 (`if(files.length > nameData.length)`) became `if (` in `PersonalParser`.
-
-These modern files are v2 carry-overs and still show the old habit. Do not copy them: `MemBuf`, `Buffer`, `BinaryWriter`, `CRC16`, `BitVector`, `BitStream`, `ArrayProcessor`, `CsvReader`, `XmlReader`, `CircleButton`, `TrainerPersonalityCalculator`. `MemBuf.java` in v2 is already `public class MemBuf {`.
-
-Code added in 2026 drifted again (long javadocs, same-line `if (x) return;`, column-aligned comments). Do not copy that drift either.
-
-JFormDesigner files (`Created by JFormDesigner`, including the generated `initComponents` blocks) are not a style sample. Generated ANTLR (`src/main/generated-sources`, gitignored) is not either. Hand-written GUI, including Nds4j-ToolUI classes such as `PanelManager` and `HexadecimalSpinner`, is.
+Generated files are not a style sample: JFormDesigner output, including `initComponents`, and generated ANTLR under `src/main/generated-sources`.
 
 ## Keywords are not methods
 
-Write a space after `if`, `for`, `while`, `switch`, `catch`, and `synchronized`:
+Write a space after `if`, `for`, `while`, `switch`, `catch`, and `synchronized`. `if` and `for` are keywords, not methods. Method calls, constructor calls, and declarations stay tight: `readInt()`, `new MemBuf()`, `void save()`.
 
-```java
-if (folders != null)
-    this.folders = new HashMap<>(folders);
-
-for (byte[] data : files)
-{
-    fimgWriter.write(data);
-}
-```
-
-Older files often use `if(` and `for(`. That was a slip, not the style. Do not replicate it. `if` and `for` are keywords, not methods. Method calls, constructor calls, and declarations stay tight: `readInt()`, `new MemBuf()`, `void save()`.
-
-The Eclipse profile inserts the keyword space and leaves call parentheses alone. Spotless applies that profile to a Java file the next time the file changes relative to `origin/main`. This repository is not being reformatted up front, so an old `if(` can still be sitting in a file you did not touch. When you do touch that file, let the formatter fix it.
+Spotless applies `config/eclipse-formatter.xml` to a Java file that differs from `origin/main`. Do not reformat a file you are not already changing. When you change a file, let the formatter fix keyword spacing.
 
 ## Braces
 
@@ -57,24 +39,17 @@ public class Fnt
 
 Anonymous classes and array initializers keep `{` on the same line: `new FileProcessingData() {`, `{0, 0, 0, 0}`.
 
-End-of-line braces show up in a minority of files (`MemBuf`, `Buffer`, `BinaryWriter`, parts of PokEditor). Do not spread that shape.
-
-## Control-flow bodies
-
-A single-statement `if` or `else` may be unbraced. The statement goes on the next line, indented one level. Never `if (x) return;`.
+An `if` or `else` whose body does real work uses braces. A one-line guard may be unbraced, with the statement on the next line, indented one level. Never `if (x) return;`.
 
 A single-statement `for` or `while` may be unbraced the same way. Brace a loop when the body is longer than one statement.
 
-A braced block always gets one blank line after it before the next statement, unless it is the last thing in its enclosing block. A braceless single-line loop or `if` follows the grouping rules below.
-
 ```java
-for (String filename : files)
-    list.add(filename);
+if (folders == null)
+    return;
 
-for (String folderName : folders.keySet())
+for (byte[] data : files)
 {
-    list.add(folderName + "/");
-    list.addAll(folder.toStringList());
+    fimgWriter.write(data);
 }
 ```
 
@@ -82,19 +57,31 @@ for (String folderName : folders.keySet())
 
 Group the lines that do one step, and put one blank line between steps. A run of the same kind of statement stays together. When that run switches to a different kind, add a blank line.
 
-A long run of the same kind of statement is not one step just because the lines look alike. Split where a new stage begins, when later lines are built from the results above.
+A long run of the same kind of statement is not one step just because the lines look alike. Put a blank line where a new stage begins, where the next lines are built from the results above.
 
-A braced block, anything that ends in `}`, gets one blank line after it before the next statement, unless it is the last thing in its enclosing block. Nested blocks that end together share that one blank line. A braced loop with a `return` after it gets that blank too, even in a short method. The parts of one construct stay joined, with no blank between them: `if`/`else` (including `else if`), `try`/`catch`/`finally`, and `do`/`while`. So `} else {`, `} catch (...) {`, `} finally {`, and `} while (...);` attach to the block before them. The blank line comes after the whole construct.
+A braced block gets one blank line after it before the next statement, unless it is the last thing in its enclosing block. That is the closing `}` of `if` / `for` / `while` / `switch` / `try`, or of a function or lambda body used as a statement. Nested blocks that end together share that one blank line. A braced loop with a `return` after it gets that blank too, even in a short method. The parts of one construct stay joined, with no blank between them: `if` / `else` (including `else if`), `try` / `catch` / `finally`, and `do` / `while`. The blank line comes after the whole construct.
 
-A braceless single-line `if`, `for`, or `while` may skip the blank. Tiny guards stay together. A step's lines stay grouped, and a blank line separates steps. A chain of `if`/`return` stays together, and the fallback `return` gets a blank line above it. Back-to-back short similar blocks, and `if` pairs that read like `if`/`else`, get no blank between them.
+A braceless one-line `if`, `for`, or `while` follows those grouping rules and may skip the blank. Tiny guards stay together. A chain of `if` / `return` stays together, and the fallback `return` gets a blank line above it. Back-to-back short similar blocks, and `if` pairs that read like `if` / `else`, get no blank between them.
 
 Put a blank line before a `return`, except when it is the only line in its block, or when it follows one or two short statements. A braceless loop in a very short block may return on the next line. A braced loop may not.
 
-## Methods, signatures, tests
+A chained call counts as one statement. In a test, arrange, act, and assert are steps, and consecutive asserts stay together.
 
 Leave one blank line between methods. The formatter preserves a blank line that is already there and will not insert one you forgot.
 
+```java
+int width = reader.readUnsignedShort();
+int height = reader.readUnsignedShort();
+
+byte[] pixels = new byte[width * height];
+reader.readFully(pixels);
+```
+
+## Methods and tests
+
 Keep a method signature on one line, including the long ones.
+
+A new or changed method stays under a CRAP score of 10, and a change does not raise an existing score. See `.quality/README.md`.
 
 Break every chained `assertThat` onto its own indented line:
 
@@ -103,26 +90,45 @@ assertThat(folder.getIdOf("Alpha"))
         .isEqualTo(0);
 ```
 
-## Comments and binary I/O
+## Comments
 
-Every method gets a javadoc, including private helpers and test methods. A javadoc is one concise summary of what the method does, plus `@param`, `@return`, or `@throws` only when they add something the signature does not. When the behavior comes from a spec or another real source, link that source. Leave its tables, sizes, and layouts out of the javadoc. A short single-line comment sits above a chunk of code inside a function. Inline notes stay short.
+Every method gets a javadoc, including private helpers and test methods. The javadoc is one concise summary of what the method does, plus `@param`, `@return`, or `@throws` only when they add something the signature does not. When the behavior comes from a GBATEK section or another real source, link that source instead of restating it. Leave its tables, sizes, and layouts out of the javadoc.
 
-Structured bytes go through `MemBuf`. `Buffer` and `BinaryWriter` are the older Nds4j exceptions.
+Each chunk of code inside a method gets a short single-line `//` comment above it saying what that step does. A chunk is a blank-line-separated step. Keep the comment short. Do not restate the code line by line. The method javadoc does not replace these comments.
 
-## Layout that already holds
+```java
+/**
+ * Reads the tile bytes.
+ * @see <a href="https://problemkaputt.de/gbatek.htm">GBATEK</a>
+ */
+public byte[] readTiles(MemBuf.MemBufReader reader)
+{
+    // Read the dimensions the pixel bytes are sized from.
+    int width = reader.readUInt16();
+    int height = reader.readUInt16();
 
-Four spaces, no tabs. UTF-8, LF, newline at end of file. One space around operators and after commas. A cast has a space after it: `(int) value`. `Type[]`, not `Type []`. Lambdas are `x -> expr` with spaces around `->`. A ternary stays on one line.
+    // Copy the pixels that follow those dimensions.
+    byte[] pixels = reader.readBytes(width * height);
+    return pixels;
+}
+```
 
-Imports are not reordered by the tools. When you write them, group project (`io.github.turtleisaac`), then other libraries, then `java` / `javax`, then static, with a blank line between groups. Wildcards are allowed. Hand-written Swing (`HexadecimalSpinner`, PokEditor cell editors) often leads with `javax` instead; that disagrees with Nds4j library code, so follow the file you are in.
+## Binary I/O
 
-Nds4j switches are `case` / `break` with an Allman brace (the sources are Java 8). PokEditor and PokEditor-Core are Java 20 and mostly use arrow switches. Do not introduce arrow switches in Nds4j.
+All binary parsing goes through `io.github.turtleisaac.nds4j.framework.MemBuf`. Read values with `MemBuf.MemBufReader` (`readUInt8`, `readUInt16`, `readUInt32`, `readBytes`). Do not index a raw `byte[]` with `& 0xFF` masks and shifts. Do not hand-write little-endian helpers such as `readU16` or `readU32`.
+
+`Buffer` reads a whole file. `BinaryWriter` writes a finished byte array. Neither one parses a layout.
+
+## Layout
+
+Four spaces, no tabs. UTF-8, LF, newline at end of file. One space around operators and after commas. A cast has a space after it: `(int) value`. `Type[]`, not `Type []`. Lambdas are `x -> expr` with spaces around `->`.
+
+Imports are not reordered by the tools. When you write them, group project (`io.github.turtleisaac`), then other libraries, then `java` / `javax`, then static, with a blank line between groups. Wildcards are allowed. When a file already uses a different group order, follow that file.
+
+Switches use `case` and `break` with an Allman brace. Do not use arrow switches.
 
 ## Tooling
 
-`mvn verify` runs Spotless in check mode and Checkstyle. Spotless uses `config/eclipse-formatter.xml` (Eclipse JDT 4.41) and only looks at Java files that differ from `origin/main`, so existing sources are not rewritten by this setup. Checkstyle (`config/checkstyle.xml`) checks every file for LF, a trailing newline, and no tab characters.
+`mvn verify` runs Spotless in check mode and Checkstyle. Spotless uses `config/eclipse-formatter.xml` (Eclipse JDT 4.41) and only looks at Java files that differ from `origin/main`. Checkstyle (`config/checkstyle.xml`) checks every file for LF, a trailing newline, and no tab characters.
 
 `mvn spotless:apply` formats those changed files. It does not reorder imports, rewrap comments, or wrap long lines.
-
-## NitroViewer
-
-`nitroviewer-core` is its own Maven module (`com.nitroviewer.core`). Copy this rule, `config/eclipse-formatter.xml`, `config/checkstyle.xml`, and `.editorconfig` into that repo and add the same two plugins to `nitroviewer-core/pom.xml`, again with `ratchetFrom` set to `origin/main`.
