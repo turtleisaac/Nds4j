@@ -138,7 +138,7 @@ public class Model
         for (int i = 0; i < shapeDict.size(); i++)
         {
             int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(i), 0);
-            int dlOffset = (int) readU32(mdl0, shapeStruct + 8);  // relative to the shape struct
+            int dlOffset = (int) readU32(mdl0, shapeStruct + 8); // relative to the shape struct
             int dlSize = (int) readU32(mdl0, shapeStruct + 12);
             Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
@@ -147,7 +147,8 @@ public class Model
             Srt world = (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null;
             transformInPlace(mesh.positions, world, posScale);
             mesh.material = (i < shapeMaterial.length && shapeMaterial[i] >= 0 && shapeMaterial[i] < materials.size())
-                    ? materials.get(shapeMaterial[i]) : null;
+                    ? materials.get(shapeMaterial[i])
+                    : null;
             meshes.add(mesh);
         }
     }
@@ -159,16 +160,24 @@ public class Model
     // ({@code v' = v * r}), matching the reference {@code renderer.TransfMatrix}.
     private static final class Srt
     {
-        final double[] t;      // translation (x,y,z), model units
-        final double[] s;      // per-axis scale
-        final double[] r;      // 3x3 rotation, row-major
+        final double[] t; // translation (x,y,z), model units
+        final double[] s; // per-axis scale
+        final double[] r; // 3x3 rotation, row-major
 
-        Srt(double[] t, double[] s, double[] r) { this.t = t; this.s = s; this.r = r; }
+        Srt(double[] t, double[] s, double[] r)
+        {
+            this.t = t;
+            this.s = s;
+            this.r = r;
+        }
 
-        static Srt identity() { return new Srt(new double[]{0, 0, 0}, new double[]{1, 1, 1}, IDENT.clone()); }
+        static Srt identity()
+        {
+            return new Srt(new double[] { 0, 0, 0 }, new double[] { 1, 1, 1 }, IDENT.clone());
+        }
     }
 
-    private static final double[] IDENT = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    private static final double[] IDENT = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 
     // Parses each node's local transform (NNS node data): u16 flags, fx16 rotation[0][0], then optional
     // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form),
@@ -184,12 +193,20 @@ public class Model
         for (int n = 0; n < count; n++)
         {
             int p = nodeSet + (int) readU32(d, recordsOffset + n * 4);
-            int flags = readU16(d, p); p += 2;
-            double r00 = (short) readU16(d, p) / 4096.0; p += 2;
-            double[] t = {0, 0, 0};
-            double[] r = {r00, 0, 0, 0, 1, 0, 0, 0, 1};
-            double[] s = {1, 1, 1};
-            if ((flags & 0x1) == 0) { t[0] = readFx32(d, p); t[1] = readFx32(d, p + 4); t[2] = readFx32(d, p + 8); p += 12; }
+            int flags = readU16(d, p);
+            p += 2;
+            double r00 = (short) readU16(d, p) / 4096.0;
+            p += 2;
+            double[] t = { 0, 0, 0 };
+            double[] r = { r00, 0, 0, 0, 1, 0, 0, 0, 1 };
+            double[] s = { 1, 1, 1 };
+            if ((flags & 0x1) == 0)
+            {
+                t[0] = readFx32(d, p);
+                t[1] = readFx32(d, p + 4);
+                t[2] = readFx32(d, p + 8);
+                p += 12;
+            }
             if ((flags & 0x2) == 0)
             {
                 if ((flags & 0x8) != 0)
@@ -197,7 +214,8 @@ public class Model
                     // Pivot-compressed rotation: two values fill a 2x2 minor with a +/-1 pivot cell. The
                     // pivot index is flags bits 4-7; sign flags are bits 8 (pivot -1), 9 (negate c),
                     // 10 (negate d). This is the NNS getPivotMatrix construction.
-                    double av = readFx16(d, p), bv = readFx16(d, p + 2); p += 4;
+                    double av = readFx16(d, p), bv = readFx16(d, p + 2);
+                    p += 4;
                     double c = (flags & 0x200) != 0 ? -bv : bv;
                     double dd = (flags & 0x400) != 0 ? -av : av;
                     double one = (flags & 0x100) != 0 ? -1.0 : 1.0;
@@ -205,7 +223,7 @@ public class Model
                     if (sel <= 8)
                     {
                         int row = sel / 3, col = sel % 3;
-                        double[] arr = {av, bv, c, dd};
+                        double[] arr = { av, bv, c, dd };
                         int k = 0;
                         for (int ii = 0; ii < 3; ii++)
                             for (int jj = 0; jj < 3; jj++)
@@ -215,12 +233,23 @@ public class Model
                 }
                 else
                 {
-                    r[1] = readFx16(d, p);     r[2] = readFx16(d, p + 2);  r[3] = readFx16(d, p + 4);
-                    r[4] = readFx16(d, p + 6); r[5] = readFx16(d, p + 8);  r[6] = readFx16(d, p + 10);
-                    r[7] = readFx16(d, p + 12);r[8] = readFx16(d, p + 14); p += 16;
+                    r[1] = readFx16(d, p);
+                    r[2] = readFx16(d, p + 2);
+                    r[3] = readFx16(d, p + 4);
+                    r[4] = readFx16(d, p + 6);
+                    r[5] = readFx16(d, p + 8);
+                    r[6] = readFx16(d, p + 10);
+                    r[7] = readFx16(d, p + 12);
+                    r[8] = readFx16(d, p + 14);
+                    p += 16;
                 }
             }
-            if ((flags & 0x4) == 0) { s[0] = readFx32(d, p); s[1] = readFx32(d, p + 4); s[2] = readFx32(d, p + 8); /* + unused 3x fx32 inverse */ }
+            if ((flags & 0x4) == 0)
+            {
+                s[0] = readFx32(d, p);
+                s[1] = readFx32(d, p + 4);
+                s[2] = readFx32(d, p + 8);
+                /* + unused 3x fx32 inverse */ }
             local[n] = new Srt(t, s, r);
         }
         return local;
@@ -248,21 +277,58 @@ public class Model
         G3dDictionary matDict = new G3dDictionary(r);
         for (int i = 0; i < matDict.size(); i++)
         {
-            // The material struct's texImageParam carries the wrap/flip bits, but its size field is left
-            // zero here (the NNS renderer takes the texture's true size from the TEX0 texture at bind
-            // time, not the material). So only the wrap/flip flags are read; UV normalisation uses the
-            // bound texture's own dimensions.
+            // texImageParam's size field is left zero; NNS takes the texture size from TEX0 at bind
+            // time. Wrap/flip still come from that word. Polygon alpha and the wireframe flag come
+            // from polyAttr and the material flag word (see PolygonDraw).
             int structOfs = matSet + (int) readU32(matDict.getRecord(i), 0);
-            long texImageParam = readU32(d, structOfs + 0x14);
-            boolean repeatS = (texImageParam & (1 << 16)) != 0;
-            boolean repeatT = (texImageParam & (1 << 17)) != 0;
-            boolean flipS = (texImageParam & (1 << 18)) != 0;
-            boolean flipT = (texImageParam & (1 << 19)) != 0;
-            materials.add(new Material(matDict.getName(i), repeatS, repeatT, flipS, flipT));
+            materials.add(readMaterial(d, structOfs, matDict.getName(i)));
         }
 
         bindNames(d, matSet, matSet + ofsTexDict, true);
         bindNames(d, matSet, matSet + ofsPltDict, false);
+    }
+
+    /**
+     * One {@code NNSG3dResMatData}: wrap/flip from {@code texImageParam}, polygon alpha from
+     * {@code polyAttr} bits 16-20, wireframe from flag {@code 0x0020} when the struct is long enough
+     * to hold that word.
+     * @param d the MDL0 block
+     * @param structOfs offset of the material struct within {@code d}
+     * @param name the material's dictionary name
+     * @return the parsed material
+     */
+    private Material readMaterial(byte[] d, int structOfs, String name)
+    {
+        long texImageParam = readU32(d, structOfs + 0x14);
+        boolean repeatS = (texImageParam & (1L << 16)) != 0;
+        boolean repeatT = (texImageParam & (1L << 17)) != 0;
+        boolean flipS = (texImageParam & (1L << 18)) != 0;
+        boolean flipT = (texImageParam & (1L << 19)) != 0;
+        int alpha = polygonAlphaAt(d, structOfs);
+        boolean wire = wireframeAt(d, structOfs);
+        return new Material(name, repeatS, repeatT, flipS, flipT, alpha, wire);
+    }
+
+    /**
+     * @param d the MDL0 block
+     * @param structOfs offset of the material struct
+     * @return polygon alpha, 0..31
+     */
+    private static int polygonAlphaAt(byte[] d, int structOfs)
+    {
+        return (int) ((readU32(d, structOfs + 0x0C) >> 16) & 31);
+    }
+
+    /**
+     * @param d the MDL0 block
+     * @param structOfs offset of the material struct
+     * @return true when {@code NNS_G3D_MATFLAG_WIREFRAME} is set
+     */
+    private static boolean wireframeAt(byte[] d, int structOfs)
+    {
+        if (readU16(d, structOfs + 2) < 0x20)
+            return false;
+        return (readU16(d, structOfs + 0x1E) & PolygonDraw.WIREFRAME_FLAG) != 0;
     }
 
     // Applies a texture-to-material (or palette-to-material) dictionary: each entry names a resource and
@@ -286,8 +352,10 @@ public class Model
                 int matIdx = d[matSet + listOfs + k] & 0xFF;
                 if (matIdx < materials.size())
                 {
-                    if (texture) materials.get(matIdx).textureName = dict.getName(i);
-                    else         materials.get(matIdx).paletteName = dict.getName(i);
+                    if (texture)
+                        materials.get(matIdx).textureName = dict.getName(i);
+                    else
+                        materials.get(matIdx).paletteName = dict.getName(i);
                 }
             }
         }
@@ -310,35 +378,89 @@ public class Model
             int op = b & 0x1F, flags = b & 0xE0;
             switch (op)
             {
-                case 0x00: break;                                   // NOP
-                case 0x01: stop = true; break;                      // RET
-                case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
-                case 0x03: current = stackNode[d[p++] & 0x1F]; break; // MTX (restore) - 5-bit stack slot, matching the store paths
-                case 0x04: currentMat = d[p++] & 0xFF; break; // MAT matId (flag bits are hints, not extra operands)
-                case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) { shapeNode[shp] = current; shapeMaterial[shp] = currentMat; } break; } // SHP
-                case 0x06: {                                        // NODEDESC nodeId, parentId, opt (+ store/restore slots)
+                case 0x00:
+                    break; // NOP
+                case 0x01:
+                    stop = true;
+                    break; // RET
+                case 0x02:
+                    current = d[p] & 0xFF;
+                    p += 2;
+                    break; // NODE nodeId, visibility
+                case 0x03:
+                    current = stackNode[d[p++] & 0x1F];
+                    break; // MTX (restore) - 5-bit stack slot, matching the store paths
+                case 0x04:
+                    currentMat = d[p++] & 0xFF;
+                    break; // MAT matId (flag bits are hints, not extra operands)
+                case 0x05:
+                {
+                    int shp = d[p++] & 0xFF;
+                    if (shp < shapeCount)
+                    {
+                        shapeNode[shp] = current;
+                        shapeMaterial[shp] = currentMat;
+                    }
+                    break;
+                } // SHP
+                case 0x06:
+                { // NODEDESC nodeId, parentId, opt (+ store/restore slots)
                     int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
-                    p++;                                            // opt byte (S/P bits) - not needed for placement
-                    if (nid < count) { parent[nid] = par < count ? par : -1; current = nid; }
-                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; } // store to stack
-                    if ((flags & 0x40) != 0) p++;                   // restore-source slot (SrcIdx)
+                    p++; // opt byte (S/P bits) - not needed for placement
+                    if (nid < count)
+                    {
+                        parent[nid] = par < count ? par : -1;
+                        current = nid;
+                    }
+                    if ((flags & 0x20) != 0)
+                    {
+                        int dst = d[p++] & 0x1F;
+                        if (dst < stackNode.length)
+                            stackNode[dst] = nid;
+                    } // store to stack
+                    if ((flags & 0x40) != 0)
+                        p++; // restore-source slot (SrcIdx)
                     break;
                 }
-                case 0x07:                                          // BB  (billboard)   nodeId (+ store/restore slots)
-                case 0x08: {                                        // BBY (billboard-Y) nodeId (+ store/restore slots)
-                    dynamicPose = true;                             // camera-facing; a static decode can't place it
-                    int nid = d[p++] & 0xFF; current = nid;
-                    if (nid < count) billboardNode[nid] = true;
-                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; }
-                    if ((flags & 0x40) != 0) p++;
+                case 0x07: // BB  (billboard)   nodeId (+ store/restore slots)
+                case 0x08:
+                { // BBY (billboard-Y) nodeId (+ store/restore slots)
+                    dynamicPose = true; // camera-facing; a static decode can't place it
+                    int nid = d[p++] & 0xFF;
+                    current = nid;
+                    if (nid < count)
+                        billboardNode[nid] = true;
+                    if ((flags & 0x20) != 0)
+                    {
+                        int dst = d[p++] & 0x1F;
+                        if (dst < stackNode.length)
+                            stackNode[dst] = nid;
+                    }
+                    if ((flags & 0x40) != 0)
+                        p++;
                     break;
                 }
-                case 0x09: { dynamicPose = true; int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
-                case 0x0A: p += 8; break;                           // CALLDL
-                case 0x0B: break;                                   // POSSCALE
-                case 0x0C: p += 2; break;                           // ENVMAP
-                case 0x0D: p += 2; break;                           // PRJMAP
-                default: stop = true; break;                        // an unmodelled command - stop rather than desync
+                case 0x09:
+                {
+                    dynamicPose = true;
+                    int terms = d[p + 1] & 0xFF;
+                    p += 2 + terms * 3;
+                    break;
+                } // NODEMIX (skinning)
+                case 0x0A:
+                    p += 8;
+                    break; // CALLDL
+                case 0x0B:
+                    break; // POSSCALE
+                case 0x0C:
+                    p += 2;
+                    break; // ENVMAP
+                case 0x0D:
+                    p += 2;
+                    break; // PRJMAP
+                default:
+                    stop = true;
+                    break; // an unmodelled command - stop rather than desync
             }
         }
         nodeParent = parent; // retained so an animation can recompose the hierarchy
@@ -368,20 +490,20 @@ public class Model
     // and the scales multiply componentwise.
     private static Srt compose(Srt parent, Srt child)
     {
-        double[] s = {child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2]};
-        double[] ts = {child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2]};
+        double[] s = { child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2] };
+        double[] ts = { child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2] };
         double[] tr = rowMul(parent.r, ts);
-        double[] t = {parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2]};
+        double[] t = { parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2] };
         return new Srt(t, s, matMul(child.r, parent.r));
     }
 
     // Row-vector times matrix: out = v * r (out[i] = sum_j v[j] * r[j][i]), r row-major.
     private static double[] rowMul(double[] r, double[] v)
     {
-        return new double[]{
+        return new double[] {
                 v[0] * r[0] + v[1] * r[3] + v[2] * r[6],
                 v[0] * r[1] + v[1] * r[4] + v[2] * r[7],
-                v[0] * r[2] + v[1] * r[5] + v[2] * r[8]};
+                v[0] * r[2] + v[1] * r[5] + v[2] * r[8] };
     }
 
     // 3x3 * 3x3 (row-major): out[i][j] = sum_k a[i][k] * b[k][j].
@@ -436,83 +558,110 @@ public class Model
         int end = dlStart + dlSize;
         while (pos + 4 <= end)
         {
-            int[] ops = {d[pos] & 0xFF, d[pos + 1] & 0xFF, d[pos + 2] & 0xFF, d[pos + 3] & 0xFF};
+            int[] ops = { d[pos] & 0xFF, d[pos + 1] & 0xFF, d[pos + 2] & 0xFF, d[pos + 3] & 0xFF };
             pos += 4;
             for (int op : ops)
             {
                 switch (op)
                 {
-                    case 0x00: break;                                   // NOP
-                    case 0x10: case 0x14: case 0x20: case 0x21:         // MTX_MODE / MTX_RESTORE / COLOR / NORMAL
-                    case 0x29: case 0x2A: case 0x2B:                    // POLYGON_ATTR / TEXIMAGE_PARAM / PLTT_BASE
-                        pos += 4; break;
-                    case 0x1B: usesMtxScale = true; pos += 12; break;    // MTX_SCALE (3x fx32): consumed, not
-                        // applied. This is not a gap: the reference jar's MTX_SCALE.execute() is a no-op, and
-                        // the placement oracle agrees - actually multiplying the 32 retail MTX_SCALE models'
-                        // vertices by it regresses them (9/32 in their header box -> 0/32), because the DL
-                        // magnify is redundant with the header posScale we already apply in transformInPlace.
-                        // The remaining static-pose misses among these models are the usual SSC / header-box
-                        // "TODO verify" cases (see the note at §3), not MTX_SCALE. Verified empirically; §5.8.
-                    case 0x22: {                                        // TEXCOORD (s,t as 1.11.4 fixed)
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x00:
+                        break; // NOP
+                    case 0x10:
+                    case 0x14:
+                    case 0x20:
+                    case 0x21: // MTX_MODE / MTX_RESTORE / COLOR / NORMAL
+                    case 0x29:
+                    case 0x2A:
+                    case 0x2B: // POLYGON_ATTR / TEXIMAGE_PARAM / PLTT_BASE
+                        pos += 4;
+                        break;
+                    case 0x1B:
+                        usesMtxScale = true;
+                        pos += 12;
+                        break; // MTX_SCALE (3x fx32): consumed, not
+                    // applied. This is not a gap: the reference jar's MTX_SCALE.execute() is a no-op, and
+                    // the placement oracle agrees - actually multiplying the 32 retail MTX_SCALE models'
+                    // vertices by it regresses them (9/32 in their header box -> 0/32), because the DL
+                    // magnify is redundant with the header posScale we already apply in transformInPlace.
+                    // The remaining static-pose misses among these models are the usual SSC / header-box
+                    // "TODO verify" cases (see the note at §3), not MTX_SCALE. Verified empirically; §5.8.
+                    case 0x22:
+                    { // TEXCOORD (s,t as 1.11.4 fixed)
+                        long p = readU32(d, pos);
+                        pos += 4;
                         uv[0] = (short) (p & 0xFFFF) / 16.0;
                         uv[1] = (short) ((p >> 16) & 0xFFFF) / 16.0;
                         break;
                     }
-                    case 0x23: {                                        // VTX_16
-                        long p1 = readU32(d, pos), p2 = readU32(d, pos + 4); pos += 8;
+                    case 0x23:
+                    { // VTX_16
+                        long p1 = readU32(d, pos), p2 = readU32(d, pos + 4);
+                        pos += 8;
                         vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
                         vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
                         vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x24: {                                        // VTX_10 (3x10-bit, 1.3.6 fixed)
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x24:
+                    { // VTX_10 (3x10-bit, 1.3.6 fixed)
+                        long p = readU32(d, pos);
+                        pos += 4;
                         vtx[0] = signed10((int) p) / 64.0;
                         vtx[1] = signed10((int) (p >> 10)) / 64.0;
                         vtx[2] = signed10((int) (p >> 20)) / 64.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x25: {                                        // VTX_XY
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x25:
+                    { // VTX_XY
+                        long p = readU32(d, pos);
+                        pos += 4;
                         vtx[0] = (short) (p & 0xFFFF) / 4096.0;
                         vtx[1] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x26: {                                        // VTX_XZ
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x26:
+                    { // VTX_XZ
+                        long p = readU32(d, pos);
+                        pos += 4;
                         vtx[0] = (short) (p & 0xFFFF) / 4096.0;
                         vtx[2] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x27: {                                        // VTX_YZ
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x27:
+                    { // VTX_YZ
+                        long p = readU32(d, pos);
+                        pos += 4;
                         vtx[1] = (short) (p & 0xFFFF) / 4096.0;
                         vtx[2] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x28: {                                        // VTX_DIFF (3x10-bit deltas, 1.3.12 fixed)
-                        long p = readU32(d, pos); pos += 4;
+                    case 0x28:
+                    { // VTX_DIFF (3x10-bit deltas, 1.3.12 fixed)
+                        long p = readU32(d, pos);
+                        pos += 4;
                         vtx[0] += signed10((int) p) / 4096.0;
                         vtx[1] += signed10((int) (p >> 10)) / 4096.0;
                         vtx[2] += signed10((int) (p >> 20)) / 4096.0;
                         emit(vtx, uv, positions, texcoords, primVerts);
                         break;
                     }
-                    case 0x40: {                                        // BEGIN_VTXS
-                        int p = (int) readU32(d, pos); pos += 4;
+                    case 0x40:
+                    { // BEGIN_VTXS
+                        int p = (int) readU32(d, pos);
+                        pos += 4;
                         if (primitive >= 0)
                             triangulate(primitive, primVerts, triangles);
                         primitive = p & 3;
                         primVerts = new ArrayList<>();
                         break;
                     }
-                    case 0x41: break;                                   // END_VTXS
+                    case 0x41:
+                        break; // END_VTXS
                     default:
                         // Every opcode a retail Gen IV display list uses is handled above (verified by
                         // the 100%-vertex-count match). An unknown opcode means either a malformed
@@ -549,8 +698,8 @@ public class Model
     private static void emit(double[] vtx, double[] uv, List<float[]> positions, List<float[]> texcoords, List<Integer> primVerts)
     {
         primVerts.add(positions.size());
-        positions.add(new float[]{(float) vtx[0], (float) vtx[1], (float) vtx[2]});
-        texcoords.add(new float[]{(float) uv[0], (float) uv[1]});
+        positions.add(new float[] { (float) vtx[0], (float) vtx[1], (float) vtx[2] });
+        texcoords.add(new float[] { (float) uv[0], (float) uv[1] });
     }
 
     // Converts a primitive's ordered vertices into triangle index triples. 0=separate triangles,
@@ -573,8 +722,10 @@ public class Model
                 break;
             case 2:
                 for (int i = 2; i < n; i++)
-                    if ((i & 1) == 0) addTri(out, v.get(i - 2), v.get(i - 1), v.get(i));
-                    else addTri(out, v.get(i - 1), v.get(i - 2), v.get(i));
+                    if ((i & 1) == 0)
+                        addTri(out, v.get(i - 2), v.get(i - 1), v.get(i));
+                    else
+                        addTri(out, v.get(i - 1), v.get(i - 2), v.get(i));
                 break;
             case 3:
                 for (int i = 0; i + 3 < n; i += 2)
@@ -588,7 +739,9 @@ public class Model
 
     private static void addTri(List<Integer> out, int a, int b, int c)
     {
-        out.add(a); out.add(b); out.add(c);
+        out.add(a);
+        out.add(b);
+        out.add(c);
     }
 
     /** @return this model's name (from the model dictionary) */
@@ -774,9 +927,12 @@ public class Model
                 double[] at = na != null ? na.translationAt(frame) : null;
                 double[] as = na != null ? na.scaleAt(frame) : null;
                 double[] ar = na != null ? na.rotationAt(frame) : null;
-                if (at != null) t = at;
-                if (as != null) s = as;
-                if (ar != null) r = ar;
+                if (at != null)
+                    t = at;
+                if (as != null)
+                    s = as;
+                if (ar != null)
+                    r = ar;
             }
             out[n] = new NodeTransform(t.clone(), s.clone(), r.clone());
         }
@@ -805,11 +961,20 @@ public class Model
         }
 
         /** @return translation (x,y,z), model units (not scaled by the model's position scale) */
-        public double[] getTranslation() { return translation; }
+        public double[] getTranslation()
+        {
+            return translation;
+        }
         /** @return per-axis scale (x,y,z) */
-        public double[] getScale() { return scale; }
+        public double[] getScale()
+        {
+            return scale;
+        }
         /** @return the 3&times;3 rotation, row-major, row-vector convention */
-        public double[] getRotation() { return rotation; }
+        public double[] getRotation()
+        {
+            return rotation;
+        }
     }
 
     /**
@@ -862,7 +1027,8 @@ public class Model
     public double[] getNodeWorldTranslation(int node)
     {
         return (bindWorldTranslation != null && node >= 0 && node < bindWorldTranslation.length)
-                ? bindWorldTranslation[node].clone() : new double[]{0, 0, 0};
+                ? bindWorldTranslation[node].clone()
+                : new double[] { 0, 0, 0 };
     }
 
     /**
@@ -872,7 +1038,8 @@ public class Model
     public double[] getNodeWorldScale(int node)
     {
         return (bindWorldScale != null && node >= 0 && node < bindWorldScale.length)
-                ? bindWorldScale[node].clone() : new double[]{1, 1, 1};
+                ? bindWorldScale[node].clone()
+                : new double[] { 1, 1, 1 };
     }
 
     /**
@@ -882,7 +1049,7 @@ public class Model
      */
     public float[][] getHeaderBoundingBox()
     {
-        return new float[][]{headerBoxMin.clone(), headerBoxMax.clone()};
+        return new float[][] { headerBoxMin.clone(), headerBoxMax.clone() };
     }
 
     /**
@@ -893,8 +1060,8 @@ public class Model
      */
     public float[][] getDecodedBoundingBox()
     {
-        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+        float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
         boolean any = false;
         for (Mesh mesh : meshes)
         {
@@ -909,8 +1076,8 @@ public class Model
             }
         }
         if (!any)
-            return new float[][]{{0, 0, 0}, {0, 0, 0}};
-        return new float[][]{min, max};
+            return new float[][] { { 0, 0, 0 }, { 0, 0, 0 } };
+        return new float[][] { min, max };
     }
 
     @Override
@@ -949,14 +1116,14 @@ public class Model
     public static class Mesh
     {
         private final String name;
-        private final float[] positions;   // 3 floats per vertex (model space)
-        private final float[] texcoords;    // 2 floats per vertex, in texel units (divide by the bound
-                                            // texture's size to normalise)
+        private final float[] positions; // 3 floats per vertex (model space)
+        private final float[] texcoords; // 2 floats per vertex, in texel units (divide by the bound
+                                         // texture's size to normalise)
         private final int[] triangleIndices; // 3 indices per triangle
-        private Material material;          // the bound material (texture/palette), or null
-        float[] rawPositions;              // pre-placement vertices (for re-posing by an animation)
-        int nodeIndex;                     // the skeleton node this mesh is drawn under
-        byte[] rawDisplayList;             // the shape's verbatim GPU command stream (for byte-exact re-emit)
+        private Material material; // the bound material (texture/palette), or null
+        float[] rawPositions; // pre-placement vertices (for re-posing by an animation)
+        int nodeIndex; // the skeleton node this mesh is drawn under
+        byte[] rawDisplayList; // the shape's verbatim GPU command stream (for byte-exact re-emit)
 
         Mesh(String name, float[] positions, float[] texcoords, int[] triangleIndices)
         {
@@ -967,72 +1134,152 @@ public class Model
         }
 
         /** @return this mesh's name (its shape name) */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the vertex positions, 3 floats (x,y,z) per vertex, in model space */
-        public float[] getPositions() { return positions; }
+        public float[] getPositions()
+        {
+            return positions;
+        }
         /**
          * @return the raw pre-placement vertex positions, 3 floats (x,y,z) per vertex, in the mesh's own
          *         node-local space &mdash; before the node world transform and before the model's
          *         position scale. This is what a hierarchical exporter places under the mesh's skeleton
          *         node (see {@link #getNodeIndex()}).
          */
-        public float[] getRawPositions() { return rawPositions; }
+        public float[] getRawPositions()
+        {
+            return rawPositions;
+        }
         /** @return the texture coordinates, 2 floats (s,t) per vertex, in texel units */
-        public float[] getTexcoords() { return texcoords; }
+        public float[] getTexcoords()
+        {
+            return texcoords;
+        }
         /** @return the triangle indices, 3 per triangle, into the vertex arrays */
-        public int[] getTriangleIndices() { return triangleIndices; }
+        public int[] getTriangleIndices()
+        {
+            return triangleIndices;
+        }
         /**
          * @return this shape's verbatim GPU command stream (the raw display-list bytes it was decoded from).
          *         Feeding it to {@link DisplayList#decodeCommands} yields the exact commands (primitive type,
          *         vertex formats, strips) that a triangle view loses, so geometry can be re-emitted
          *         byte-for-byte. The array is a copy; mutating it does not affect the model.
          */
-        public byte[] getRawDisplayList() { return rawDisplayList != null ? rawDisplayList.clone() : null; }
+        public byte[] getRawDisplayList()
+        {
+            return rawDisplayList != null ? rawDisplayList.clone() : null;
+        }
         /** @return the number of vertices */
-        public int getVertexCount() { return positions.length / 3; }
+        public int getVertexCount()
+        {
+            return positions.length / 3;
+        }
         /** @return the number of triangles */
-        public int getTriangleCount() { return triangleIndices.length / 3; }
+        public int getTriangleCount()
+        {
+            return triangleIndices.length / 3;
+        }
         /** @return the material bound to this mesh, or null if it draws untextured */
-        public Material getMaterial() { return material; }
+        public Material getMaterial()
+        {
+            return material;
+        }
         /** @return the skeleton node (bone) index this mesh is drawn under (for visibility animation) */
-        public int getNodeIndex() { return nodeIndex; }
+        public int getNodeIndex()
+        {
+            return nodeIndex;
+        }
     }
 
     /**
      * A material bound to one or more shapes: the names of the texture and palette it samples (looked up
      * in the model's embedded or a sibling {@code TEX0}) plus the texture's texel size and wrap/flip
-     * flags. Color/lighting/polygon attributes are present in the file but not exposed until they are
-     * needed. Names are {@code null} when the material draws untextured.
+     * flags, the 5-bit polygon alpha, and whether the material is flagged wireframe. Names are
+     * {@code null} when the material draws untextured.
      */
     public static class Material
     {
         private final String name;
         private final boolean repeatS, repeatT, flipS, flipT;
+        private final int polygonAlpha;
+        private final boolean wireframe;
         private String textureName;
         private String paletteName;
 
-        Material(String name, boolean repeatS, boolean repeatT, boolean flipS, boolean flipT)
+        /**
+         * @param name the material name
+         * @param repeatS texture repeats along S
+         * @param repeatT texture repeats along T
+         * @param flipS texture mirrors along S
+         * @param flipT texture mirrors along T
+         * @param polygonAlpha 5-bit polygon alpha, 0..31
+         * @param wireframe true when {@code NNS_G3D_MATFLAG_WIREFRAME} is set
+         */
+        Material(String name, boolean repeatS, boolean repeatT, boolean flipS, boolean flipT,
+                int polygonAlpha, boolean wireframe)
         {
             this.name = name;
             this.repeatS = repeatS;
             this.repeatT = repeatT;
             this.flipS = flipS;
             this.flipT = flipT;
+            this.polygonAlpha = polygonAlpha;
+            this.wireframe = wireframe;
         }
 
         /** @return this material's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the name of the texture this material samples, or null */
-        public String getTextureName() { return textureName; }
+        public String getTextureName()
+        {
+            return textureName;
+        }
         /** @return the name of the palette this material samples, or null */
-        public String getPaletteName() { return paletteName; }
+        public String getPaletteName()
+        {
+            return paletteName;
+        }
         /** @return whether the texture repeats (tiles) along S; else it clamps */
-        public boolean isRepeatS() { return repeatS; }
+        public boolean isRepeatS()
+        {
+            return repeatS;
+        }
         /** @return whether the texture repeats (tiles) along T; else it clamps */
-        public boolean isRepeatT() { return repeatT; }
+        public boolean isRepeatT()
+        {
+            return repeatT;
+        }
         /** @return whether the texture mirrors on every other S tile */
-        public boolean isFlipS() { return flipS; }
+        public boolean isFlipS()
+        {
+            return flipS;
+        }
         /** @return whether the texture mirrors on every other T tile */
-        public boolean isFlipT() { return flipT; }
+        public boolean isFlipT()
+        {
+            return flipT;
+        }
+        /**
+         * @return the 5-bit polygon alpha (0..31) from {@code polyAttr}. Zero is the NNS transparent
+         *         skip, not a wireframe (see {@link PolygonDraw}).
+         */
+        public int getPolygonAlpha()
+        {
+            return polygonAlpha;
+        }
+        /**
+         * @return true when the material flag has {@code NNS_G3D_MATFLAG_WIREFRAME} ({@code 0x0020})
+         */
+        public boolean isWireframe()
+        {
+            return wireframe;
+        }
     }
 }

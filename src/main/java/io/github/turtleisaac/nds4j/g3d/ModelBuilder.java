@@ -44,7 +44,9 @@ import java.util.List;
  */
 public final class ModelBuilder
 {
-    private ModelBuilder() {}
+    private ModelBuilder()
+    {
+    }
 
     /**
      * Authors an untextured NSBMD around a triangle mesh.
@@ -61,18 +63,20 @@ public final class ModelBuilder
         // Choose a power-of-two posScale so the largest coordinate fits the signed VTX_16 range (|raw| < 8),
         // then feed the encoder pre-scaled ("raw") positions; the decoder multiplies posScale back in.
         double maxAbs = 0;
-        for (float v : positions) maxAbs = Math.max(maxAbs, Math.abs(v));
+        for (float v : positions)
+            maxAbs = Math.max(maxAbs, Math.abs(v));
         int posScale = powerOfTwoScale(maxAbs);
         float[] raw = new float[positions.length];
-        for (int i = 0; i < positions.length; i++) raw[i] = (float) (positions[i] / posScale);
+        for (int i = 0; i < positions.length; i++)
+            raw[i] = (float) (positions[i] / posScale);
 
         byte[] dl = DisplayList.encode(raw, null, triangles);
         int numTriangle = triangles.length / 3;
-        int numVertex = numTriangle * 3;   // the encoder emits one vertex per triangle corner
+        int numVertex = numTriangle * 3; // the encoder emits one vertex per triangle corner
 
         // Header bounding box (min corner + dimensions), stored 1.3.12 scaled by a power-of-two boxPosScale.
-        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
-        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        float[] min = { Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE };
+        float[] max = { -Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE };
         for (int i = 0; i < positions.length; i += 3)
             for (int c = 0; c < 3; c++)
             {
@@ -80,7 +84,8 @@ public final class ModelBuilder
                 max[c] = Math.max(max[c], positions[i + c]);
             }
         double boxMag = 0;
-        for (int c = 0; c < 3; c++) boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
+        for (int c = 0; c < 3; c++)
+            boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
         int boxPosScale = powerOfTwoScale(boxMag);
 
         return assemble(modelName, dl, numVertex, numTriangle, posScale, min, max, boxPosScale);
@@ -100,23 +105,43 @@ public final class ModelBuilder
      * @return the NSBMD file bytes (MDL0 + TEX0), ready for {@link ModelSet}
      */
     public static byte[] buildTextured(String modelName, float[] positions, float[] texelUV, int[] triangles,
-                                       BufferedImage texture)
+            BufferedImage texture)
+    {
+        return buildTextured(modelName, positions, texelUV, triangles, texture, 31, false);
+    }
+
+    /**
+     * Authors a textured NSBMD whose single material uses {@code polygonAlpha} (0..31) and, when
+     * {@code wireframe} is set, {@code NNS_G3D_MATFLAG_WIREFRAME}. Solid authoring passes 31 and false.
+     * @param modelName the model's dictionary name
+     * @param positions vertex positions (x,y,z triples), in model units
+     * @param texelUV texcoords in texel units
+     * @param triangles triangle indices (3 per triangle)
+     * @param texture the texture image to embed
+     * @param polygonAlpha the 5-bit polygon alpha written into {@code polyAttr}
+     * @param wireframe whether the material flag requests wireframe edges
+     * @return the NSBMD file bytes (MDL0 + TEX0)
+     */
+    static byte[] buildTextured(String modelName, float[] positions, float[] texelUV, int[] triangles,
+            BufferedImage texture, int polygonAlpha, boolean wireframe)
     {
         if (triangles.length < 3 || triangles.length % 3 != 0)
             throw new IllegalArgumentException("triangles must be a non-empty multiple of 3");
 
         double maxAbs = 0;
-        for (float v : positions) maxAbs = Math.max(maxAbs, Math.abs(v));
+        for (float v : positions)
+            maxAbs = Math.max(maxAbs, Math.abs(v));
         int posScale = powerOfTwoScale(maxAbs);
         float[] raw = new float[positions.length];
-        for (int i = 0; i < positions.length; i++) raw[i] = (float) (positions[i] / posScale);
+        for (int i = 0; i < positions.length; i++)
+            raw[i] = (float) (positions[i] / posScale);
 
         byte[] dl = DisplayList.encode(raw, texelUV, triangles);
         int numTriangle = triangles.length / 3;
         int numVertex = numTriangle * 3;
 
-        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
-        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        float[] min = { Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE };
+        float[] max = { -Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE };
         for (int i = 0; i < positions.length; i += 3)
             for (int c = 0; c < 3; c++)
             {
@@ -124,13 +149,15 @@ public final class ModelBuilder
                 max[c] = Math.max(max[c], positions[i + c]);
             }
         double boxMag = 0;
-        for (int c = 0; c < 3; c++) boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
+        for (int c = 0; c < 3; c++)
+            boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
         int boxPosScale = powerOfTwoScale(boxMag);
 
         byte[] tex0 = buildDirectTex0("tex0", texture);
-        byte[] matSet = buildTexturedMaterialSet("mat0", "tex0", texture.getWidth(), texture.getHeight());
+        byte[] matSet = buildTexturedMaterialSet("mat0", "tex0", texture.getWidth(), texture.getHeight(),
+                polygonAlpha, wireframe);
         // SBC: NODEDESC(0,0,0), MAT(0), SHP(0), RET
-        byte[] sbc = {0x06, 0x00, 0x00, 0x00,  0x04, 0x00,  0x05, 0x00,  0x01};
+        byte[] sbc = { 0x06, 0x00, 0x00, 0x00, 0x04, 0x00, 0x05, 0x00, 0x01 };
 
         byte[] mdl0 = assembleMdl0(modelName, dl, numVertex, numTriangle, posScale, min, max, boxPosScale, matSet, sbc);
         return G3dFile.assembleContainer("BMD0", 1, mdl0, tex0);
@@ -154,8 +181,11 @@ public final class ModelBuilder
          */
         public Part(String name, float[] positions, float[] texelUV, int[] triangles, BufferedImage texture)
         {
-            this.name = name; this.positions = positions; this.texelUV = texelUV;
-            this.triangles = triangles; this.texture = texture;
+            this.name = name;
+            this.positions = positions;
+            this.texelUV = texelUV;
+            this.triangles = triangles;
+            this.texture = texture;
         }
     }
 
@@ -170,12 +200,13 @@ public final class ModelBuilder
      */
     public static byte[] buildMultiTextured(String modelName, List<Part> parts)
     {
-        if (parts.isEmpty()) throw new IllegalArgumentException("need at least one part");
+        if (parts.isEmpty())
+            throw new IllegalArgumentException("need at least one part");
 
         // Global posScale and bounding box over every part's geometry.
         double maxAbs = 0;
-        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
-        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        float[] min = { Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE };
+        float[] max = { -Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE };
         for (Part p : parts)
             for (int i = 0; i < p.positions.length; i += 3)
                 for (int c = 0; c < 3; c++)
@@ -187,7 +218,8 @@ public final class ModelBuilder
                 }
         int posScale = powerOfTwoScale(maxAbs);
         double boxMag = 0;
-        for (int c = 0; c < 3; c++) boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
+        for (int c = 0; c < 3; c++)
+            boxMag = Math.max(boxMag, Math.max(Math.abs(min[c]), Math.abs(max[c] - min[c])));
         int boxPosScale = powerOfTwoScale(boxMag);
 
         List<byte[]> dls = new java.util.ArrayList<>();
@@ -197,12 +229,16 @@ public final class ModelBuilder
         List<BufferedImage> textures = new java.util.ArrayList<>();
         int totalV = 0, totalT = 0;
         ByteArrayOutputStream sbc = new ByteArrayOutputStream();
-        sbc.write(0x06); sbc.write(0); sbc.write(0); sbc.write(0);   // NODEDESC(0,0,0)
+        sbc.write(0x06);
+        sbc.write(0);
+        sbc.write(0);
+        sbc.write(0); // NODEDESC(0,0,0)
         for (int i = 0; i < parts.size(); i++)
         {
             Part p = parts.get(i);
             float[] raw = new float[p.positions.length];
-            for (int k = 0; k < raw.length; k++) raw[k] = (float) (p.positions[k] / posScale);
+            for (int k = 0; k < raw.length; k++)
+                raw[k] = (float) (p.positions[k] / posScale);
             dls.add(DisplayList.encode(raw, p.texelUV, p.triangles));
             shapeNames.add("shp_" + p.name);
             matNames.add("mat_" + p.name);
@@ -210,8 +246,10 @@ public final class ModelBuilder
             textures.add(p.texture);
             totalT += p.triangles.length / 3;
             totalV += p.triangles.length; // 3 emitted vertices per triangle
-            sbc.write(0x04); sbc.write(i);   // MAT(i)
-            sbc.write(0x05); sbc.write(i);   // SHP(i)
+            sbc.write(0x04);
+            sbc.write(i); // MAT(i)
+            sbc.write(0x05);
+            sbc.write(i); // SHP(i)
         }
         sbc.write(0x01); // RET
 
@@ -226,7 +264,8 @@ public final class ModelBuilder
     private static int powerOfTwoScale(double maxAbs)
     {
         int p = 1;
-        while (maxAbs / p >= 7.999) p <<= 1;
+        while (maxAbs / p >= 7.999)
+            p <<= 1;
         return p;
     }
 
@@ -247,9 +286,9 @@ public final class ModelBuilder
     }
 
     private static byte[] assemble(String modelName, byte[] dl, int numVertex, int numTriangle,
-                                   int posScale, float[] boxMin, float[] boxMax, int boxPosScale)
+            int posScale, float[] boxMin, float[] boxMax, int boxPosScale)
     {
-        byte[] sbc = {0x06, 0x00, 0x00, 0x00,  0x05, 0x00,  0x01}; // NODEDESC(0,0,0), SHP(0), RET
+        byte[] sbc = { 0x06, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01 }; // NODEDESC(0,0,0), SHP(0), RET
         byte[] mdl0 = assembleMdl0(modelName, dl, numVertex, numTriangle, posScale, boxMin, boxMax,
                 boxPosScale, emptyMaterialSet(), sbc);
         return G3dFile.assembleContainer("BMD0", 2, mdl0);
@@ -257,8 +296,8 @@ public final class ModelBuilder
 
     // Single-shape MDL0 (one material count = 0 or 1, one shape).
     private static byte[] assembleMdl0(String modelName, byte[] dl, int numVertex, int numTriangle,
-                                       int posScale, float[] boxMin, float[] boxMax, int boxPosScale,
-                                       byte[] matSet, byte[] sbc)
+            int posScale, float[] boxMin, float[] boxMax, int boxPosScale,
+            byte[] matSet, byte[] sbc)
     {
         return assembleMdl0(modelName, Arrays.asList(dl), Arrays.asList("shape0"), countMaterials(matSet), numVertex,
                 numTriangle, posScale, boxMin, boxMax, boxPosScale, matSet, sbc);
@@ -275,20 +314,21 @@ public final class ModelBuilder
 
     // Lays out one MDL0 block around N shape display lists, a caller-supplied material set and SBC stream.
     private static byte[] assembleMdl0(String modelName, List<byte[]> dls, List<String> shapeNames,
-                                       int matCount, int numVertex, int numTriangle,
-                                       int posScale, float[] boxMin, float[] boxMax, int boxPosScale,
-                                       byte[] matSet, byte[] sbc)
+            int matCount, int numVertex, int numTriangle,
+            int posScale, float[] boxMin, float[] boxMax, int boxPosScale,
+            byte[] matSet, byte[] sbc)
     {
         int shapeCount = dls.size();
         byte[] nodeDict = serialize(G3dDictionary.build(Arrays.asList("node0"), Arrays.asList(rec4(40)), 4));
-        byte[] nodeData = {0x07, 0x00, 0x00, 0x10}; // flags 7 (identity node): skip t/r/s, rotation[0][0]=1.0
+        byte[] nodeData = { 0x07, 0x00, 0x00, 0x10 }; // flags 7 (identity node): skip t/r/s, rotation[0][0]=1.0
         int nodeSetLen = nodeDict.length + nodeData.length;
         int matSetLen = matSet.length;
 
         // Shape set: dictionary + N 16-byte structs + N display lists. Each struct's dlOffset is relative
         // to that struct; measure the dictionary length first so all offsets are exact.
         List<byte[]> dummyRecords = new java.util.ArrayList<>();
-        for (int i = 0; i < shapeCount; i++) dummyRecords.add(rec4(0));
+        for (int i = 0; i < shapeCount; i++)
+            dummyRecords.add(rec4(0));
         int shapeDictLen = serialize(G3dDictionary.build(shapeNames, dummyRecords, 4)).length;
 
         List<byte[]> shapeRecords = new java.util.ArrayList<>();
@@ -300,8 +340,8 @@ public final class ModelBuilder
         {
             int structOfs = structsBase + i * 16;
             shapeRecords.add(rec4(structOfs));
-            u32(structs[i], 8, dlCursor - structOfs);   // dlOffset (relative to the struct)
-            u32(structs[i], 12, dls.get(i).length);     // dlSize
+            u32(structs[i], 8, dlCursor - structOfs); // dlOffset (relative to the struct)
+            u32(structs[i], 12, dls.get(i).length); // dlSize
             dlCursor += dls.get(i).length;
         }
         byte[] shapeDict = serialize(G3dDictionary.build(shapeNames, shapeRecords, 4));
@@ -317,15 +357,15 @@ public final class ModelBuilder
         u32(model, 4, ofsSbc);
         u32(model, 8, ofsMat);
         u32(model, 12, ofsShp);
-        model[0x14 + 3] = 1;                    // numNode
-        model[0x14 + 4] = (byte) matCount;      // matCount
-        model[0x14 + 5] = (byte) shapeCount;    // shapeCount
+        model[0x14 + 3] = 1; // numNode
+        model[0x14 + 4] = (byte) matCount; // matCount
+        model[0x14 + 5] = (byte) shapeCount; // shapeCount
         u32(model, 0x14 + 8, (long) posScale * 4096); // posScale (fx32)
         u16(model, 0x14 + 16, numVertex);
         u16(model, 0x14 + 20, numTriangle);
         for (int c = 0; c < 3; c++)
         {
-            u16(model, 0x14 + 0x18 + c * 2, fx12(boxMin[c] / boxPosScale));            // box min corner
+            u16(model, 0x14 + 0x18 + c * 2, fx12(boxMin[c] / boxPosScale)); // box min corner
             u16(model, 0x14 + 0x1E + c * 2, fx12((boxMax[c] - boxMin[c]) / boxPosScale)); // box dimensions
         }
         u32(model, 0x14 + 0x24, (long) boxPosScale * 4096); // boxPosScale (fx32)
@@ -337,7 +377,11 @@ public final class ModelBuilder
         for (int i = 0; i < shapeCount; i++)
             System.arraycopy(structs[i], 0, model, ofsShp + structsBase + i * 16, 16);
         int dlPos = ofsShp + dlBase;
-        for (byte[] d : dls) { System.arraycopy(d, 0, model, dlPos, d.length); dlPos += d.length; }
+        for (byte[] d : dls)
+        {
+            System.arraycopy(d, 0, model, dlPos, d.length);
+            dlPos += d.length;
+        }
 
         int modelStart = 8 + serialize(G3dDictionary.build(Arrays.asList(modelName), Arrays.asList(rec4(0)), 4)).length;
         byte[] modelDict = serialize(G3dDictionary.build(Arrays.asList(modelName), Arrays.asList(rec4(modelStart)), 4));
@@ -381,11 +425,11 @@ public final class ModelBuilder
         byte[] block = new byte[blockSize];
         System.arraycopy("TEX0".getBytes(StandardCharsets.US_ASCII), 0, block, 0, 4);
         u32(block, 4, blockSize);
-        u16(block, 12, data.length >> 3);   // sizeTex (8-byte units)
-        u16(block, 14, texOfsDict);         // ofsDict
-        u32(block, 20, texDataOfs);         // ofsData
-        u16(block, 30, texOfsDict);         // Tex4x4Info dict (points at tex dict; no 4x4 data)
-        u16(block, 52, plttOfsDict);        // PlttInfo dict
+        u16(block, 12, data.length >> 3); // sizeTex (8-byte units)
+        u16(block, 14, texOfsDict); // ofsDict
+        u32(block, 20, texDataOfs); // ofsData
+        u16(block, 30, texOfsDict); // Tex4x4Info dict (points at tex dict; no 4x4 data)
+        u16(block, 52, plttOfsDict); // PlttInfo dict
         u32(block, 56, texDataOfs);
         System.arraycopy(texDict, 0, block, texOfsDict, texDict.length);
         System.arraycopy(plttDict, 0, block, plttOfsDict, plttDict.length);
@@ -403,13 +447,14 @@ public final class ModelBuilder
         {
             BufferedImage img = imgs.get(i);
             int w = img.getWidth(), h = img.getHeight();
-            int dataOfsUnits = texData.size() >> 3;   // 8-byte units within the data section
+            int dataOfsUnits = texData.size() >> 3; // 8-byte units within the data section
             for (int p = 0; p < w * h; p++)
             {
                 int argb = img.getRGB(p % w, p / w);
                 int r = ((argb >> 16) & 0xFF) >> 3, g = ((argb >> 8) & 0xFF) >> 3, b = (argb & 0xFF) >> 3;
                 int v = r | (g << 5) | (b << 10) | 0x8000;
-                texData.write(v & 0xFF); texData.write((v >> 8) & 0xFF);
+                texData.write(v & 0xFF);
+                texData.write((v >> 8) & 0xFF);
             }
             int widthSel = Integer.numberOfTrailingZeros(w / 8);
             int heightSel = Integer.numberOfTrailingZeros(h / 8);
@@ -449,13 +494,14 @@ public final class ModelBuilder
     {
         int n = matNames.size();
         List<byte[]> dummy = new java.util.ArrayList<>();
-        for (int i = 0; i < n; i++) dummy.add(rec4(0));
+        for (int i = 0; i < n; i++)
+            dummy.add(rec4(0));
         int matDictLen = serialize(G3dDictionary.build(matNames, dummy, 4)).length;
         int texDictLen = serialize(G3dDictionary.build(texNames, dummy, 4)).length;
         int plttDictLen = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4)).length;
 
         int structsBase = 4 + matDictLen;
-        int matStructLen = 0x18;
+        int matStructLen = MAT_STRUCT_LEN;
         int ofsTexDict = structsBase + n * matStructLen;
         int ofsPltDict = ofsTexDict + texDictLen;
         int indexListBase = ofsPltDict + plttDictLen; // one byte per material: matIdx
@@ -476,7 +522,7 @@ public final class ModelBuilder
             int heightSel = Integer.numberOfTrailingZeros(Math.max(8, tex.getHeight()) / 8);
             long texImageParam = ((long) 7 << 26) | ((long) widthSel << 20) | ((long) heightSel << 23)
                     | (1L << 16) | (1L << 17);
-            u32(matSet, structOfs + 0x14, texImageParam);
+            writeMaterialStruct(matSet, structOfs, texImageParam, 31, false);
             // texture i -> material i: index list is one byte [i] at indexListBase + i
             texRecords.add(rec4(((indexListBase + i) & 0xFFFFL) | (1L << 16)));
             matSet[indexListBase + i] = (byte) i;
@@ -490,7 +536,8 @@ public final class ModelBuilder
     // Builds a material set with one material bound (by name) to one texture. bindNames() reads the
     // texture->material dictionary to name each material's texture; the material struct only needs its
     // texImageParam wrap/flip bits (the renderer takes the texture's size from the TEX0).
-    private static byte[] buildTexturedMaterialSet(String matName, String texName, int texW, int texH)
+    private static byte[] buildTexturedMaterialSet(String matName, String texName, int texW, int texH,
+            int polygonAlpha, boolean wireframe)
     {
         // Measure dictionary sizes first (fixed by their record counts) so the offsets are exact.
         int matDictLen = serialize(G3dDictionary.build(Arrays.asList(matName), Arrays.asList(rec4(0)), 4)).length;
@@ -498,7 +545,7 @@ public final class ModelBuilder
         int plttDictLen = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4)).length;
 
         int structOfs = 4 + matDictLen;
-        int matStructLen = 0x18;                 // through texImageParam at +0x14
+        int matStructLen = MAT_STRUCT_LEN;
         int ofsTexDict = structOfs + matStructLen;
         int ofsPltDict = ofsTexDict + texDictLen;
         int indexListOfs = ofsPltDict + plttDictLen;
@@ -517,7 +564,7 @@ public final class ModelBuilder
         int heightSel = Integer.numberOfTrailingZeros(Math.max(8, texH) / 8);
         long texImageParam = ((long) 7 << 26) | ((long) widthSel << 20) | ((long) heightSel << 23)
                 | (1L << 16) | (1L << 17); // repeatS | repeatT
-        u32(matSet, structOfs + 0x14, texImageParam);
+        writeMaterialStruct(matSet, structOfs, texImageParam, polygonAlpha, wireframe);
 
         // texture->material binding: entry = listOffset (bits 0-15) | listLen (bits 16-23); list = [matIdx].
         long texEntry = (indexListOfs & 0xFFFFL) | (1L << 16);
@@ -530,6 +577,35 @@ public final class ModelBuilder
         return matSet;
     }
 
+    /** Fixed {@code NNSG3dResMatData} length through {@code magH}, before optional texture-matrix data. */
+    private static final int MAT_STRUCT_LEN = 0x2C;
+
+    /**
+     * Writes one standard material struct. Polygon alpha is bits 16-20 of {@code polyAttr}. The
+     * wireframe flag is {@code NNS_G3D_MATFLAG_WIREFRAME} in the flag word. Front-face and the
+     * required polygon-attr bit 13 match a solid IMD material.
+     * @param matSet the material-set bytes
+     * @param structOfs offset of this struct within {@code matSet}
+     * @param texImageParam the TexImageParam word (wrap/flip and format)
+     * @param polygonAlpha 5-bit polygon alpha, 0..31
+     * @param wireframe whether to set the wireframe flag
+     */
+    private static void writeMaterialStruct(byte[] matSet, int structOfs, long texImageParam,
+            int polygonAlpha, boolean wireframe)
+    {
+        u16(matSet, structOfs + 2, MAT_STRUCT_LEN);
+        u32(matSet, structOfs + 0x0C, ((long) polygonAlpha << 16) | 0x2080L);
+        u32(matSet, structOfs + 0x10, 0x3f1ff8ffL);
+        u32(matSet, structOfs + 0x14, texImageParam);
+        u32(matSet, structOfs + 0x18, 0xffffffffL);
+        int flag = 0x1fce;
+        if (wireframe)
+            flag |= PolygonDraw.WIREFRAME_FLAG;
+        u16(matSet, structOfs + 0x1E, flag);
+        u32(matSet, structOfs + 0x24, 0x1000);
+        u32(matSet, structOfs + 0x28, 0x1000);
+    }
+
     private static byte[] serialize(G3dDictionary d)
     {
         MemBuf b = MemBuf.create();
@@ -537,11 +613,26 @@ public final class ModelBuilder
         return b.reader().getBuffer();
     }
 
-    private static byte[] rec4(long v) { byte[] r = new byte[4]; u32(r, 0, v); return r; }
-    private static int fx12(double v) { return (int) Math.round(v * 4096) & 0xFFFF; }
-    private static void u16(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
+    private static byte[] rec4(long v)
+    {
+        byte[] r = new byte[4];
+        u32(r, 0, v);
+        return r;
+    }
+    private static int fx12(double v)
+    {
+        return (int) Math.round(v * 4096) & 0xFFFF;
+    }
+    private static void u16(byte[] d, int o, int v)
+    {
+        d[o] = (byte) v;
+        d[o + 1] = (byte) (v >> 8);
+    }
     private static void u32(byte[] d, int o, long v)
     {
-        d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); d[o + 2] = (byte) (v >> 16); d[o + 3] = (byte) (v >> 24);
+        d[o] = (byte) v;
+        d[o + 1] = (byte) (v >> 8);
+        d[o + 2] = (byte) (v >> 16);
+        d[o + 3] = (byte) (v >> 24);
     }
 }

@@ -51,7 +51,9 @@ import java.util.Map;
  */
 public final class GltfExporter
 {
-    private GltfExporter() {}
+    private GltfExporter()
+    {
+    }
 
     /**
      * Writes {@code model} as a self-contained glTF 2.0 file. Textures the model's materials reference
@@ -99,7 +101,7 @@ public final class GltfExporter
      * @throws IOException if the file cannot be written
      */
     public static void write(Model model, TextureSet textures, List<SkeletalAnimationSet.Animation> animations,
-                             TextureSrtAnimationSet.Animation textureSrt, File out) throws IOException
+            TextureSrtAnimationSet.Animation textureSrt, File out) throws IOException
     {
         Files.write(out.toPath(), toGltf(model, textures, animations, textureSrt).getBytes(StandardCharsets.UTF_8));
     }
@@ -114,7 +116,7 @@ public final class GltfExporter
      * @return the glTF document as a {@code String}
      */
     public static String toGltf(Model model, TextureSet textures, List<SkeletalAnimationSet.Animation> animations,
-                                TextureSrtAnimationSet.Animation textureSrt)
+            TextureSrtAnimationSet.Animation textureSrt)
     {
         return new SkinnedBuild(model, textures, textureSrt).finish(
                 animations != null ? animations : java.util.Collections.emptyList());
@@ -136,7 +138,10 @@ public final class GltfExporter
         private final Map<String, Integer> samplerByKey = new LinkedHashMap<>();
         private int defaultMaterial = -1;
 
-        Build(TextureSet textures) { this.textures = textures; }
+        Build(TextureSet textures)
+        {
+            this.textures = textures;
+        }
 
         void addMesh(Model.Mesh mesh)
         {
@@ -152,8 +157,8 @@ public final class GltfExporter
             int texH = tex != null ? tex.getHeight() : 1;
 
             // POSITION (with the min/max the spec requires) and TEXCOORD_0, normalised to [0,1].
-            float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-            float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+            float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+            float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
             int posAccessor = beginAccessor("VEC3", 5126, nVerts);
             for (int i = 0; i < nVerts; i++)
                 for (int c = 0; c < 3; c++)
@@ -188,11 +193,33 @@ public final class GltfExporter
         // are not deduped (there are only a handful per model); textures and samplers are.
         private int materialFor(Model.Mesh mesh)
         {
-            BufferedImage tex = textureFor(mesh);
             Model.Material mat = mesh.getMaterial();
-            if (tex == null || mat == null)
-                return defaultMaterial();
+            BufferedImage tex = textureFor(mesh);
+            if (tex == null)
+                return plainMaterial(mat);
 
+            return texturedMaterial(mat, tex);
+        }
+
+        /**
+         * @param mat the mesh material, or null
+         * @return a material index with no texture
+         */
+        private int plainMaterial(Model.Material mat)
+        {
+            if (mat == null)
+                return defaultMaterial();
+            materials.add(plainMaterialJson(mat));
+            return materials.size() - 1;
+        }
+
+        /**
+         * @param mat the mesh material
+         * @param tex the resolved texture
+         * @return a textured material index
+         */
+        private int texturedMaterial(Model.Material mat, BufferedImage tex)
+        {
             int image = imageByTexture.computeIfAbsent(mat.getTextureName(), n -> {
                 images.add("{\"uri\":\"data:image/png;base64," + pngDataUri(tex) + "\"}");
                 int sampler = samplerFor(mat);
@@ -203,7 +230,7 @@ public final class GltfExporter
             materials.add("{\"name\":" + jsonString(mat.getName())
                     + ",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":" + image
                     + "},\"metallicFactor\":0,\"roughnessFactor\":1},\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5"
-                    + ",\"doubleSided\":true}");
+                    + ",\"doubleSided\":true" + polygonExtras(mat) + "}");
             return materials.size() - 1;
         }
 
@@ -237,8 +264,14 @@ public final class GltfExporter
             TextureSet.Texture t = textures.getTexture(mat.getTextureName());
             if (t == null)
                 return null;
-            try { return textures.getImage(t); }
-            catch (RuntimeException e) { return null; }
+            try
+            {
+                return textures.getImage(t);
+            }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
         }
 
         // --- binary buffer / accessor plumbing ---
@@ -276,12 +309,18 @@ public final class GltfExporter
         private void putFloat(float v)
         {
             int bits = Float.floatToIntBits(v);
-            bin.write(bits); bin.write(bits >> 8); bin.write(bits >> 16); bin.write(bits >> 24);
+            bin.write(bits);
+            bin.write(bits >> 8);
+            bin.write(bits >> 16);
+            bin.write(bits >> 24);
         }
 
         private void putInt(int v)
         {
-            bin.write(v); bin.write(v >> 8); bin.write(v >> 16); bin.write(v >> 24);
+            bin.write(v);
+            bin.write(v >> 8);
+            bin.write(v >> 16);
+            bin.write(v >> 24);
         }
 
         String finish(String name)
@@ -347,35 +386,70 @@ public final class GltfExporter
             for (int i = 0; i < s.length(); i++)
             {
                 char c = s.charAt(i);
-                if (c == '"' || c == '\\') sb.append('\\').append(c);
-                else if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-                else sb.append(c);
+                if (c == '"' || c == '\\')
+                    sb.append('\\').append(c);
+                else if (c < 0x20)
+                    sb.append(String.format("\\u%04x", (int) c));
+                else
+                    sb.append(c);
             }
             return sb.append('"').toString();
         }
     }
 
     // kept to make the little-endian intent explicit if a GLB path is added later
-    static ByteBuffer le(int size) { return ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN); }
+    static ByteBuffer le(int size)
+    {
+        return ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /**
+     * Extras the viewer reads when deciding whether NNS would submit the shape. See {@link PolygonDraw}.
+     * @param mat the material
+     * @return a glTF {@code extras} fragment
+     */
+    private static String polygonExtras(Model.Material mat)
+    {
+        return ",\"extras\":{\"polygonAlpha\":" + mat.getPolygonAlpha()
+                + ",\"wireframe\":" + mat.isWireframe() + "}";
+    }
+
+    /**
+     * @param mat a material with no resolved texture
+     * @return a glTF material object, named so a material-color track can find it
+     */
+    private static String plainMaterialJson(Model.Material mat)
+    {
+        return "{\"name\":" + jsonString(mat.getName())
+                + ",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.8,0.8,0.8,1],"
+                + "\"metallicFactor\":0,\"roughnessFactor\":1},\"doubleSided\":true"
+                + polygonExtras(mat) + "}";
+    }
 
     // Shared JSON/number helpers, used by the animated builder below.
     private static String f(float v)
     {
-        if (Float.isNaN(v) || Float.isInfinite(v)) v = 0;
-        if (v == Math.rint(v) && Math.abs(v) < 1e7) return Integer.toString((int) v);
+        if (Float.isNaN(v) || Float.isInfinite(v))
+            v = 0;
+        if (v == Math.rint(v) && Math.abs(v) < 1e7)
+            return Integer.toString((int) v);
         return Float.toString(v);
     }
 
     private static String jsonString(String s)
     {
-        if (s == null) return "\"\"";
+        if (s == null)
+            return "\"\"";
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++)
         {
             char c = s.charAt(i);
-            if (c == '"' || c == '\\') sb.append('\\').append(c);
-            else if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-            else sb.append(c);
+            if (c == '"' || c == '\\')
+                sb.append('\\').append(c);
+            else if (c < 0x20)
+                sb.append(String.format("\\u%04x", (int) c));
+            else
+                sb.append(c);
         }
         return sb.append('"').toString();
     }
@@ -388,7 +462,10 @@ public final class GltfExporter
             ImageIO.write(img, "png", out);
             return Base64.getEncoder().encodeToString(out.toByteArray());
         }
-        catch (IOException e) { throw new RuntimeException("Failed to PNG-encode a texture for glTF export", e); }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Failed to PNG-encode a texture for glTF export", e);
+        }
     }
 
     // Converts a rotation held in NNS row-vector convention (v' = v * r, r row-major) to the unit
@@ -404,26 +481,39 @@ public final class GltfExporter
         if (tr > 0)
         {
             double s = Math.sqrt(tr + 1.0) * 2;
-            w = 0.25 * s; x = (m21 - m12) / s; y = (m02 - m20) / s; z = (m10 - m01) / s;
+            w = 0.25 * s;
+            x = (m21 - m12) / s;
+            y = (m02 - m20) / s;
+            z = (m10 - m01) / s;
         }
         else if (m00 > m11 && m00 > m22)
         {
             double s = Math.sqrt(1.0 + m00 - m11 - m22) * 2;
-            w = (m21 - m12) / s; x = 0.25 * s; y = (m01 + m10) / s; z = (m02 + m20) / s;
+            w = (m21 - m12) / s;
+            x = 0.25 * s;
+            y = (m01 + m10) / s;
+            z = (m02 + m20) / s;
         }
         else if (m11 > m22)
         {
             double s = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
-            w = (m02 - m20) / s; x = (m01 + m10) / s; y = 0.25 * s; z = (m12 + m21) / s;
+            w = (m02 - m20) / s;
+            x = (m01 + m10) / s;
+            y = 0.25 * s;
+            z = (m12 + m21) / s;
         }
         else
         {
             double s = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
-            w = (m10 - m01) / s; x = (m02 + m20) / s; y = (m12 + m21) / s; z = 0.25 * s;
+            w = (m10 - m01) / s;
+            x = (m02 + m20) / s;
+            y = (m12 + m21) / s;
+            z = 0.25 * s;
         }
         double n = Math.sqrt(x * x + y * y + z * z + w * w);
-        if (n == 0) return new float[]{0, 0, 0, 1};
-        return new float[]{(float) (x / n), (float) (y / n), (float) (z / n), (float) (w / n)};
+        if (n == 0)
+            return new float[] { 0, 0, 0, 1 };
+        return new float[] { (float) (x / n), (float) (y / n), (float) (z / n), (float) (w / n) };
     }
 
     // Builds a hierarchical, animatable glTF: one node per skeleton node (bind-pose TRS), geometry
@@ -477,21 +567,26 @@ public final class GltfExporter
             // Nodes: bind-pose TRS, children by parent link, mesh if any.
             Model.NodeTransform[] bind = model.localTransforms(null, 0);
             List<List<Integer>> children = new ArrayList<>();
-            for (int i = 0; i < nodeCount; i++) children.add(new ArrayList<>());
+            for (int i = 0; i < nodeCount; i++)
+                children.add(new ArrayList<>());
             List<Integer> roots = new ArrayList<>();
             for (int n = 0; n < nodeCount; n++)
             {
                 int p = model.getNodeParent(n);
-                if (p >= 0 && p < nodeCount && p != n) children.get(p).add(n);
-                else roots.add(n);
+                if (p >= 0 && p < nodeCount && p != n)
+                    children.get(p).add(n);
+                else
+                    roots.add(n);
             }
             List<String> nodes = new ArrayList<>();
             for (int n = 0; n < nodeCount; n++)
             {
                 StringBuilder nb = new StringBuilder("{");
                 nb.append(trsJson(bind[n]));
-                if (meshOfNode.containsKey(n)) nb.append(",\"mesh\":").append(meshOfNode.get(n));
-                if (!children.get(n).isEmpty()) nb.append(",\"children\":[").append(join(children.get(n))).append("]");
+                if (meshOfNode.containsKey(n))
+                    nb.append(",\"mesh\":").append(meshOfNode.get(n));
+                if (!children.get(n).isEmpty())
+                    nb.append(",\"children\":[").append(join(children.get(n))).append("]");
                 nb.append("}");
                 nodes.add(nb.toString());
             }
@@ -521,12 +616,14 @@ public final class GltfExporter
             // shared time input
             int timeAcc = beginAccessor("SCALAR", 5126, frames);
             float tmin = 0, tmax = (float) ((frames - 1) / FRAME_RATE);
-            for (int fI = 0; fI < frames; fI++) putFloat((float) (fI / FRAME_RATE));
+            for (int fI = 0; fI < frames; fI++)
+                putFloat((float) (fI / FRAME_RATE));
             endAccessor(0, "\"min\":[" + f(tmin) + "],\"max\":[" + f(tmax) + "]");
 
             // pre-sample every node's local transform per frame
             Model.NodeTransform[][] pose = new Model.NodeTransform[frames][];
-            for (int fI = 0; fI < frames; fI++) pose[fI] = model.localTransforms(a, fI);
+            for (int fI = 0; fI < frames; fI++)
+                pose[fI] = model.localTransforms(a, fI);
 
             List<String> samplersJson = new ArrayList<>();
             List<String> channels = new ArrayList<>();
@@ -542,7 +639,7 @@ public final class GltfExporter
 
         // kind: 0=translation (VEC3), 1=rotation (VEC4 quat, sign-continuous), 2=scale (VEC3)
         private void emitChannel(int node, int frames, Model.NodeTransform[][] pose, Model.NodeTransform bind,
-                                 int timeAcc, int kind, List<String> samplersJson, List<String> channels)
+                int timeAcc, int kind, List<String> samplersJson, List<String> channels)
         {
             int comps = kind == 1 ? 4 : 3;
             float[][] vals = new float[frames][];
@@ -553,15 +650,20 @@ public final class GltfExporter
                 for (int fI = 1; fI < frames; fI++)
                 {
                     double dot = 0;
-                    for (int c = 0; c < 4; c++) dot += vals[fI][c] * vals[fI - 1][c];
-                    if (dot < 0) for (int c = 0; c < 4; c++) vals[fI][c] = -vals[fI][c];
+                    for (int c = 0; c < 4; c++)
+                        dot += vals[fI][c] * vals[fI - 1][c];
+                    if (dot < 0)
+                        for (int c = 0; c < 4; c++)
+                            vals[fI][c] = -vals[fI][c];
                 }
             float[] bindVal = sampleComponent(bind, kind);
             if (!moves(vals, bindVal))
                 return;
 
             int outAcc = beginAccessor(comps == 4 ? "VEC4" : "VEC3", 5126, frames);
-            for (float[] v : vals) for (float c : v) putFloat(c);
+            for (float[] v : vals)
+                for (float c : v)
+                    putFloat(c);
             endAccessor(0, null);
 
             int samplerIdx = samplersJson.size();
@@ -572,8 +674,16 @@ public final class GltfExporter
 
         private float[] sampleComponent(Model.NodeTransform t, int kind)
         {
-            if (kind == 0) { double[] v = t.getTranslation(); return new float[]{(float) v[0], (float) v[1], (float) v[2]}; }
-            if (kind == 2) { double[] v = t.getScale(); return new float[]{(float) v[0], (float) v[1], (float) v[2]}; }
+            if (kind == 0)
+            {
+                double[] v = t.getTranslation();
+                return new float[] { (float) v[0], (float) v[1], (float) v[2] };
+            }
+            if (kind == 2)
+            {
+                double[] v = t.getScale();
+                return new float[] { (float) v[0], (float) v[1], (float) v[2] };
+            }
             return matrixToQuat(t.getRotation());
         }
 
@@ -600,8 +710,8 @@ public final class GltfExporter
             int texW = tex != null ? tex.getWidth() : 1;
             int texH = tex != null ? tex.getHeight() : 1;
 
-            float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-            float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+            float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+            float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
             int posAccessor = beginAccessor("VEC3", 5126, nVerts);
             for (int i = 0; i < nVerts; i++)
                 for (int c = 0; c < 3; c++)
@@ -624,7 +734,8 @@ public final class GltfExporter
             endAccessor(34962, null);
 
             int idxAccessor = beginAccessor("SCALAR", 5125, idx.length);
-            for (int v : idx) putInt(v);
+            for (int v : idx)
+                putInt(v);
             endAccessor(34963, null);
 
             int material = materialFor(mesh);
@@ -632,16 +743,54 @@ public final class GltfExporter
                     + "},\"indices\":" + idxAccessor + ",\"material\":" + material + "}";
         }
 
+        /**
+         * @param mesh the mesh whose material is exported
+         * @return the glTF material index
+         */
         private int materialFor(Model.Mesh mesh)
         {
-            BufferedImage tex = textureFor(mesh);
-            Model.Material mat = mesh.getMaterial();
-            if (tex == null || mat == null)
-            {
-                materials.add("{\"name\":\"default\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.8,0.8,0.8,1],"
-                        + "\"metallicFactor\":0,\"roughnessFactor\":1},\"doubleSided\":true}");
-                return materials.size() - 1;
-            }
+            return skinnedMaterial(mesh.getMaterial(), textureFor(mesh));
+        }
+
+        /**
+         * @param mat the mesh material, or null
+         * @param tex the resolved texture, or null
+         * @return the glTF material index
+         */
+        private int skinnedMaterial(Model.Material mat, BufferedImage tex)
+        {
+            return tex == null ? plainMaterial(mat) : texturedMaterial(mat, tex);
+        }
+
+        /**
+         * @param mat the mesh material, or null
+         * @return a material index with no texture
+         */
+        private int plainMaterial(Model.Material mat)
+        {
+            if (mat == null)
+                return addDefaultMaterial();
+            materials.add(plainMaterialJson(mat));
+            return materials.size() - 1;
+        }
+
+        /**
+         * @return a fresh unnamed default material index
+         */
+        private int addDefaultMaterial()
+        {
+            materials.add("{\"name\":\"default\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.8,0.8,0.8,1],"
+                    + "\"metallicFactor\":0,\"roughnessFactor\":1},\"doubleSided\":true}");
+            return materials.size() - 1;
+        }
+
+        /**
+         * @param mat the mesh material
+         * @param tex the resolved texture
+         * @return a textured material index
+         */
+        private int texturedMaterial(Model.Material mat, BufferedImage tex)
+        {
             int image = imageByTexture.computeIfAbsent(mat.getTextureName(), n -> {
                 images.add("{\"uri\":\"data:image/png;base64," + pngDataUri(tex) + "\"}");
                 glTextures.add("{\"source\":" + (images.size() - 1) + ",\"sampler\":" + samplerFor(mat) + "}");
@@ -651,14 +800,15 @@ public final class GltfExporter
             materials.add("{\"name\":" + jsonString(mat.getName())
                     + ",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":" + image + texTransform
                     + "},\"metallicFactor\":0,\"roughnessFactor\":1},\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5"
-                    + ",\"doubleSided\":true}");
+                    + ",\"doubleSided\":true" + polygonExtras(mat) + "}");
             return materials.size() - 1;
         }
 
         // The initial (frame-0) NSBTA texture-SRT as a KHR_texture_transform, if this material is animated.
         private String textureTransform(String matName)
         {
-            if (textureSrt == null) return "";
+            if (textureSrt == null)
+                return "";
             for (TextureSrtAnimationSet.MaterialSrt m : textureSrt.getMaterials())
                 if (m.getName().equals(matName))
                 {
@@ -687,9 +837,16 @@ public final class GltfExporter
             if (textures == null || mat == null || mat.getTextureName() == null)
                 return null;
             TextureSet.Texture t = textures.getTexture(mat.getTextureName());
-            if (t == null) return null;
-            try { return textures.getImage(t); }
-            catch (RuntimeException e) { return null; }
+            if (t == null)
+                return null;
+            try
+            {
+                return textures.getImage(t);
+            }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
         }
 
         private String assemble(List<String> nodes, List<Integer> roots, List<String> animJson)
@@ -724,7 +881,12 @@ public final class GltfExporter
         private static String join(List<Integer> xs)
         {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < xs.size(); i++) { if (i > 0) sb.append(','); sb.append(xs.get(i)); }
+            for (int i = 0; i < xs.size(); i++)
+            {
+                if (i > 0)
+                    sb.append(',');
+                sb.append(xs.get(i));
+            }
             return sb.toString();
         }
 
@@ -747,21 +909,35 @@ public final class GltfExporter
             int length = bin.size() - start;
             int view = bufferViews.size();
             String bv = "{\"buffer\":0,\"byteOffset\":" + start + ",\"byteLength\":" + length;
-            if (target != 0) bv += ",\"target\":" + target;
+            if (target != 0)
+                bv += ",\"target\":" + target;
             bufferViews.add(bv + "}");
             accessors.set(i, "{\"bufferView\":" + view + ",\"componentType\":" + componentType
                     + ",\"count\":" + count + ",\"type\":\"" + type + "\""
                     + (extra != null ? "," + extra : "") + "}");
         }
 
-        private void pad4() { while ((bin.size() & 3) != 0) bin.write(0); }
+        private void pad4()
+        {
+            while ((bin.size() & 3) != 0)
+                bin.write(0);
+        }
 
         private void putFloat(float v)
         {
             int bits = Float.floatToIntBits(v);
-            bin.write(bits); bin.write(bits >> 8); bin.write(bits >> 16); bin.write(bits >> 24);
+            bin.write(bits);
+            bin.write(bits >> 8);
+            bin.write(bits >> 16);
+            bin.write(bits >> 24);
         }
 
-        private void putInt(int v) { bin.write(v); bin.write(v >> 8); bin.write(v >> 16); bin.write(v >> 24); }
+        private void putInt(int v)
+        {
+            bin.write(v);
+            bin.write(v >> 8);
+            bin.write(v >> 16);
+            bin.write(v >> 24);
+        }
     }
 }
