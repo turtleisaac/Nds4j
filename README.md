@@ -389,11 +389,11 @@ Guidelines for contributing
 ---------------------------
 
 If you plan on contributing to Nds4j, please ensure that your additions meet the following criteria:
-* All public methods and constructors have well-written Javadoc comments
+* Java follows `.cursor/rules/java-style.mdc`. Every method, including private helpers and tests, has a concise Javadoc. When the behavior comes from a GBATEK section or another real source, link that source instead of restating it
 * Debug prints have been removed or at the very least commented out
 * Formats which begin with the generic NTR header should always extend `framework.GenericNtrFile`. See existing classes for examples.
 * The following classes in the `framework` package should be used for the following purposes and be consistent with existing code:
-  * `MemBuf` - Reading and writing binary data one value at a time.
+  * `MemBuf` - Reading and writing binary data one value at a time. Parse through `MemBuf` rather than indexing a raw `byte[]` with `& 0xFF` masks and shifts, or hand-writing a `readU16` / `readU32` helper.
     * `MemBuf.MemBufReader` - Reading binary data one value at a time.
     * `MemBuf.MemBufWriter` - Writing binary data one value at a time.
   * `Buffer` - Reading entire binary data (bytes) from file. 
