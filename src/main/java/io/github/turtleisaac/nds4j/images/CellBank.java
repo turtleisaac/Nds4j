@@ -576,7 +576,8 @@ public class CellBank extends GenericNtrFile
             int[] footprint = getOamFootprint(oam);
             int offX = (footprint[0] - physical[0]) / 2, offY = (footprint[1] - physical[1]) / 2;
             BufferedImage oamImage = transparent ? images[x].getTransparentImage() : images[x].getImage();
-            g.drawImage(oamImage, oam.xCoord + offX - bounds.x, oam.yCoord + offY - bounds.y, null);
+            drawOam(g, oamImage, oam.xCoord + offX - bounds.x, oam.yCoord + offY - bounds.y,
+                    mirrorBit(oam, 3), mirrorBit(oam, 4));
         }
         g.dispose();
 
@@ -1829,5 +1830,54 @@ public class CellBank extends GenericNtrFile
     public static boolean isOamDisabled(Cell.OAM oam)
     {
         return !oam.rotation && oam.sizeDisable;
+    }
+
+    /**
+     * Reads one OBJ flip bit. Affine objects use the same bits as a parameter index.
+     * Bit 3 is Attribute 1 bit 12 (horizontal) and bit 4 is bit 13 (vertical).
+     * @param oam the object
+     * @param bit the bit inside the stored Attribute 1 field
+     * @return whether that bit mirrors the sprite
+     * @see <a href="https://problemkaputt.de/gbatek.htm#lcdobjattributes">GBATEK OBJ Attributes</a>
+     */
+    private static boolean mirrorBit(Cell.OAM oam, int bit)
+    {
+        if (oam.rotation)
+            return false;
+
+        return ((oam.rotationScaling >> bit) & 1) == 1;
+    }
+
+    /**
+     * Draws one object, mirroring it when its Attribute 1 flip bits say so.
+     * @param g the cell canvas
+     * @param image the unflipped object pixels
+     * @param dx the object's left edge on the canvas
+     * @param dy the object's top edge on the canvas
+     * @param hMirror whether to mirror horizontally
+     * @param vMirror whether to mirror vertically
+     */
+    private static void drawOam(Graphics2D g, BufferedImage image, int dx, int dy, boolean hMirror, boolean vMirror)
+    {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int x1 = dx;
+        int x2 = dx + width;
+        int y1 = dy;
+        int y2 = dy + height;
+
+        // Swap the destination edges so the unflipped pixels land mirrored.
+        if (hMirror)
+        {
+            x1 = dx + width;
+            x2 = dx;
+        }
+        if (vMirror)
+        {
+            y1 = dy + height;
+            y2 = dy;
+        }
+
+        g.drawImage(image, x1, y1, x2, y2, 0, 0, width, height, null);
     }
 }
