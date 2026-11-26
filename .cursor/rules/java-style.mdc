@@ -1,7 +1,7 @@
 ---
-description: Java style for Nds4j sources and tests
+description: Nds4j Java layout and style. Use this whenever you write or edit Java (Allman braces, keyword spacing, blank lines between steps).
 globs: "**/*.java"
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Java style
@@ -55,27 +55,71 @@ for (byte[] data : files)
 
 ## Blank lines
 
-Group the lines that do one step, and put one blank line between steps. A run of the same kind of statement stays together. When that run switches to a different kind, add a blank line.
+Group the lines that do one step, and put one blank line between steps. A run of the same kind of statement stays together until a new stage begins: later lines are built from the results above, or the kind of work changes (declarations, a loop, then a use).
 
-A long run of the same kind of statement is not one step just because the lines look alike. Put a blank line where a new stage begins, where the next lines are built from the results above.
+```java
+int p1 = commands.readInt();
+int p2 = commands.readInt();
 
-A braced block gets one blank line after it before the next statement, unless it is the last thing in its enclosing block. That is the closing `}` of `if` / `for` / `while` / `switch` / `try`, or of a function or lambda body used as a statement. Nested blocks that end together share that one blank line. A braced loop with a `return` after it gets that blank too, even in a short method. The parts of one construct stay joined, with no blank between them: `if` / `else` (including `else if`), `try` / `catch` / `finally`, and `do` / `while`. The blank line comes after the whole construct.
+vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
+```
 
-A braceless one-line `if`, `for`, or `while` follows those grouping rules and may skip the blank. Tiny guards stay together. A chain of `if` / `return` stays together, and the fallback `return` gets a blank line above it. Back-to-back short similar blocks, and `if` pairs that read like `if` / `else`, get no blank between them.
+A braced block gets one blank line after its `}` before the next statement, unless that `}` ends its enclosing block. Nested blocks that end together share that one blank line. The blank applies before a `return` or `throw` too, even in a short method.
 
-Put a blank line before a `return`, except when it is the only line in its block, or when it follows one or two short statements. A braceless loop in a very short block may return on the next line. A braced loop may not.
+`if` / `else` (including `else if`), `try` / `catch` / `finally`, and `do` / `while` stay joined. The blank line comes after the whole construct.
+
+A braceless one-line `if`, `for`, or `while` follows the same grouping. Put a blank line after it when the next line is a new step. Keep that blank when the body is one line.
+
+```java
+for (double n : xyz)
+    length += n * n;
+
+length = Math.sqrt(length);
+```
+
+A guard is an `if` with a single `return`, `throw`, `break`, or `continue`. Guards stay together only when they are the same kind of check and no work sits between them: several null checks, or an `if` / `else` pair. Put a blank line after a guard when the next line does work, when the next check is a different kind of early-out, and before a final fallback `return` or `throw`.
+
+```java
+if (cmd == null)
+    throw unknown(op);
+
+switch (cmd)
+{
+```
+
+```java
+if ((bits & 0x200) == 0)
+    return bits;
+
+return bits - 0x400;
+```
+
+Put a blank line before a `return` or `throw`, except when it is the only statement in its block, or the immediate result of one or two short statements in the same step. A braceless loop that fills the returned value, then the `return`, is that same step. Any other prior loop, guard, or braced block is a completed step, so keep the blank.
+
+```java
+Build b = new Build(textures);
+for (Mesh mesh : model)
+    b.addMesh(mesh);
+
+return b.finish(model.getName());
+```
+
+Successive optional sections of a builder or assembled document are stages. Put a blank line between them.
+
+```java
+if (!materials.isEmpty())
+    sb.append(materials);
+
+if (!glTextures.isEmpty())
+{
+    sb.append(glTextures);
+    sb.append(images);
+}
+```
 
 A chained call counts as one statement. In a test, arrange, act, and assert are steps, and consecutive asserts stay together.
 
 Leave one blank line between methods. The formatter preserves a blank line that is already there and will not insert one you forgot.
-
-```java
-int width = reader.readUnsignedShort();
-int height = reader.readUnsignedShort();
-
-byte[] pixels = new byte[width * height];
-reader.readFully(pixels);
-```
 
 ## Methods and tests
 
