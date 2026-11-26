@@ -36,4 +36,5 @@ jobs:
           QUALITY_BASE: origin/${{ github.base_ref || 'main' }}
           QUALITY_MODE: ${{ github.event_name == 'pull_request' && 'changed' || 'full' }}
         # Tests use HexFormat, so 17 is the floor. The sources still target 8.
+        # Central 429 retries are in .mvn/maven.config.
         run: scripts/quality/mutate.sh

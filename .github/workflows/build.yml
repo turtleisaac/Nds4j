@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 # A branch that gets pushed twice in quick succession only needs the newer run.
@@ -41,6 +41,7 @@ jobs:
       - name: Build and test
         # Tests needing a retail ROM skip rather than fail, so no ROM is required here.
         # See TestRoms: pass -Drom.dir to run them locally.
+        # Central 429 retries are in .mvn/maven.config.
         run: mvn -B -ntp verify
 
       - name: Upload test reports
