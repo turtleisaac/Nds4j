@@ -41,14 +41,15 @@ import java.util.List;
  * a self-check, a model's decoded bounding box should match the box its header declares:
  * {@link #getDecodedBoundingBox()} / {@link #getHeaderBoundingBox()} expose both, and
  * {@link #isSingleNode()} reports whether a model even has a multi-node skeleton. This lands ~96% of
- * all retail models exactly; the remainder use segment-scale-compensate skeletons or billboard /
- * skinning render commands whose final pose a static (bind-pose) decode can't reproduce &mdash; those
- * are driven by a separate animation file (NSBCA and friends) layered on top.
+ * all retail models exactly. Maya and envelope models are placed by the SBC matrix stack
+ * ({@code sbc.c}); billboard nodes are flagged for a viewer and are not turned toward a camera here.
  */
 public class Model
 {
     private final String name;
     private final double posScale;
+    private final double invPosScale;
+    private final boolean maya;
     // Vertex/triangle/quad totals the model header declares. Used to validate the interpreter: the
     // number of vertices emitted while walking the display lists must equal expectedVertexCount.
     private final int expectedVertexCount;
@@ -66,10 +67,16 @@ public class Model
     // True if the SBC uses billboard (BB/BBY) or skinning (NODEMIX) commands: the final pose is
     // camera- or blend-dependent, so a static bind-pose decode legitimately can't reproduce it.
     private boolean dynamicPose;
-    boolean usesMtxScale; // set if any shape's display list contains an MTX_SCALE (op 0x1B) command
+    boolean usesMtxScale; // set if any shape's display list contains an MTX_SCALE command
     // Per-node billboard flag (BB/BBY), for inspection/rendering. A billboard node's geometry faces the
     // camera at runtime; a static decode leaves it at its authored orientation.
     private boolean[] billboardNode;
+    private boolean[] yBillboard;
+    private byte[] sbcBytes;
+    private boolean envelopeCmd;
+    private boolean stackPose;
+    private double[][] invBind;
+    private StackPose.Frame bindFrame;
     // Bind-pose world translation/scale per node (the billboard pivot and its accumulated scale).
     private double[][] bindWorldTranslation;
     private double[][] bindWorldScale;
@@ -78,9 +85,14 @@ public class Model
     {
         this.name = name;
 
+        MemBuf.MemBufReader model = MemBuf.create(mdl0).reader();
         int ofsSbc = (int) readU32(mdl0, modelStart + 4);
         int ofsMat = (int) readU32(mdl0, modelStart + 8);
         int ofsShp = (int) readU32(mdl0, modelStart + 12);
+        model.setPosition(modelStart);
+        int modelSize = model.readInt();
+        model.setPosition(modelStart + 16);
+        int ofsEvp = model.readInt();
 
         // model header (NNS_G3dModelInfo)
         int info = modelStart + 0x14;
@@ -88,6 +100,14 @@ public class Model
         int matCount = mdl0[info + 4] & 0xFF;
         int shapeCountHeader = mdl0[info + 5] & 0xFF;
         posScale = readU32(mdl0, info + 8) / 4096.0;
+        model.setPosition(info + 12);
+        invPosScale = model.readInt() / 4096.0;
+        model.setPosition(info + 1);
+        maya = model.readByte() == 1;
+
+        if (ofsEvp != 0)
+            invBind = readInvBind(model, modelStart + ofsEvp, modelStart + modelSize, nodeCount, mdl0.length);
+
         expectedVertexCount = readU16(mdl0, info + 16);
         expectedTriangleCount = readU16(mdl0, info + 20);
         expectedQuadCount = readU16(mdl0, info + 22);
@@ -130,26 +150,34 @@ public class Model
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
         // 16-byte shape struct that points at its display list. The dictionary is authoritative.
         int shapeSet = modelStart + ofsShp;
-        MemBuf buf = MemBuf.create(mdl0);
-        MemBuf.MemBufReader reader = buf.reader();
-        reader.setPosition(shapeSet);
-        G3dDictionary shapeDict = new G3dDictionary(reader);
+        model.setPosition(shapeSet);
+        G3dDictionary shapeDict = new G3dDictionary(model);
 
         for (int i = 0; i < shapeDict.size(); i++)
         {
             int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(i), 0);
-            int dlOffset = (int) readU32(mdl0, shapeStruct + 8);  // relative to the shape struct
+            model.setPosition(shapeStruct + 4);
+            if ((model.readUInt32() & 8) != 0)
+                envelopeCmd = true;
+
+            int dlOffset = (int) readU32(mdl0, shapeStruct + 8); // relative to the shape struct
             int dlSize = (int) readU32(mdl0, shapeStruct + 12);
             Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
+
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
             mesh.nodeIndex = node;
             mesh.rawPositions = mesh.positions.clone(); // pre-placement vertices, kept for re-posing
             Srt world = (node >= 0 && node < nodeWorld.length) ? nodeWorld[node] : null;
             transformInPlace(mesh.positions, world, posScale);
             mesh.material = (i < shapeMaterial.length && shapeMaterial[i] >= 0 && shapeMaterial[i] < materials.size())
-                    ? materials.get(shapeMaterial[i]) : null;
+                    ? materials.get(shapeMaterial[i])
+                    : null;
             meshes.add(mesh);
         }
+
+        stackPose = maya || envelopeCmd;
+        if (stackPose)
+            bindFrame = playStack(null, 0, true);
     }
 
     // A node's local placement as the NNS renderer keeps it: translation, per-axis scale and a 3x3
@@ -159,16 +187,24 @@ public class Model
     // ({@code v' = v * r}), matching the reference {@code renderer.TransfMatrix}.
     private static final class Srt
     {
-        final double[] t;      // translation (x,y,z), model units
-        final double[] s;      // per-axis scale
-        final double[] r;      // 3x3 rotation, row-major
+        final double[] t; // translation (x,y,z), model units
+        final double[] s; // per-axis scale
+        final double[] r; // 3x3 rotation, row-major
 
-        Srt(double[] t, double[] s, double[] r) { this.t = t; this.s = s; this.r = r; }
+        Srt(double[] t, double[] s, double[] r)
+        {
+            this.t = t;
+            this.s = s;
+            this.r = r;
+        }
 
-        static Srt identity() { return new Srt(new double[]{0, 0, 0}, new double[]{1, 1, 1}, IDENT.clone()); }
+        static Srt identity()
+        {
+            return new Srt(new double[] { 0, 0, 0 }, new double[] { 1, 1, 1 }, IDENT.clone());
+        }
     }
 
-    private static final double[] IDENT = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    private static final double[] IDENT = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 
     // Parses each node's local transform (NNS node data): u16 flags, fx16 rotation[0][0], then optional
     // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form),
@@ -181,56 +217,122 @@ public class Model
         int count = d[nodeSet + 1] & 0xFF;
         int recordsOffset = nodeSet + 2 + 10 + count * 4 + 4; // dict header + patricia + elemSize/ofsData
         Srt[] local = new Srt[count];
+
         for (int n = 0; n < count; n++)
         {
             int p = nodeSet + (int) readU32(d, recordsOffset + n * 4);
-            int flags = readU16(d, p); p += 2;
-            double r00 = (short) readU16(d, p) / 4096.0; p += 2;
-            double[] t = {0, 0, 0};
-            double[] r = {r00, 0, 0, 0, 1, 0, 0, 0, 1};
-            double[] s = {1, 1, 1};
-            if ((flags & 0x1) == 0) { t[0] = readFx32(d, p); t[1] = readFx32(d, p + 4); t[2] = readFx32(d, p + 8); p += 12; }
-            if ((flags & 0x2) == 0)
-            {
-                if ((flags & 0x8) != 0)
-                {
-                    // Pivot-compressed rotation: two values fill a 2x2 minor with a +/-1 pivot cell. The
-                    // pivot index is flags bits 4-7; sign flags are bits 8 (pivot -1), 9 (negate c),
-                    // 10 (negate d). This is the NNS getPivotMatrix construction.
-                    double av = readFx16(d, p), bv = readFx16(d, p + 2); p += 4;
-                    double c = (flags & 0x200) != 0 ? -bv : bv;
-                    double dd = (flags & 0x400) != 0 ? -av : av;
-                    double one = (flags & 0x100) != 0 ? -1.0 : 1.0;
-                    int sel = (flags >> 4) & 0xF;
-                    if (sel <= 8)
-                    {
-                        int row = sel / 3, col = sel % 3;
-                        double[] arr = {av, bv, c, dd};
-                        int k = 0;
-                        for (int ii = 0; ii < 3; ii++)
-                            for (int jj = 0; jj < 3; jj++)
-                                r[ii * 3 + jj] = (jj == col || ii == row) ? 0 : arr[k++];
-                        r[row * 3 + col] = one;
-                    }
-                }
-                else
-                {
-                    r[1] = readFx16(d, p);     r[2] = readFx16(d, p + 2);  r[3] = readFx16(d, p + 4);
-                    r[4] = readFx16(d, p + 6); r[5] = readFx16(d, p + 8);  r[6] = readFx16(d, p + 10);
-                    r[7] = readFx16(d, p + 12);r[8] = readFx16(d, p + 14); p += 16;
-                }
-            }
-            if ((flags & 0x4) == 0) { s[0] = readFx32(d, p); s[1] = readFx32(d, p + 4); s[2] = readFx32(d, p + 8); /* + unused 3x fx32 inverse */ }
+            int flags = readU16(d, p);
+            p += 2;
+            double r00 = (short) readU16(d, p) / 4096.0;
+            p += 2;
+
+            double[] t = { 0, 0, 0 };
+            double[] r = { r00, 0, 0, 0, 1, 0, 0, 0, 1 };
+            double[] s = { 1, 1, 1 };
+
+            p = readVec3(d, p, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_TRANS_ZERO.mask) != 0, t);
+            p = readRotation(d, p, flags, r);
+            readVec3(d, p, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SCALE_ONE.mask) != 0, s);
+
             local[n] = new Srt(t, s, r);
         }
+
         return local;
+    }
+
+    /**
+     * @param d model bytes
+     * @param p cursor on the optional vector
+     * @param omit true when the record stores nothing because the vector is the identity
+     * @param dest translation or scale, written when it is stored
+     * @return cursor after the vector
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     */
+    private static int readVec3(byte[] d, int p, boolean omit, double[] dest)
+    {
+        if (omit)
+            return p;
+
+        dest[0] = readFx32(d, p);
+        dest[1] = readFx32(d, p + 4);
+        dest[2] = readFx32(d, p + 8);
+
+        return p + 12;
+    }
+
+    /**
+     * @param d model bytes
+     * @param p cursor on the optional rotation
+     * @param flags node flag word
+     * @param r rotation, with {@code r[0]} already read
+     * @return cursor after the rotation
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     */
+    private static int readRotation(byte[] d, int p, int flags, double[] r)
+    {
+        if ((flags & NodeSrtFlag.NNS_G3D_SRTFLAG_ROT_ZERO.mask) != 0)
+            return p;
+
+        if ((flags & NodeSrtFlag.NNS_G3D_SRTFLAG_PIVOT_EXIST.mask) != 0)
+            return readPivot(d, p, flags, r);
+
+        r[1] = readFx16(d, p);
+        r[2] = readFx16(d, p + 2);
+        r[3] = readFx16(d, p + 4);
+        r[4] = readFx16(d, p + 6);
+        r[5] = readFx16(d, p + 8);
+        r[6] = readFx16(d, p + 10);
+        r[7] = readFx16(d, p + 12);
+        r[8] = readFx16(d, p + 14);
+
+        return p + 16;
+    }
+
+    /**
+     * Pivot-compressed rotation: two values fill a 2x2 minor with a +/-1 pivot cell. The pivot index is
+     * flag bits 4-7.
+     * @param d model bytes
+     * @param p cursor on the two pivot values
+     * @param flags node flag word
+     * @param r rotation to fill
+     * @return cursor after the two values
+     * @see "NitroSystem g3d/src/sbc.c getPivotMatrix"
+     */
+    private static int readPivot(byte[] d, int p, int flags, double[] r)
+    {
+        double av = readFx16(d, p);
+        double bv = readFx16(d, p + 2);
+        double c = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVC.mask) != 0 ? -bv : bv;
+        double dd = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVD.mask) != 0 ? -av : av;
+        double one = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_PIVOT_MINUS.mask) != 0 ? -1.0 : 1.0;
+        int sel = (flags >> 4) & 0xF;
+
+        if (sel <= 8)
+        {
+            int row = sel / 3;
+            int col = sel % 3;
+            double[] arr = { av, bv, c, dd };
+            int k = 0;
+
+            for (int ii = 0; ii < 3; ii++)
+            {
+                for (int jj = 0; jj < 3; jj++)
+                {
+                    r[ii * 3 + jj] = (jj == col || ii == row) ? 0 : arr[k++];
+                }
+            }
+
+            r[row * 3 + col] = one;
+        }
+
+        return p + 4;
     }
 
     // Walks the SBC render-command stream to record each node's parent (for the world-matrix hierarchy)
     // and which node is current when each shape is drawn, then resolves node world matrices. Commands:
     // opcode = byte & 0x1F, store/restore flags in the high bits; every command's operand length is
     // consumed so the walk stays in sync. Operand widths follow NNS exactly: NODEDESC is nodeId, parentId,
-    // opt, then +1 if the 0x20 (store) flag is set and +1 if the 0x40 (restore) flag is set; BB/BBY are
+    // opt, then +1 if NNS_G3D_SBCFLG_001 (store) is set and +1 if NNS_G3D_SBCFLG_010 (restore) is set; BB/BBY are
     // nodeId + the same optional store/restore bytes; NODEMIX is 2 + 3*count; CALLDL is 8; etc.
     // Parses the material set (NNS_G3dResMat): a dictionary of named materials, each pointing at a
     // material struct, plus two dictionaries mapping texture names and palette names to the materials
@@ -246,6 +348,7 @@ public class Model
         MemBuf.MemBufReader r = buf.reader();
         r.setPosition(matSet + 4);
         G3dDictionary matDict = new G3dDictionary(r);
+
         for (int i = 0; i < matDict.size(); i++)
         {
             // The material struct's texImageParam carries the wrap/flip bits, but its size field is left
@@ -254,10 +357,12 @@ public class Model
             // bound texture's own dimensions.
             int structOfs = matSet + (int) readU32(matDict.getRecord(i), 0);
             long texImageParam = readU32(d, structOfs + 0x14);
+
             boolean repeatS = (texImageParam & (1 << 16)) != 0;
             boolean repeatT = (texImageParam & (1 << 17)) != 0;
             boolean flipS = (texImageParam & (1 << 18)) != 0;
             boolean flipT = (texImageParam & (1 << 19)) != 0;
+
             materials.add(new Material(matDict.getName(i), repeatS, repeatT, flipS, flipT));
         }
 
@@ -274,20 +379,25 @@ public class Model
         MemBuf.MemBufReader r = buf.reader();
         r.setPosition(dictStart);
         G3dDictionary dict = new G3dDictionary(r);
+
         for (int i = 0; i < dict.size(); i++)
         {
             long entry = readU32(dict.getRecord(i), 0);
             if ((entry & 0x01000000L) != 0)
                 continue;
+
             int listOfs = (int) (entry & 0xFFFF);
             int listLen = (int) ((entry >> 16) & 0xFF);
+
             for (int k = 0; k < listLen; k++)
             {
                 int matIdx = d[matSet + listOfs + k] & 0xFF;
                 if (matIdx < materials.size())
                 {
-                    if (texture) materials.get(matIdx).textureName = dict.getName(i);
-                    else         materials.get(matIdx).paletteName = dict.getName(i);
+                    if (texture)
+                        materials.get(matIdx).textureName = dict.getName(i);
+                    else
+                        materials.get(matIdx).paletteName = dict.getName(i);
                 }
             }
         }
@@ -299,62 +409,276 @@ public class Model
         int[] parent = new int[count];
         java.util.Arrays.fill(parent, -1);
         billboardNode = new boolean[count];
+        yBillboard = new boolean[count];
         int[] stackNode = new int[64];
-        int current = 0;
-        int currentMat = -1;
-        int p = sbc;
-        boolean stop = false;
-        while (p < d.length && !stop)
+        int[] cur = new int[] { 0, -1 };
+
+        MemBuf.MemBufReader commands = MemBuf.create(d).reader();
+        commands.setPosition(sbc);
+        while (commands.getPosition() < d.length)
         {
-            int b = d[p++] & 0xFF;
-            int op = b & 0x1F, flags = b & 0xE0;
-            switch (op)
-            {
-                case 0x00: break;                                   // NOP
-                case 0x01: stop = true; break;                      // RET
-                case 0x02: current = d[p] & 0xFF; p += 2; break;    // NODE nodeId, visibility
-                case 0x03: current = stackNode[d[p++] & 0x1F]; break; // MTX (restore) - 5-bit stack slot, matching the store paths
-                case 0x04: currentMat = d[p++] & 0xFF; break; // MAT matId (flag bits are hints, not extra operands)
-                case 0x05: { int shp = d[p++] & 0xFF; if (shp < shapeCount) { shapeNode[shp] = current; shapeMaterial[shp] = currentMat; } break; } // SHP
-                case 0x06: {                                        // NODEDESC nodeId, parentId, opt (+ store/restore slots)
-                    int nid = d[p++] & 0xFF, par = d[p++] & 0xFF;
-                    p++;                                            // opt byte (S/P bits) - not needed for placement
-                    if (nid < count) { parent[nid] = par < count ? par : -1; current = nid; }
-                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; } // store to stack
-                    if ((flags & 0x40) != 0) p++;                   // restore-source slot (SrcIdx)
-                    break;
-                }
-                case 0x07:                                          // BB  (billboard)   nodeId (+ store/restore slots)
-                case 0x08: {                                        // BBY (billboard-Y) nodeId (+ store/restore slots)
-                    dynamicPose = true;                             // camera-facing; a static decode can't place it
-                    int nid = d[p++] & 0xFF; current = nid;
-                    if (nid < count) billboardNode[nid] = true;
-                    if ((flags & 0x20) != 0) { int dst = d[p++] & 0x1F; if (dst < stackNode.length) stackNode[dst] = nid; }
-                    if ((flags & 0x40) != 0) p++;
-                    break;
-                }
-                case 0x09: { dynamicPose = true; int terms = d[p + 1] & 0xFF; p += 2 + terms * 3; break; } // NODEMIX (skinning)
-                case 0x0A: p += 8; break;                           // CALLDL
-                case 0x0B: break;                                   // POSSCALE
-                case 0x0C: p += 2; break;                           // ENVMAP
-                case 0x0D: p += 2; break;                           // PRJMAP
-                default: stop = true; break;                        // an unmodelled command - stop rather than desync
-            }
+            int b = commands.readByte();
+
+            SbcCommand cmd = SbcCommand.from(b);
+            if (cmd == SbcCommand.NNS_G3D_SBC_RET)
+                break;
+
+            int next = cmd != null && cmd.code < SbcCommand.NNS_G3D_SBC_BBY.code
+                    ? sbcLow(commands, cmd, b, cur, parent, stackNode, count, shapeNode, shapeMaterial, shapeCount)
+                    : sbcHigh(commands, cmd, b, cur, stackNode, count);
+            if (next < 0)
+                break;
+
+            commands.setPosition(next);
         }
+
+        int p = commands.getPosition();
+        sbcBytes = java.util.Arrays.copyOfRange(d, sbc, Math.min(p, d.length));
         nodeParent = parent; // retained so an animation can recompose the hierarchy
+
         Srt[] world = new Srt[count];
         for (int n = 0; n < count; n++)
             world[n] = resolveWorld(n, parent, nodeLocal, world);
+
         return world;
+    }
+
+    /**
+     * @param commands SBC reader, on the operand
+     * @param cmd opcode below {@link SbcCommand#NNS_G3D_SBC_BBY}
+     * @param raw the command byte, including flag bits
+     * @param cur {@code {node, material}}
+     * @param parent parent index per node
+     * @param stackNode node stored in each stack slot
+     * @param count node count
+     * @param shapeNode shape-to-node map
+     * @param shapeMaterial shape-to-material map
+     * @param shapeCount shape count
+     * @return the next opcode cursor
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNS_G3D_SBC_NODE"
+     */
+    private int sbcLow(MemBuf.MemBufReader commands, SbcCommand cmd, int raw, int[] cur, int[] parent, int[] stackNode,
+            int count, int[] shapeNode, int[] shapeMaterial, int shapeCount)
+    {
+        switch (cmd)
+        {
+            case NNS_G3D_SBC_NODE:
+                return storeByte(commands, cur, 0, 2);
+            case NNS_G3D_SBC_MTX:
+                return sbcMtx(commands, cur, stackNode);
+            case NNS_G3D_SBC_MAT:
+                return storeByte(commands, cur, 1, 1);
+            case NNS_G3D_SBC_SHP:
+                return sbcShape(commands, cur, shapeNode, shapeMaterial, shapeCount);
+            case NNS_G3D_SBC_NODEDESC:
+                return sbcNodeDesc(commands, raw, cur, parent, stackNode, count);
+            case NNS_G3D_SBC_BB:
+                return sbcBillboard(commands, raw, cur, stackNode, count, false);
+            default:
+                return commands.getPosition();
+        }
+    }
+
+    /**
+     * @param d SBC bytes
+     * @param p operand cursor
+     * @param op opcode of {@link SbcCommand#NNS_G3D_SBC_BBY} or higher
+     * @param flags SBC flag bits
+     * @param cur {@code {node, material}}
+     * @param stackNode node stored in each stack slot
+     * @param count node count
+     * @return the next opcode cursor, or -1 to stop
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNS_G3D_SBC_BBY"
+     */
+    int sbcHigh(byte[] d, int p, int op, int flags, int[] cur, int[] stackNode, int count)
+    {
+        MemBuf.MemBufReader commands = MemBuf.create(d).reader();
+        commands.setPosition(p);
+        return sbcHigh(commands, SbcCommand.from(op), flags, cur, stackNode, count);
+    }
+
+    /**
+     * @param commands SBC reader, on the operand
+     * @param cmd opcode of {@link SbcCommand#NNS_G3D_SBC_BBY} or higher, or null when it is not defined
+     * @param flags SBC flag bits
+     * @param cur {@code {node, material}}
+     * @param stackNode node stored in each stack slot
+     * @param count node count
+     * @return the next opcode cursor, or -1 to stop
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNS_G3D_SBC_BBY"
+     */
+    private int sbcHigh(MemBuf.MemBufReader commands, SbcCommand cmd, int flags, int[] cur, int[] stackNode, int count)
+    {
+        if (cmd == SbcCommand.NNS_G3D_SBC_BBY)
+            return sbcBillboard(commands, flags, cur, stackNode, count, true);
+
+        if (cmd == SbcCommand.NNS_G3D_SBC_NODEMIX)
+            return sbcMix(commands);
+
+        if (cmd == SbcCommand.NNS_G3D_SBC_CALLDL)
+            return skip(commands, 8);
+
+        if (cmd == SbcCommand.NNS_G3D_SBC_POSSCALE)
+            return commands.getPosition();
+
+        if (cmd == SbcCommand.NNS_G3D_SBC_ENVMAP || cmd == SbcCommand.NNS_G3D_SBC_PRJMAP)
+            return skip(commands, 2);
+
+        return -1;
+    }
+
+    /**
+     * @param commands SBC reader
+     * @param n operand bytes that this command does not decode
+     * @return the cursor after those bytes
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNS_G3D_SBC_PRJMAP"
+     */
+    private static int skip(MemBuf.MemBufReader commands, int n)
+    {
+        commands.skip(n);
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on the id
+     * @param cur node and material slots
+     * @param slot which entry of {@code cur} to write
+     * @param skip bytes to advance, including the id
+     * @return the cursor after the id
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODE"
+     */
+    private static int storeByte(MemBuf.MemBufReader commands, int[] cur, int slot, int skip)
+    {
+        cur[slot] = commands.readByte();
+
+        if (skip > 1)
+            commands.skip(skip - 1);
+
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on the stack slot
+     * @param cur current node slot
+     * @param stackNode stack slots
+     * @return cursor after the slot byte
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_MTX"
+     */
+    private static int sbcMtx(MemBuf.MemBufReader commands, int[] cur, int[] stackNode)
+    {
+        cur[0] = stackNode[commands.readByte() & 0x1F];
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on the shape id
+     * @param cur current node and material
+     * @param shapeNode shape-to-node map
+     * @param shapeMaterial shape-to-material map
+     * @param shapeCount shape count
+     * @return cursor after the shape id
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_SHP"
+     */
+    private static int sbcShape(MemBuf.MemBufReader commands, int[] cur, int[] shapeNode, int[] shapeMaterial,
+            int shapeCount)
+    {
+        int shp = commands.readByte();
+        if (shp < shapeCount)
+        {
+            shapeNode[shp] = cur[0];
+            shapeMaterial[shp] = cur[1];
+        }
+
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on the node id
+     * @param flags store and restore bits
+     * @param cur current node slot
+     * @param parent parent index per node
+     * @param stackNode stack slots
+     * @param count node count
+     * @return cursor after the NODEDESC operands
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEDESC"
+     */
+    private static int sbcNodeDesc(MemBuf.MemBufReader commands, int flags, int[] cur, int[] parent, int[] stackNode,
+            int count)
+    {
+        int nid = commands.readByte();
+        int par = commands.readByte();
+        commands.readByte();
+
+        if (nid < count)
+        {
+            parent[nid] = par < count ? par : -1;
+            cur[0] = nid;
+        }
+
+        if ((flags & SbcFlag.NNS_G3D_SBCFLG_001.mask) != 0)
+            stackNode[commands.readByte() & 0x1F] = nid;
+        if ((flags & SbcFlag.NNS_G3D_SBCFLG_010.mask) != 0)
+            commands.readByte();
+
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on the node id
+     * @param flags store and restore bits
+     * @param cur current node slot
+     * @param stackNode stack slots
+     * @param count node count
+     * @param yAxis true for {@code BBY}
+     * @return cursor after the billboard operands
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private int sbcBillboard(MemBuf.MemBufReader commands, int flags, int[] cur, int[] stackNode, int count,
+            boolean yAxis)
+    {
+        dynamicPose = true;
+        int nid = commands.readByte();
+        cur[0] = nid;
+
+        if (nid < count)
+        {
+            billboardNode[nid] = true;
+            if (yAxis)
+                yBillboard[nid] = true;
+        }
+
+        if ((flags & SbcFlag.NNS_G3D_SBCFLG_001.mask) != 0)
+            stackNode[commands.readByte() & 0x1F] = nid;
+        if ((flags & SbcFlag.NNS_G3D_SBCFLG_010.mask) != 0)
+            commands.readByte();
+
+        return commands.getPosition();
+    }
+
+    /**
+     * @param commands SBC reader, on idxMtxDest
+     * @return cursor after the NODEMIX term list
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
+     */
+    private int sbcMix(MemBuf.MemBufReader commands)
+    {
+        dynamicPose = true;
+        envelopeCmd = true;
+
+        commands.readByte();
+        int terms = commands.readByte();
+        return commands.getPosition() + terms * 3;
     }
 
     private Srt resolveWorld(int n, int[] parent, Srt[] local, Srt[] world)
     {
         if (world[n] != null)
             return world[n];
+
         world[n] = local[n]; // guard against cycles
         if (parent[n] < 0 || parent[n] == n)
             return local[n];
+
         Srt pw = resolveWorld(parent[n], parent, local, world);
         world[n] = compose(pw, local[n]);
         return world[n];
@@ -368,20 +692,22 @@ public class Model
     // and the scales multiply componentwise.
     private static Srt compose(Srt parent, Srt child)
     {
-        double[] s = {child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2]};
-        double[] ts = {child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2]};
+        double[] s = { child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2] };
+        double[] ts = { child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2] };
+
         double[] tr = rowMul(parent.r, ts);
-        double[] t = {parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2]};
+        double[] t = { parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2] };
+
         return new Srt(t, s, matMul(child.r, parent.r));
     }
 
     // Row-vector times matrix: out = v * r (out[i] = sum_j v[j] * r[j][i]), r row-major.
     private static double[] rowMul(double[] r, double[] v)
     {
-        return new double[]{
+        return new double[] {
                 v[0] * r[0] + v[1] * r[3] + v[2] * r[6],
                 v[0] * r[1] + v[1] * r[4] + v[2] * r[7],
-                v[0] * r[2] + v[1] * r[5] + v[2] * r[8]};
+                v[0] * r[2] + v[1] * r[5] + v[2] * r[8] };
     }
 
     // 3x3 * 3x3 (row-major): out[i][j] = sum_k a[i][k] * b[k][j].
@@ -394,8 +720,10 @@ public class Model
                 double s = 0;
                 for (int k = 0; k < 3; k++)
                     s += a[i * 3 + k] * b[k * 3 + j];
+
                 r[i * 3 + j] = s;
             }
+
         return r;
     }
 
@@ -406,12 +734,14 @@ public class Model
     private static void transformInPlace(float[] positions, Srt m, double posScale)
     {
         Srt w = (m == null) ? Srt.identity() : m;
+
         for (int i = 0; i < positions.length; i += 3)
         {
             double x = positions[i] * w.s[0], y = positions[i + 1] * w.s[1], z = positions[i + 2] * w.s[2];
             double rx = x * w.r[0] + y * w.r[3] + z * w.r[6];
             double ry = x * w.r[1] + y * w.r[4] + z * w.r[7];
             double rz = x * w.r[2] + y * w.r[5] + z * w.r[8];
+
             positions[i] = (float) (rx * posScale + w.t[0]);
             positions[i + 1] = (float) (ry * posScale + w.t[1]);
             positions[i + 2] = (float) (rz * posScale + w.t[2]);
@@ -429,102 +759,24 @@ public class Model
 
         double[] vtx = new double[3];
         double[] uv = new double[2];
-        int primitive = -1;
+        int[] primitive = { -1 };
         List<Integer> primVerts = new ArrayList<>();
 
         int pos = dlStart;
         int end = dlStart + dlSize;
         while (pos + 4 <= end)
         {
-            int[] ops = {d[pos] & 0xFF, d[pos + 1] & 0xFF, d[pos + 2] & 0xFF, d[pos + 3] & 0xFF};
+            int[] ops = { d[pos] & 0xFF, d[pos + 1] & 0xFF, d[pos + 2] & 0xFF, d[pos + 3] & 0xFF };
             pos += 4;
+
             for (int op : ops)
             {
-                switch (op)
-                {
-                    case 0x00: break;                                   // NOP
-                    case 0x10: case 0x14: case 0x20: case 0x21:         // MTX_MODE / MTX_RESTORE / COLOR / NORMAL
-                    case 0x29: case 0x2A: case 0x2B:                    // POLYGON_ATTR / TEXIMAGE_PARAM / PLTT_BASE
-                        pos += 4; break;
-                    case 0x1B: usesMtxScale = true; pos += 12; break;    // MTX_SCALE (3x fx32): consumed, not
-                        // applied. This is not a gap: the reference jar's MTX_SCALE.execute() is a no-op, and
-                        // the placement oracle agrees - actually multiplying the 32 retail MTX_SCALE models'
-                        // vertices by it regresses them (9/32 in their header box -> 0/32), because the DL
-                        // magnify is redundant with the header posScale we already apply in transformInPlace.
-                        // The remaining static-pose misses among these models are the usual SSC / header-box
-                        // "TODO verify" cases (see the note at §3), not MTX_SCALE. Verified empirically; §5.8.
-                    case 0x22: {                                        // TEXCOORD (s,t as 1.11.4 fixed)
-                        long p = readU32(d, pos); pos += 4;
-                        uv[0] = (short) (p & 0xFFFF) / 16.0;
-                        uv[1] = (short) ((p >> 16) & 0xFFFF) / 16.0;
-                        break;
-                    }
-                    case 0x23: {                                        // VTX_16
-                        long p1 = readU32(d, pos), p2 = readU32(d, pos + 4); pos += 8;
-                        vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
-                        vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
-                        vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x24: {                                        // VTX_10 (3x10-bit, 1.3.6 fixed)
-                        long p = readU32(d, pos); pos += 4;
-                        vtx[0] = signed10((int) p) / 64.0;
-                        vtx[1] = signed10((int) (p >> 10)) / 64.0;
-                        vtx[2] = signed10((int) (p >> 20)) / 64.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x25: {                                        // VTX_XY
-                        long p = readU32(d, pos); pos += 4;
-                        vtx[0] = (short) (p & 0xFFFF) / 4096.0;
-                        vtx[1] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x26: {                                        // VTX_XZ
-                        long p = readU32(d, pos); pos += 4;
-                        vtx[0] = (short) (p & 0xFFFF) / 4096.0;
-                        vtx[2] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x27: {                                        // VTX_YZ
-                        long p = readU32(d, pos); pos += 4;
-                        vtx[1] = (short) (p & 0xFFFF) / 4096.0;
-                        vtx[2] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x28: {                                        // VTX_DIFF (3x10-bit deltas, 1.3.12 fixed)
-                        long p = readU32(d, pos); pos += 4;
-                        vtx[0] += signed10((int) p) / 4096.0;
-                        vtx[1] += signed10((int) (p >> 10)) / 4096.0;
-                        vtx[2] += signed10((int) (p >> 20)) / 4096.0;
-                        emit(vtx, uv, positions, texcoords, primVerts);
-                        break;
-                    }
-                    case 0x40: {                                        // BEGIN_VTXS
-                        int p = (int) readU32(d, pos); pos += 4;
-                        if (primitive >= 0)
-                            triangulate(primitive, primVerts, triangles);
-                        primitive = p & 3;
-                        primVerts = new ArrayList<>();
-                        break;
-                    }
-                    case 0x41: break;                                   // END_VTXS
-                    default:
-                        // Every opcode a retail Gen IV display list uses is handled above (verified by
-                        // the 100%-vertex-count match). An unknown opcode means either a malformed
-                        // stream or a command whose parameter words we don't know to skip - continuing
-                        // would silently desync the whole stream, so fail loudly instead.
-                        throw new RuntimeException(String.format(
-                                "Unhandled display-list opcode 0x%02X at offset 0x%X in mesh %s", op, pos - 4, meshName));
-                }
+                pos = applyCommand(d, pos, op, vtx, uv, primitive, primVerts, positions, texcoords, triangles, meshName);
             }
         }
-        if (primitive >= 0)
-            triangulate(primitive, primVerts, triangles);
+
+        if (primitive[0] >= 0)
+            triangulate(primitive[0], primVerts, triangles);
 
         // Raw (pre-posScale) positions: posScale is applied together with the node placement in
         // transformInPlace, so scale/rotation/translation and posScale compose in the NNS vertex order.
@@ -538,19 +790,263 @@ public class Model
             uv2[i * 2] = texcoords.get(i)[0];
             uv2[i * 2 + 1] = texcoords.get(i)[1];
         }
+
         int[] idx = new int[triangles.size()];
         for (int i = 0; i < idx.length; i++)
             idx[i] = triangles.get(i);
+
         Mesh mesh = new Mesh(meshName, pos3, uv2, idx);
         mesh.rawDisplayList = java.util.Arrays.copyOfRange(d, dlStart, dlStart + dlSize);
         return mesh;
     }
 
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on this command's parameters
+     * @param op geometry opcode
+     * @param vtx running vertex
+     * @param uv running texcoord
+     * @param primitive current primitive type, or -1
+     * @param primVerts vertices of the open primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param triangles triangle indices
+     * @param meshName mesh name used when the opcode is unknown
+     * @return the cursor after the command
+     * @see "GBATEK DS 3D Video"
+     */
+    private int applyCommand(byte[] d, int pos, int op, double[] vtx, double[] uv, int[] primitive,
+            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords, List<Integer> triangles,
+            String meshName)
+    {
+        GeometryCommand cmd = GeometryCommand.from(op);
+        if (cmd == null || !cmd.inMesh)
+            throw unknownCommand(op, pos, meshName);
+
+        if (cmd.emitsVertex)
+            return readMeshVertex(cmd, d, pos, vtx, uv, primVerts, positions, texcoords);
+
+        return readMeshState(cmd, d, pos, uv, primitive, primVerts, triangles);
+    }
+
+    /**
+     * @param cmd a command that does not emit a vertex
+     * @param d display-list bytes
+     * @param pos cursor on the parameters
+     * @param uv running texcoord
+     * @param primitive current primitive type, or -1
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @return the cursor after the command
+     * @see "GBATEK DS 3D Video, MTX_SCALE"
+     */
+    private int readMeshState(GeometryCommand cmd, byte[] d, int pos, double[] uv, int[] primitive,
+            List<Integer> primVerts, List<Integer> triangles)
+    {
+        if (cmd == GeometryCommand.MTX_SCALE)
+            return readMeshScale(pos);
+
+        if (cmd == GeometryCommand.TEXCOORD)
+            return readMeshTexcoord(d, pos, uv);
+
+        if (cmd == GeometryCommand.BEGIN_VTXS)
+            return readMeshBegin(d, pos, primitive, primVerts, triangles);
+
+        if (cmd == GeometryCommand.NOP || cmd == GeometryCommand.END_VTXS)
+            return pos;
+
+        return pos + 4;
+    }
+
+    /**
+     * MTX_SCALE is consumed and not applied. The reference jar's MTX_SCALE.execute() is a no-op, and
+     * multiplying the retail MTX_SCALE models' vertices by it regresses them, because the display-list
+     * magnify repeats the header posScale applied in transformInPlace.
+     * @param pos cursor on the three scale words
+     * @return the cursor after those words
+     * @see "GBATEK DS 3D Video, MTX_SCALE"
+     */
+    private int readMeshScale(int pos)
+    {
+        usesMtxScale = true;
+        return pos + 12;
+    }
+
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on the texcoord word
+     * @param uv running texcoord
+     * @return the cursor after the word
+     * @see "GBATEK DS 3D Video, TEXCOORD"
+     */
+    private static int readMeshTexcoord(byte[] d, int pos, double[] uv)
+    {
+        long p = readU32(d, pos);
+
+        uv[0] = (short) (p & 0xFFFF) / 16.0;
+        uv[1] = (short) ((p >> 16) & 0xFFFF) / 16.0;
+        return pos + 4;
+    }
+
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on the primitive word
+     * @param primitive current primitive type, or -1
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @return the cursor after the word
+     * @see "GBATEK DS 3D Video, BEGIN_VTXS"
+     */
+    private static int readMeshBegin(byte[] d, int pos, int[] primitive, List<Integer> primVerts, List<Integer> triangles)
+    {
+        int p = (int) readU32(d, pos);
+
+        if (primitive[0] >= 0)
+            triangulate(primitive[0], primVerts, triangles);
+
+        primitive[0] = p & 3;
+        primVerts.clear();
+        return pos + 4;
+    }
+
+    /**
+     * @param cmd a vertex command
+     * @param d display-list bytes
+     * @param pos cursor on the vertex parameters
+     * @param vtx running vertex
+     * @param uv running texcoord
+     * @param primVerts vertices of the open primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @return the cursor after the vertex
+     * @see "GBATEK DS 3D Video, VTX_16"
+     */
+    private static int readMeshVertex(GeometryCommand cmd, byte[] d, int pos, double[] vtx, double[] uv,
+            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords)
+    {
+        switch (cmd)
+        {
+            case VTX_16:
+                return readVtx16(d, pos, vtx, uv, primVerts, positions, texcoords);
+            case VTX_10:
+                return readVtx10(d, pos, vtx, false, uv, primVerts, positions, texcoords);
+            case VTX_DIFF:
+                return readVtx10(d, pos, vtx, true, uv, primVerts, positions, texcoords);
+            case VTX_XY:
+                return readVtxPair(d, pos, vtx, 0, 1, uv, primVerts, positions, texcoords);
+            case VTX_XZ:
+                return readVtxPair(d, pos, vtx, 0, 2, uv, primVerts, positions, texcoords);
+            default:
+                return readVtxPair(d, pos, vtx, 1, 2, uv, primVerts, positions, texcoords);
+        }
+    }
+
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on the two vertex words
+     * @param vtx running vertex
+     * @param uv running texcoord
+     * @param primVerts vertices of the open primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @return the cursor after the vertex
+     * @see "GBATEK DS 3D Video, VTX_16"
+     */
+    private static int readVtx16(byte[] d, int pos, double[] vtx, double[] uv, List<Integer> primVerts,
+            List<float[]> positions, List<float[]> texcoords)
+    {
+        long p1 = readU32(d, pos);
+        long p2 = readU32(d, pos + 4);
+
+        vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
+        vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
+        vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
+
+        emit(vtx, uv, positions, texcoords, primVerts);
+        return pos + 8;
+    }
+
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on the packed word
+     * @param vtx running vertex
+     * @param delta true for {@link GeometryCommand#VTX_DIFF}, which adds to the running vertex
+     * @param uv running texcoord
+     * @param primVerts vertices of the open primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @return the cursor after the word
+     * @see "GBATEK DS 3D Video, VTX_10 and VTX_DIFF"
+     */
+    private static int readVtx10(byte[] d, int pos, double[] vtx, boolean delta, double[] uv, List<Integer> primVerts,
+            List<float[]> positions, List<float[]> texcoords)
+    {
+        long p = readU32(d, pos);
+        double k = delta ? 4096.0 : 64.0;
+        double x = signed10((int) p) / k;
+        double y = signed10((int) (p >> 10)) / k;
+        double z = signed10((int) (p >> 20)) / k;
+
+        if (delta)
+        {
+            vtx[0] += x;
+            vtx[1] += y;
+            vtx[2] += z;
+        }
+        else
+        {
+            vtx[0] = x;
+            vtx[1] = y;
+            vtx[2] = z;
+        }
+
+        emit(vtx, uv, positions, texcoords, primVerts);
+        return pos + 4;
+    }
+
+    /**
+     * @param d display-list bytes
+     * @param pos cursor on the packed word
+     * @param vtx running vertex
+     * @param first component index written from the low half
+     * @param second component index written from the high half
+     * @param uv running texcoord
+     * @param primVerts vertices of the open primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @return the cursor after the word
+     * @see "GBATEK DS 3D Video, VTX_XY, VTX_XZ and VTX_YZ"
+     */
+    private static int readVtxPair(byte[] d, int pos, double[] vtx, int first, int second, double[] uv,
+            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords)
+    {
+        long p = readU32(d, pos);
+
+        vtx[first] = (short) (p & 0xFFFF) / 4096.0;
+        vtx[second] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
+
+        emit(vtx, uv, positions, texcoords, primVerts);
+        return pos + 4;
+    }
+
+    /**
+     * @param op geometry opcode
+     * @param pos cursor just after the parameters already consumed
+     * @param meshName mesh that held the opcode
+     * @return the rejection
+     * @see "GBATEK DS 3D Video"
+     */
+    private static RuntimeException unknownCommand(int op, int pos, String meshName)
+    {
+        return new RuntimeException(String.format(
+                "Unhandled display-list opcode 0x%02X at offset 0x%X in mesh %s", op, pos - 4, meshName));
+    }
+
     private static void emit(double[] vtx, double[] uv, List<float[]> positions, List<float[]> texcoords, List<Integer> primVerts)
     {
         primVerts.add(positions.size());
-        positions.add(new float[]{(float) vtx[0], (float) vtx[1], (float) vtx[2]});
-        texcoords.add(new float[]{(float) uv[0], (float) uv[1]});
+        positions.add(new float[] { (float) vtx[0], (float) vtx[1], (float) vtx[2] });
+        texcoords.add(new float[] { (float) uv[0], (float) uv[1] });
     }
 
     // Converts a primitive's ordered vertices into triangle index triples. 0=separate triangles,
@@ -573,8 +1069,10 @@ public class Model
                 break;
             case 2:
                 for (int i = 2; i < n; i++)
-                    if ((i & 1) == 0) addTri(out, v.get(i - 2), v.get(i - 1), v.get(i));
-                    else addTri(out, v.get(i - 1), v.get(i - 2), v.get(i));
+                    if ((i & 1) == 0)
+                        addTri(out, v.get(i - 2), v.get(i - 1), v.get(i));
+                    else
+                        addTri(out, v.get(i - 1), v.get(i - 2), v.get(i));
                 break;
             case 3:
                 for (int i = 0; i + 3 < n; i += 2)
@@ -588,7 +1086,9 @@ public class Model
 
     private static void addTri(List<Integer> out, int a, int b, int c)
     {
-        out.add(a); out.add(b); out.add(c);
+        out.add(a);
+        out.add(b);
+        out.add(c);
     }
 
     /** @return this model's name (from the model dictionary) */
@@ -610,27 +1110,273 @@ public class Model
     }
 
     /**
+     * @param animation skeletal animation, or null for the bind pose
+     * @param frame frame index
+     * @param writeMeshes true to replace the cached mesh positions
+     * @return the stack frame
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private StackPose.Frame playStack(SkeletalAnimationSet.Animation animation, int frame, boolean writeMeshes)
+    {
+        double[][][] local = sampleLocals(animation, frame);
+
+        byte[][] dls = new byte[meshes.size()][];
+        float[][] raw = new float[meshes.size()][];
+        for (int i = 0; i < meshes.size(); i++)
+        {
+            dls[i] = meshes.get(i).rawDisplayList;
+            raw[i] = meshes.get(i).rawPositions;
+        }
+
+        StackPose.Frame played = StackPose.play(sbcBytes, maya, posScale, invPosScale, local[0], local[1], local[2],
+                invBind, dls, raw);
+
+        if (writeMeshes)
+            writePosed(played);
+
+        return played;
+    }
+
+    /**
+     * @param animation skeletal animation, or null for the bind locals
+     * @param frame frame index
+     * @return {@code {translation, rotation, scale}} per node
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private double[][][] sampleLocals(SkeletalAnimationSet.Animation animation, int frame)
+    {
+        int n = nodeLocals.length;
+        double[][] t = new double[n][];
+        double[][] r = new double[n][];
+        double[][] s = new double[n][];
+        List<SkeletalAnimationSet.NodeAnim> animNodes = animation == null ? null : animation.getNodes();
+
+        for (int i = 0; i < n; i++)
+            copyLocal(i, frame, animNodes, t, r, s);
+
+        return new double[][][] { t, r, s };
+    }
+
+    /**
+     * @param i node index
+     * @param frame frame index
+     * @param animNodes animation nodes, or null
+     * @param t translation out
+     * @param r rotation out
+     * @param s scale out
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private void copyLocal(int i, int frame, List<SkeletalAnimationSet.NodeAnim> animNodes,
+            double[][] t, double[][] r, double[][] s)
+    {
+        Srt bind = nodeLocals[i];
+        SkeletalAnimationSet.NodeAnim na = animNode(animNodes, i);
+
+        t[i] = orBind(channel(na, frame, 0), bind.t);
+        r[i] = orBind(channel(na, frame, 1), bind.r);
+        s[i] = orBind(channel(na, frame, 2), bind.s);
+    }
+
+    /**
+     * @param animNodes animation nodes, or null
+     * @param i node index
+     * @return that node's animation, or null
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static SkeletalAnimationSet.NodeAnim animNode(List<SkeletalAnimationSet.NodeAnim> animNodes, int i)
+    {
+        if (animNodes == null || i >= animNodes.size())
+            return null;
+
+        return animNodes.get(i);
+    }
+
+    /**
+     * @param na a node animation, or null
+     * @param frame frame index
+     * @param kind 0 translation, 1 rotation, 2 scale
+     * @return the sampled channel, or null to keep the bind value
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static double[] channel(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
+    {
+        if (na == null)
+            return null;
+
+        return sample(na, frame, kind);
+    }
+
+    /**
+     * @param na a node animation
+     * @param frame frame index
+     * @param kind 0 translation, 1 rotation, 2 scale
+     * @return the sampled channel
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static double[] sample(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
+    {
+        if (kind == 0)
+            return na.translationAt(frame);
+
+        return later(na, frame, kind);
+    }
+
+    /**
+     * @param na a node animation
+     * @param frame frame index
+     * @param kind 1 rotation or 2 scale
+     * @return the sampled channel
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static double[] later(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
+    {
+        return kind == 1 ? na.rotationAt(frame) : na.scaleAt(frame);
+    }
+
+    /**
+     * @param sampled an animated channel, or null
+     * @param bind the bind-pose value
+     * @return {@code sampled} when present, otherwise {@code bind}
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static double[] orBind(double[] sampled, double[] bind)
+    {
+        return sampled != null ? sampled : bind;
+    }
+
+    /**
+     * @param played stack frame whose positions replace the mesh cache
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_SHP"
+     */
+    private void writePosed(StackPose.Frame played)
+    {
+        for (int i = 0; i < meshes.size(); i++)
+            if (played.positions[i] != null)
+                meshes.get(i).positions = played.positions[i];
+    }
+
+    /**
+     * @param played stack frame
+     * @return one position array per mesh
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_SHP"
+     */
+    private List<float[]> stackList(StackPose.Frame played)
+    {
+        List<float[]> out = new ArrayList<>(meshes.size());
+        for (int i = 0; i < meshes.size(); i++)
+            out.add(orRaw(played.positions[i], i));
+
+        return out;
+    }
+
+    /**
+     * @param posed a posed mesh, or null when the shape was not drawn
+     * @param mesh mesh index
+     * @return {@code posed}, or a copy of the raw vertices
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_SHP"
+     */
+    private float[] orRaw(float[] posed, int mesh)
+    {
+        return posed != null ? posed : meshes.get(mesh).rawPositions.clone();
+    }
+
+    /**
+     * @param model model reader
+     * @param evp envelope-matrix offset
+     * @param end first byte past the model
+     * @param nodes node count
+     * @param length model byte length
+     * @return each node's inverse bind, 12 doubles, stride 84. Joints past the array stay identity.
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResEvpMtx"
+     */
+    private static double[][] readInvBind(MemBuf.MemBufReader model, int evp, int end, int nodes, int length)
+    {
+        double[][] inv = new double[nodes][];
+        int count = Math.max(0, (end - evp) / 84);
+
+        for (int n = 0; n < nodes; n++)
+            inv[n] = n < count && evp + (n + 1) * 84 <= length ? readM43(model, evp + n * 84) : NitroMtx.identity();
+
+        return inv;
+    }
+
+    /**
+     * @param model model reader
+     * @param o matrix offset
+     * @return twelve 1.19.12 values
+     * @see "NitroSDK fx_mtx43.h MtxFx43"
+     */
+    private static double[] readM43(MemBuf.MemBufReader model, int o)
+    {
+        model.setPosition(o);
+
+        double[] m = new double[12];
+        for (int i = 0; i < 12; i++)
+            m[i] = model.readInt() / 4096.0;
+
+        return m;
+    }
+
+    /**
      * Poses this model by a skeletal animation and returns the vertex positions for each mesh at the
-     * given frame &mdash; the same list order as {@link #getMeshes()}. Each animated node replaces its
-     * bind-pose scale/rotation/translation with the animation's value for that frame (a "base" track
-     * keeps the bind-pose value), the node hierarchy is recomposed exactly as at bind pose, and the raw
-     * vertices are re-placed. The model's own meshes are left at their bind pose.
+     * given frame &mdash; the same list order as {@link #getMeshes()}. Maya and envelope models are
+     * placed by the SBC matrix stack; other models keep the separate scale/rotation composition.
+     * The model's own meshes stay at their bind pose.
      * @param animation the animation to apply (its nodes correspond to this model's nodes, in order)
      * @param frame the frame index to sample
      * @return one {@code float[]} of {@code x,y,z} triples per mesh, in {@link #getMeshes()} order
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
      */
     public List<float[]> pose(SkeletalAnimationSet.Animation animation, int frame)
     {
+        if (stackPose)
+            return stackList(playStack(animation, frame, false));
+
+        return rigidPose(animation, frame);
+    }
+
+    /**
+     * @param animation skeletal animation
+     * @param frame frame index
+     * @return one position array per mesh, from the separate scale and rotation composition
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private List<float[]> rigidPose(SkeletalAnimationSet.Animation animation, int frame)
+    {
         Srt[] world = poseWorld(animation, frame);
+
         List<float[]> posed = new ArrayList<>(meshes.size());
         for (Mesh mesh : meshes)
-        {
-            float[] out = mesh.rawPositions.clone();
-            Srt w = (mesh.nodeIndex >= 0 && mesh.nodeIndex < world.length) ? world[mesh.nodeIndex] : null;
-            transformInPlace(out, w, posScale);
-            posed.add(out);
-        }
+            posed.add(place(mesh, world));
+
         return posed;
+    }
+
+    /**
+     * @param mesh a shape
+     * @param world posed world transforms
+     * @return the shape's vertices placed by its node
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_SHP"
+     */
+    private float[] place(Mesh mesh, Srt[] world)
+    {
+        float[] out = mesh.rawPositions.clone();
+        transformInPlace(out, worldOf(mesh, world), posScale);
+        return out;
+    }
+
+    /**
+     * @param mesh a shape
+     * @param world posed world transforms
+     * @return the node's world transform, or null
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEDESC"
+     */
+    private static Srt worldOf(Mesh mesh, Srt[] world)
+    {
+        if (mesh.nodeIndex < 0 || mesh.nodeIndex >= world.length)
+            return null;
+
+        return world[mesh.nodeIndex];
     }
 
     // Composes each node's posed world transform for an animation frame (the shared core of pose() and the
@@ -641,18 +1387,23 @@ public class Model
         int count = nodeLocals.length;
         List<SkeletalAnimationSet.NodeAnim> animNodes = animation.getNodes();
         Srt[] local = new Srt[count];
+
         for (int n = 0; n < count; n++)
         {
             Srt bind = nodeLocals[n];
             SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
+
             double[] t = na != null ? na.translationAt(frame) : null;
             double[] s = na != null ? na.scaleAt(frame) : null;
             double[] r = na != null ? na.rotationAt(frame) : null;
+
             local[n] = new Srt(t != null ? t : bind.t, s != null ? s : bind.s, r != null ? r : bind.r);
         }
+
         Srt[] world = new Srt[count];
         for (int n = 0; n < count; n++)
             world[n] = resolveWorld(n, nodeParent, local, world);
+
         return world;
     }
 
@@ -668,12 +1419,14 @@ public class Model
     public double[][] poseNodeWorldTranslations(SkeletalAnimationSet.Animation animation, int frame)
     {
         Srt[] world = poseWorld(animation, frame);
+
         double[][] out = new double[world.length][];
         for (int n = 0; n < world.length; n++)
         {
             Srt w = world[n] != null ? world[n] : Srt.identity();
             out[n] = w.t.clone();
         }
+
         return out;
     }
 
@@ -692,6 +1445,7 @@ public class Model
         int total = 0;
         for (Mesh m : meshes)
             total += m.positions.length / 3;
+
         return total;
     }
 
@@ -708,19 +1462,24 @@ public class Model
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(name).append(" exported by Nds4j\n");
         int vBase = 1;
+
         for (Mesh mesh : meshes)
         {
             sb.append("g ").append(mesh.name).append('\n');
             int vertexCount = mesh.positions.length / 3;
+
             for (int i = 0; i < vertexCount; i++)
                 sb.append("v ").append(mesh.positions[i * 3]).append(' ')
                         .append(mesh.positions[i * 3 + 1]).append(' ').append(mesh.positions[i * 3 + 2]).append('\n');
+
             for (int i = 0; i + 2 < mesh.triangleIndices.length; i += 3)
                 sb.append("f ").append(vBase + mesh.triangleIndices[i]).append(' ')
                         .append(vBase + mesh.triangleIndices[i + 1]).append(' ')
                         .append(vBase + mesh.triangleIndices[i + 2]).append('\n');
+
             vBase += vertexCount;
         }
+
         return sb.toString();
     }
 
@@ -764,22 +1523,31 @@ public class Model
         int count = nodeLocals.length;
         List<SkeletalAnimationSet.NodeAnim> animNodes = animation != null ? animation.getNodes() : null;
         NodeTransform[] out = new NodeTransform[count];
+
         for (int n = 0; n < count; n++)
         {
             Srt bind = nodeLocals[n];
             double[] t = bind.t, s = bind.s, r = bind.r;
+
             if (animNodes != null)
             {
                 SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
+
                 double[] at = na != null ? na.translationAt(frame) : null;
                 double[] as = na != null ? na.scaleAt(frame) : null;
                 double[] ar = na != null ? na.rotationAt(frame) : null;
-                if (at != null) t = at;
-                if (as != null) s = as;
-                if (ar != null) r = ar;
+
+                if (at != null)
+                    t = at;
+                if (as != null)
+                    s = as;
+                if (ar != null)
+                    r = ar;
             }
+
             out[n] = new NodeTransform(t.clone(), s.clone(), r.clone());
         }
+
         return out;
     }
 
@@ -805,11 +1573,22 @@ public class Model
         }
 
         /** @return translation (x,y,z), model units (not scaled by the model's position scale) */
-        public double[] getTranslation() { return translation; }
+        public double[] getTranslation()
+        {
+            return translation;
+        }
+
         /** @return per-axis scale (x,y,z) */
-        public double[] getScale() { return scale; }
+        public double[] getScale()
+        {
+            return scale;
+        }
+
         /** @return the 3&times;3 rotation, row-major, row-vector convention */
-        public double[] getRotation() { return rotation; }
+        public double[] getRotation()
+        {
+            return rotation;
+        }
     }
 
     /**
@@ -833,11 +1612,10 @@ public class Model
     }
 
     /**
-     * @return true if any of this model's display lists contains an {@code MTX_SCALE} (op 0x1B) command.
-     *         These are a handful of {@code g_demo_*} / effect models; the command is consumed (its 12
-     *         operand bytes are skipped so the stream stays in sync) but deliberately not applied &mdash;
-     *         the DS magnify it carries is redundant with the header {@code posScale}, and multiplying it
-     *         in regresses those models' placement, matching the reference renderer's no-op.
+     * @return true if any of this model's display lists contains an {@code MTX_SCALE} command.
+     *         Stack-posed models apply it to the position matrix. Other models only consume the operand
+     *         words, because that scale repeats the header {@code posScale}.
+     * @see "GBATEK DS 3D Video, MTX_SCALE"
      */
     public boolean usesMtxScale()
     {
@@ -856,13 +1634,92 @@ public class Model
 
     /**
      * @param node a node index
+     * @return true when SBC {@code BBY} draws that node. {@link #isBillboardNode(int)} is also true.
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BBY"
+     */
+    public boolean isYaxisBillboard(int node)
+    {
+        return marked(yBillboard, node);
+    }
+
+    /**
+     * @param flags per-node flags, or null
+     * @param node a node index
+     * @return whether that flag is set
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BBY"
+     */
+    private static boolean marked(boolean[] flags, int node)
+    {
+        if (flags == null)
+            return false;
+
+        return bit(flags, node);
+    }
+
+    /**
+     * @param flags per-node flags
+     * @param node a node index
+     * @return whether that flag is set
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BBY"
+     */
+    private static boolean bit(boolean[] flags, int node)
+    {
+        if (outside(node, flags.length))
+            return false;
+
+        return flags[node];
+    }
+
+    /**
+     * @param node a node index
+     * @param length flag array length
+     * @return true when {@code node} is outside the array
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BBY"
+     */
+    private static boolean outside(int node, int length)
+    {
+        return node < 0 || node >= length;
+    }
+
+    /**
+     * @return true when bind pose and {@link #pose} use the SBC matrix stack
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    public boolean usesStackPose()
+    {
+        return stackPose;
+    }
+
+    /**
+     * @return the bind-pose stack frame, or null when this model does not use the stack
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    StackPose.Frame bindSkin()
+    {
+        return bindFrame;
+    }
+
+    /**
+     * @param animation skeletal animation, or null for the bind pose
+     * @param frame frame index
+     * @return the stack frame for that sample
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    StackPose.Frame poseFrame(SkeletalAnimationSet.Animation animation, int frame)
+    {
+        return playStack(animation, frame, false);
+    }
+
+    /**
+     * @param node a node index
      * @return the node's bind-pose world translation (x,y,z) &mdash; the pivot a billboard's camera-facing
      *         geometry is placed at &mdash; or {@code {0,0,0}} if unknown
      */
     public double[] getNodeWorldTranslation(int node)
     {
         return (bindWorldTranslation != null && node >= 0 && node < bindWorldTranslation.length)
-                ? bindWorldTranslation[node].clone() : new double[]{0, 0, 0};
+                ? bindWorldTranslation[node].clone()
+                : new double[] { 0, 0, 0 };
     }
 
     /**
@@ -872,7 +1729,8 @@ public class Model
     public double[] getNodeWorldScale(int node)
     {
         return (bindWorldScale != null && node >= 0 && node < bindWorldScale.length)
-                ? bindWorldScale[node].clone() : new double[]{1, 1, 1};
+                ? bindWorldScale[node].clone()
+                : new double[] { 1, 1, 1 };
     }
 
     /**
@@ -882,7 +1740,7 @@ public class Model
      */
     public float[][] getHeaderBoundingBox()
     {
-        return new float[][]{headerBoxMin.clone(), headerBoxMax.clone()};
+        return new float[][] { headerBoxMin.clone(), headerBoxMax.clone() };
     }
 
     /**
@@ -893,14 +1751,16 @@ public class Model
      */
     public float[][] getDecodedBoundingBox()
     {
-        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+        float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
         boolean any = false;
+
         for (Mesh mesh : meshes)
         {
             for (int i = 0; i < mesh.positions.length; i += 3)
             {
                 any = true;
+
                 for (int c = 0; c < 3; c++)
                 {
                     min[c] = Math.min(min[c], mesh.positions[i + c]);
@@ -908,9 +1768,11 @@ public class Model
                 }
             }
         }
+
         if (!any)
-            return new float[][]{{0, 0, 0}, {0, 0, 0}};
-        return new float[][]{min, max};
+            return new float[][] { { 0, 0, 0 }, { 0, 0, 0 } };
+
+        return new float[][] { min, max };
     }
 
     @Override
@@ -949,14 +1811,14 @@ public class Model
     public static class Mesh
     {
         private final String name;
-        private final float[] positions;   // 3 floats per vertex (model space)
-        private final float[] texcoords;    // 2 floats per vertex, in texel units (divide by the bound
-                                            // texture's size to normalise)
+        private float[] positions; // 3 floats per vertex (model space); replaced by a stack pose
+        private final float[] texcoords; // 2 floats per vertex, in texel units (divide by the bound
+                                         // texture's size to normalise)
         private final int[] triangleIndices; // 3 indices per triangle
-        private Material material;          // the bound material (texture/palette), or null
-        float[] rawPositions;              // pre-placement vertices (for re-posing by an animation)
-        int nodeIndex;                     // the skeleton node this mesh is drawn under
-        byte[] rawDisplayList;             // the shape's verbatim GPU command stream (for byte-exact re-emit)
+        private Material material; // the bound material (texture/palette), or null
+        float[] rawPositions; // pre-placement vertices (for re-posing by an animation)
+        int nodeIndex; // the skeleton node this mesh is drawn under
+        byte[] rawDisplayList; // the shape's verbatim GPU command stream (for byte-exact re-emit)
 
         Mesh(String name, float[] positions, float[] texcoords, int[] triangleIndices)
         {
@@ -967,35 +1829,74 @@ public class Model
         }
 
         /** @return this mesh's name (its shape name) */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
+
         /** @return the vertex positions, 3 floats (x,y,z) per vertex, in model space */
-        public float[] getPositions() { return positions; }
+        public float[] getPositions()
+        {
+            return positions;
+        }
+
         /**
          * @return the raw pre-placement vertex positions, 3 floats (x,y,z) per vertex, in the mesh's own
          *         node-local space &mdash; before the node world transform and before the model's
          *         position scale. This is what a hierarchical exporter places under the mesh's skeleton
          *         node (see {@link #getNodeIndex()}).
          */
-        public float[] getRawPositions() { return rawPositions; }
+        public float[] getRawPositions()
+        {
+            return rawPositions;
+        }
+
         /** @return the texture coordinates, 2 floats (s,t) per vertex, in texel units */
-        public float[] getTexcoords() { return texcoords; }
+        public float[] getTexcoords()
+        {
+            return texcoords;
+        }
+
         /** @return the triangle indices, 3 per triangle, into the vertex arrays */
-        public int[] getTriangleIndices() { return triangleIndices; }
+        public int[] getTriangleIndices()
+        {
+            return triangleIndices;
+        }
+
         /**
          * @return this shape's verbatim GPU command stream (the raw display-list bytes it was decoded from).
          *         Feeding it to {@link DisplayList#decodeCommands} yields the exact commands (primitive type,
          *         vertex formats, strips) that a triangle view loses, so geometry can be re-emitted
          *         byte-for-byte. The array is a copy; mutating it does not affect the model.
          */
-        public byte[] getRawDisplayList() { return rawDisplayList != null ? rawDisplayList.clone() : null; }
+        public byte[] getRawDisplayList()
+        {
+            return rawDisplayList != null ? rawDisplayList.clone() : null;
+        }
+
         /** @return the number of vertices */
-        public int getVertexCount() { return positions.length / 3; }
+        public int getVertexCount()
+        {
+            return positions.length / 3;
+        }
+
         /** @return the number of triangles */
-        public int getTriangleCount() { return triangleIndices.length / 3; }
+        public int getTriangleCount()
+        {
+            return triangleIndices.length / 3;
+        }
+
         /** @return the material bound to this mesh, or null if it draws untextured */
-        public Material getMaterial() { return material; }
+        public Material getMaterial()
+        {
+            return material;
+        }
+
         /** @return the skeleton node (bone) index this mesh is drawn under (for visibility animation) */
-        public int getNodeIndex() { return nodeIndex; }
+        public int getNodeIndex()
+        {
+            return nodeIndex;
+        }
     }
 
     /**
@@ -1021,18 +1922,45 @@ public class Model
         }
 
         /** @return this material's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
+
         /** @return the name of the texture this material samples, or null */
-        public String getTextureName() { return textureName; }
+        public String getTextureName()
+        {
+            return textureName;
+        }
+
         /** @return the name of the palette this material samples, or null */
-        public String getPaletteName() { return paletteName; }
+        public String getPaletteName()
+        {
+            return paletteName;
+        }
+
         /** @return whether the texture repeats (tiles) along S; else it clamps */
-        public boolean isRepeatS() { return repeatS; }
+        public boolean isRepeatS()
+        {
+            return repeatS;
+        }
+
         /** @return whether the texture repeats (tiles) along T; else it clamps */
-        public boolean isRepeatT() { return repeatT; }
+        public boolean isRepeatT()
+        {
+            return repeatT;
+        }
+
         /** @return whether the texture mirrors on every other S tile */
-        public boolean isFlipS() { return flipS; }
+        public boolean isFlipS()
+        {
+            return flipS;
+        }
+
         /** @return whether the texture mirrors on every other T tile */
-        public boolean isFlipT() { return flipT; }
+        public boolean isFlipT()
+        {
+            return flipT;
+        }
     }
 }
