@@ -73,9 +73,15 @@ public class ParticleSet
         // Version tag sits immediately after the magic.
         reader.setPosition(4);
         version = reader.readString(4);
-        emitterCount = reader.readUInt16At(8);
-        int textureCount = reader.readUInt16At(10);
-        int texSectionOffset = (int) reader.readUInt32At(0x18);
+        reader.setPosition(8);
+        int spa0 = reader.readUInt16();
+        emitterCount = spa0;
+        reader.setPosition(10);
+        int spa1 = reader.readUInt16();
+        int textureCount = spa1;
+        reader.setPosition(0x18);
+        long spa2 = reader.readUInt32();
+        int texSectionOffset = (int) spa2;
 
         // Walk the emitter block (starts right after the 0x20-byte header). Each emitter is an 0x58-byte
         // fixed body followed by flag-gated optional blocks (scale/color/alpha/tex anim, child, six field
@@ -128,7 +134,9 @@ public class ParticleSet
     /** @return the byte offset where the texture section begins */
     public int getTextureSectionOffset()
     {
-        return (int) reader.readUInt32At(0x18);
+        reader.setPosition(0x18);
+        long spa3 = reader.readUInt32();
+        return (int) spa3;
     }
     /** @return the decoded particle textures */
     public List<ParticleTexture> getTextures()
@@ -215,7 +223,9 @@ public class ParticleSet
         Emitter(int start)
         {
             int c = start;
-            this.flags = reader.readUInt32At(c);
+            reader.setPosition(c);
+            long spa4 = reader.readUInt32();
+            this.flags = spa4;
             c += 4;
             this.shape = EmitterShape.values()[(int) (flags & 0xF) % EmitterShape.values().length];
             this.posX = fx32(c);
@@ -232,7 +242,9 @@ public class ParticleSet
             this.axisY = fx16(c + 2);
             this.axisZ = fx16(c + 4);
             c += 6;
-            this.color = bgr555(reader.readUInt16At(c));
+            reader.setPosition(c);
+            int spa5 = reader.readUInt16();
+            this.color = bgr555(spa5);
             c += 2;
             this.particlePosVeloMag = fx32(c);
             c += 4;
@@ -242,18 +254,30 @@ public class ParticleSet
             c += 4;
             this.aspectRatio = fx16(c);
             c += 2;
-            this.emissionStartTime = reader.readUInt16At(c);
+            reader.setPosition(c);
+            int spa6 = reader.readUInt16();
+            this.emissionStartTime = spa6;
             c += 2;
-            this.minRotVelocity = reader.readInt16At(c) * 360.0 / 65536.0;
+            reader.setPosition(c);
+            int spa7 = reader.readShort();
+            this.minRotVelocity = spa7 * 360.0 / 65536.0;
             c += 2;
-            this.maxRotVelocity = reader.readInt16At(c) * 360.0 / 65536.0;
+            reader.setPosition(c);
+            int spa8 = reader.readShort();
+            this.maxRotVelocity = spa8 * 360.0 / 65536.0;
             c += 2;
-            this.particleRotation = reader.readInt16At(c) * 360.0 / 65536.0;
+            reader.setPosition(c);
+            int spa9 = reader.readShort();
+            this.particleRotation = spa9 * 360.0 / 65536.0;
             c += 2;
             c += 2; // padding
-            this.emissionTime = reader.readUInt16At(c);
+            reader.setPosition(c);
+            int spa10 = reader.readUInt16();
+            this.emissionTime = spa10;
             c += 2;
-            this.particleLifetime = reader.readUInt16At(c);
+            reader.setPosition(c);
+            int spa11 = reader.readUInt16();
+            this.particleLifetime = spa11;
             c += 2;
             this.scaleRandomness = u8(c++) / 256.0;
             this.lifetimeRandomness = u8(c++) / 256.0;
@@ -544,12 +568,18 @@ public class ParticleSet
 
         ColorAnim(int c)
         {
-            initial = bgr555(reader.readUInt16At(c));
-            ending = bgr555(reader.readUInt16At(c + 2));
+            reader.setPosition(c);
+            int spa12 = reader.readUInt16();
+            initial = bgr555(spa12);
+            reader.setPosition(c + 2);
+            int spa13 = reader.readUInt16();
+            ending = bgr555(spa13);
             inEnd = u8(c + 4) / 256.0;
             peak = u8(c + 5) / 256.0;
             outStart = u8(c + 6) / 256.0;
-            interpolate = (reader.readUInt16At(c + 8) >> 2 & 1) == 1;
+            reader.setPosition(c + 8);
+            int spa14 = reader.readUInt16();
+            interpolate = (spa14 >> 2 & 1) == 1;
         }
         /** @return color at spawn as 0xRRGGBB */
         public int getInitial()
@@ -581,7 +611,9 @@ public class ParticleSet
 
         AlphaAnim(int c)
         {
-            int tmp = reader.readUInt16At(c);
+            reader.setPosition(c);
+            int spa15 = reader.readUInt16();
+            int tmp = spa15;
             initial = tmp & 0x1F;
             peak = tmp >> 5 & 0x1F;
             ending = tmp >> 10 & 0x1F;
@@ -655,7 +687,9 @@ public class ParticleSet
         ParticleTexture(int start)
         {
             this.start = start;
-            long param = reader.readUInt32At(start + 4);
+            reader.setPosition(start + 4);
+            long spa16 = reader.readUInt32();
+            long param = spa16;
             this.format = (int) (param & 7);
             this.width = 8 << ((int) (param >> 4) & 7);
             this.height = 8 << ((int) (param >> 8) & 7);
@@ -667,8 +701,12 @@ public class ParticleSet
             this.flipS = (mode & 4) != 0;
             this.flipT = (mode & 8) != 0;
             this.texelOffset = start + 0x20;
-            this.paletteOffset = start + (int) reader.readUInt32At(start + 12);
-            this.totalSize = (int) reader.readUInt32At(start + 20);
+            reader.setPosition(start + 12);
+            long spa17 = reader.readUInt32();
+            this.paletteOffset = start + (int) spa17;
+            reader.setPosition(start + 20);
+            long spa18 = reader.readUInt32();
+            this.totalSize = (int) spa18;
         }
 
         /** @return the texture width in texels */
@@ -800,7 +838,9 @@ public class ParticleSet
         /** @param pixel the texel index @return a BGR555 texel */
         private int direct(int pixel)
         {
-            int value = reader.readUInt16At(texelOffset + pixel * 2);
+            reader.setPosition(texelOffset + pixel * 2);
+            int spa19 = reader.readUInt16();
+            int value = spa19;
 
             return directColor(value);
         }
@@ -837,7 +877,9 @@ public class ParticleSet
             int offset = paletteOffset + index * 2;
             if (offset + 1 >= data.length)
                 return 0;
-            return bgr555(reader.readUInt16At(offset));
+            reader.setPosition(offset);
+            int spa20 = reader.readUInt16();
+            return bgr555(spa20);
         }
     }
 

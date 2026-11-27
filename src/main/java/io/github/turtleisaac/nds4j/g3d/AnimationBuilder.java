@@ -113,9 +113,15 @@ public final class AnimationBuilder
 
         // SRT0 block: "SRT0" + size + animation dictionary (4-byte offset records, block-relative) + the
         // animation block. Measure the dictionary's serialized length so the animation offset is exact.
-        int animDictLen = serialize(G3dDictionary.build(List.of(animName), List.of(MemBuf.le32(0)), 4)).length;
+        MemBuf word0Buf = MemBuf.create();
+        word0Buf.writer().writeUInt32(0);
+        byte[] word0 = word0Buf.reader().getBuffer();
+        int animDictLen = serialize(G3dDictionary.build(List.of(animName), List.of(word0), 4)).length;
         int animOffset = 8 + animDictLen;
-        byte[] animDict = serialize(G3dDictionary.build(List.of(animName), List.of(MemBuf.le32(animOffset)), 4));
+        MemBuf word1Buf = MemBuf.create();
+        word1Buf.writer().writeUInt32(animOffset);
+        byte[] word1 = word1Buf.reader().getBuffer();
+        byte[] animDict = serialize(G3dDictionary.build(List.of(animName), List.of(word1), 4));
 
         int srtLen = 8 + animDict.length + animBlock.length;
         byte[] srt0 = new byte[srtLen];
@@ -123,7 +129,15 @@ public final class AnimationBuilder
         srt0[1] = 'R';
         srt0[2] = 'T';
         srt0[3] = '0';
-        MemBuf.putUInt32(srt0, 4, srtLen);
+        {
+            MemBuf scratch = MemBuf.create(srt0);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeUInt32(srtLen);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, srt0, 0, srt0.length);
+        }
         System.arraycopy(animDict, 0, srt0, 8, animDict.length);
         System.arraycopy(animBlock, 0, srt0, animOffset, animBlock.length);
 
@@ -166,7 +180,15 @@ public final class AnimationBuilder
         byte[] out = new byte[8 + dict.length + arrayBytes.length];
         out[0] = 'T';
         out[1] = ' '; // member tag (decoder reads only the frame count)
-        MemBuf.putUInt16(out, 4, frameCount);
+        {
+            MemBuf scratch = MemBuf.create(out);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeShort((short) (frameCount));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, out, 0, out.length);
+        }
         System.arraycopy(dict, 0, out, 8, dict.length);
         System.arraycopy(arrayBytes, 0, out, 8 + dict.length, arrayBytes.length);
         return out;
@@ -179,16 +201,48 @@ public final class AnimationBuilder
     {
         if (ch.constant)
         {
-            MemBuf.putUInt32(rec, recOfs, ELEM_CONST | ELEM_FX16);
-            MemBuf.putUInt32(rec, recOfs + 4, fx16(ch.value) & 0xFFFF);
+            {
+                MemBuf scratch = MemBuf.create(rec);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(recOfs);
+                scratch.writer().writeUInt32(ELEM_CONST | ELEM_FX16);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(rec);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(recOfs + 4);
+                scratch.writer().writeUInt32(fx16(ch.value) & 0xFFFF);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+            }
             return;
         }
         int off = arrayBase + arrays.getPosition();
         int count = valueCount(frameCount, ch.step);
         for (int i = 0; i < count; i++)
             arrays.writeShort((short) fx16(sampleKey(ch, i)));
-        MemBuf.putUInt32(rec, recOfs, ELEM_FX16 | stepBits(ch.step));
-        MemBuf.putUInt32(rec, recOfs + 4, off);
+        {
+            MemBuf scratch = MemBuf.create(rec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(recOfs);
+            scratch.writer().writeUInt32(ELEM_FX16 | stepBits(ch.step));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(rec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(recOfs + 4);
+            scratch.writer().writeUInt32(off);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+        }
     }
 
     // Encodes the rotation channel as (sin, cos) fx16 pairs; degrees in, packed pair out.
@@ -199,8 +253,24 @@ public final class AnimationBuilder
         {
             int sin = fx16((float) Math.sin(Math.toRadians(ch.value)));
             int cos = fx16((float) Math.cos(Math.toRadians(ch.value)));
-            MemBuf.putUInt32(rec, recOfs, ELEM_CONST);
-            MemBuf.putUInt32(rec, recOfs + 4, ((cos & 0xFFFF) << 16) | (sin & 0xFFFF));
+            {
+                MemBuf scratch = MemBuf.create(rec);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(recOfs);
+                scratch.writer().writeUInt32(ELEM_CONST);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(rec);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(recOfs + 4);
+                scratch.writer().writeUInt32(((cos & 0xFFFF) << 16) | (sin & 0xFFFF));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+            }
             return;
         }
         int off = arrayBase + arrays.getPosition();
@@ -211,8 +281,24 @@ public final class AnimationBuilder
             arrays.writeShort((short) fx16((float) Math.sin(rad)));
             arrays.writeShort((short) fx16((float) Math.cos(rad)));
         }
-        MemBuf.putUInt32(rec, recOfs, stepBits(ch.step));
-        MemBuf.putUInt32(rec, recOfs + 4, off);
+        {
+            MemBuf scratch = MemBuf.create(rec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(recOfs);
+            scratch.writer().writeUInt32(stepBits(ch.step));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(rec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(recOfs + 4);
+            scratch.writer().writeUInt32(off);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, rec, 0, rec.length);
+        }
     }
 
     // Reads the i-th stored key (arrays may hold fewer keys than frames when step > 1).

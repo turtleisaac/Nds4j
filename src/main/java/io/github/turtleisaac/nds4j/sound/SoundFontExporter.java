@@ -340,16 +340,66 @@ public final class SoundFontExporter
         int pgenCount = presetZones(pgen, pbag, phdr, presetZone, presetNames);
         // terminal preset (EOP) + terminal pbag + terminal pgen
         name20(phdr, "EOP");
-        MemBuf.writeUInt16(phdr, 0);
-        MemBuf.writeUInt16(phdr, 0);
-        MemBuf.writeUInt16(phdr, presetZone.size());
-        MemBuf.writeUInt32(phdr, 0);
-        MemBuf.writeUInt32(phdr, 0);
-        MemBuf.writeUInt32(phdr, 0);
-        MemBuf.writeUInt16(pbag, pgenCount);
-        MemBuf.writeUInt16(pbag, 0);
-        MemBuf.writeUInt16(pgen, 0);
-        MemBuf.writeUInt16(pgen, 0);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (presetZone.size()));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (pgenCount));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pbag.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pbag.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pgen.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pgen.write(scratchBytes, 0, scratchBytes.length);
+        }
 
         // pmod terminal
         ByteArrayOutputStream pmod = new ByteArrayOutputStream();
@@ -385,7 +435,12 @@ public final class SoundFontExporter
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         writeStr(out, "RIFF");
-        MemBuf.writeUInt32(out, body.size());
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(body.size());
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            out.write(scratchBytes, 0, scratchBytes.length);
+        }
         out.write(body.toByteArray(), 0, body.size());
         return out.toByteArray();
     }
@@ -471,12 +526,32 @@ public final class SoundFontExporter
 
         for (int[] generator : igen)
         {
-            MemBuf.writeUInt16(genBuf, generator[0]);
-            MemBuf.writeUInt16(genBuf, generator[1]);
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (generator[0]));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                genBuf.write(scratchBytes, 0, scratchBytes.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (generator[1]));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                genBuf.write(scratchBytes, 0, scratchBytes.length);
+            }
         }
 
-        MemBuf.writeUInt16(genBuf, 0);
-        MemBuf.writeUInt16(genBuf, 0);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            genBuf.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            genBuf.write(scratchBytes, 0, scratchBytes.length);
+        }
 
         return genBuf;
     }
@@ -488,12 +563,32 @@ public final class SoundFontExporter
 
         for (int index : ibagGen)
         {
-            MemBuf.writeUInt16(ibag, index);
-            MemBuf.writeUInt16(ibag, 0);
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (index));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                ibag.write(scratchBytes, 0, scratchBytes.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (0));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                ibag.write(scratchBytes, 0, scratchBytes.length);
+            }
         }
 
-        MemBuf.writeUInt16(ibag, terminal);
-        MemBuf.writeUInt16(ibag, 0);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (terminal));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            ibag.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            ibag.write(scratchBytes, 0, scratchBytes.length);
+        }
 
         return ibag;
     }
@@ -506,11 +601,21 @@ public final class SoundFontExporter
         for (int[] record : inst)
         {
             name20(instBuf, instNames.get(record[0]));
-            MemBuf.writeUInt16(instBuf, record[1]);
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (record[1]));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                instBuf.write(scratchBytes, 0, scratchBytes.length);
+            }
         }
 
         name20(instBuf, "EOI");
-        MemBuf.writeUInt16(instBuf, terminal);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (terminal));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            instBuf.write(scratchBytes, 0, scratchBytes.length);
+        }
 
         return instBuf;
     }
@@ -531,17 +636,67 @@ public final class SoundFontExporter
     private static int onePreset(ByteArrayOutputStream pgen, ByteArrayOutputStream pbag, ByteArrayOutputStream phdr,
             int[] zone, List<String> presetNames, int index, int count)
     {
-        MemBuf.writeUInt16(pbag, count);
-        MemBuf.writeUInt16(pbag, 0);
-        MemBuf.writeUInt16(pgen, GEN_INSTRUMENT);
-        MemBuf.writeUInt16(pgen, zone[1]);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (count));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pbag.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pbag.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (GEN_INSTRUMENT));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pgen.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (zone[1]));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            pgen.write(scratchBytes, 0, scratchBytes.length);
+        }
         name20(phdr, presetNames.get(zone[2]));
-        MemBuf.writeUInt16(phdr, zone[0]);
-        MemBuf.writeUInt16(phdr, 0);
-        MemBuf.writeUInt16(phdr, index);
-        MemBuf.writeUInt32(phdr, 0);
-        MemBuf.writeUInt32(phdr, 0);
-        MemBuf.writeUInt32(phdr, 0);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (zone[0]));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (index));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(0);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            phdr.write(scratchBytes, 0, scratchBytes.length);
+        }
 
         return count + 1;
     }
@@ -550,31 +705,98 @@ public final class SoundFontExporter
             int loopStart, int loopEnd, int rate, int rootKey)
     {
         name20(o, name);
-        MemBuf.writeUInt32(o, start);
-        MemBuf.writeUInt32(o, end);
-        MemBuf.writeUInt32(o, loopStart);
-        MemBuf.writeUInt32(o, loopEnd);
-        MemBuf.writeUInt32(o, rate);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(start);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(end);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(loopStart);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(loopEnd);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(rate);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
         o.write(rootKey & 0xFF); // byOriginalPitch
         o.write(0); // chPitchCorrection
-        MemBuf.writeUInt16(o, 0); // wSampleLink
-        MemBuf.writeUInt16(o, 1); // sfSampleType = monoSample
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (0)); // wSampleLink
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (1)); // sfSampleType = monoSample
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+
     }
 
     private static void writeMod(ByteArrayOutputStream o, int src, int dest, int amt, int amtSrc, int trans)
     {
-        MemBuf.writeUInt16(o, src);
-        MemBuf.writeUInt16(o, dest);
-        MemBuf.writeUInt16(o, amt);
-        MemBuf.writeUInt16(o, amtSrc);
-        MemBuf.writeUInt16(o, trans);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (src));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (dest));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (amt));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (amtSrc));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeShort((short) (trans));
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
     }
 
     // ---- RIFF helpers ----
     private static void chunk(ByteArrayOutputStream o, String id, byte[] data)
     {
         writeStr(o, id);
-        MemBuf.writeUInt32(o, data.length);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(data.length);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
         o.write(data, 0, data.length);
         if ((data.length & 1) == 1)
             o.write(0); // word-align
@@ -582,7 +804,12 @@ public final class SoundFontExporter
     private static void listChunk(ByteArrayOutputStream o, String type, byte[] data)
     {
         writeStr(o, "LIST");
-        MemBuf.writeUInt32(o, data.length + 4);
+        {
+            MemBuf scratch = MemBuf.create();
+            scratch.writer().writeUInt32(data.length + 4);
+            byte[] scratchBytes = scratch.reader().getBuffer();
+            o.write(scratchBytes, 0, scratchBytes.length);
+        }
         writeStr(o, type);
         o.write(data, 0, data.length);
         if (((data.length + 4) & 1) == 1)

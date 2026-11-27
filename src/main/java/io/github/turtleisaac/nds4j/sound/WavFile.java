@@ -153,7 +153,10 @@ public final class WavFile
     private static int oneChunk(byte[] wav, int p, WavChunks chunks)
     {
         String id = ascii(wav, p, 4);
-        int size = (int) MemBuf.uint32(wav, p + 4);
+        MemBuf.MemBufReader field0Reader = MemBuf.create(wav).reader();
+        field0Reader.setPosition(p + 4);
+        long field0 = field0Reader.readUInt32();
+        int size = (int) field0;
         int body = p + 8;
         requireFits(wav, id, body, size);
         takeFmt(wav, id, body, size, chunks);
@@ -203,10 +206,22 @@ public final class WavFile
         if (size < 16)
             throw new IllegalArgumentException("WAV fmt chunk too short");
 
-        chunks.fmt = MemBuf.uint16(wav, body);
-        chunks.channels = MemBuf.uint16(wav, body + 2);
-        chunks.sampleRate = (int) MemBuf.uint32(wav, body + 4);
-        chunks.bits = MemBuf.uint16(wav, body + 14);
+        MemBuf.MemBufReader field1Reader = MemBuf.create(wav).reader();
+        field1Reader.setPosition(body);
+        int field1 = field1Reader.readUInt16();
+        chunks.fmt = field1;
+        MemBuf.MemBufReader field2Reader = MemBuf.create(wav).reader();
+        field2Reader.setPosition(body + 2);
+        int field2 = field2Reader.readUInt16();
+        chunks.channels = field2;
+        MemBuf.MemBufReader field3Reader = MemBuf.create(wav).reader();
+        field3Reader.setPosition(body + 4);
+        long field3 = field3Reader.readUInt32();
+        chunks.sampleRate = (int) field3;
+        MemBuf.MemBufReader field4Reader = MemBuf.create(wav).reader();
+        field4Reader.setPosition(body + 14);
+        int field4 = field4Reader.readUInt16();
+        chunks.bits = field4;
     }
 
     /**
@@ -318,7 +333,9 @@ public final class WavFile
         if (bits == 8)
             return ((wav[offset] & 0xFF) - 128) << 8;
 
-        return (short) MemBuf.uint16(wav, offset);
+        MemBuf.MemBufReader reader = MemBuf.create(new byte[] { wav[offset], wav[offset + 1] }).reader();
+
+        return reader.readShort();
     }
 
     /**

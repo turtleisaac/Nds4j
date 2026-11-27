@@ -110,10 +110,16 @@ public final class MidiSequence
     {
         expect(d, 0, "MThd");
         int pos = 4;
-        int hdrLen = (int) MemBuf.uint32be(d, pos);
+        MemBuf.MemBufReader field0Reader = MemBuf.create(d).reader();
+        field0Reader.setPosition(pos);
+        long field0 = field0Reader.readUInt32Be();
+        int hdrLen = (int) field0;
         pos += 4;
         int headerEnd = pos + hdrLen;
-        p.ppqn = MemBuf.uint16be(d, pos + 4);
+        MemBuf.MemBufReader field1Reader = MemBuf.create(d).reader();
+        field1Reader.setPosition(pos + 4);
+        int field1 = field1Reader.readUInt16Be();
+        p.ppqn = field1;
 
         return headerEnd;
     }
@@ -130,7 +136,10 @@ public final class MidiSequence
     /** @param d the MIDI file @param p the parsed result @param pos the track length @return the first byte after the track */
     private static int readTrack(byte[] d, Parsed p, int pos)
     {
-        int len = (int) MemBuf.uint32be(d, pos);
+        MemBuf.MemBufReader field2Reader = MemBuf.create(d).reader();
+        field2Reader.setPosition(pos);
+        long field2 = field2Reader.readUInt32Be();
+        int len = (int) field2;
         pos += 4;
         int end = pos + len;
         readEvents(d, p, pos, end, 0, 0);

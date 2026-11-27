@@ -113,21 +113,25 @@ public class BinaryMessage
         if (data.length < 0x20 || !Arrays.equals(Arrays.copyOfRange(data, 0, 8), MAGIC))
             throw new RuntimeException("Not a valid BMG file.");
 
+        MemBuf.MemBufReader source = MemBuf.create(data).reader();
+
         // Endianness isn't declared anywhere -- sniffed the same way ndspy does: read the total-length
         // field both ways and trust whichever interpretation is the smaller (i.e. plausible) value. Every
         // real BMG length is tiny compared to 2^32, so the wrong endianness reads as an enormous number.
-        long lenLe = MemBuf.uint32(data, 8, false);
-        long lenBe = MemBuf.uint32(data, 8, true);
+        source.setPosition(8);
+        long lenLe = source.readUInt32();
+        source.setPosition(8);
+        long lenBe = source.readUInt32Be();
         bigEndian = lenBe < lenLe;
         declaredTotalLength = bigEndian ? lenBe : lenLe;
 
-        long sectionCount = MemBuf.uint32(data, 12, bigEndian);
+        long sectionCount = readWord(source, 12);
         encoding = data[16] & 0xFF;
         if (encoding <= 0 || encoding >= ENCODING_NAMES.length)
             throw new RuntimeException("Unknown BMG encoding value: " + encoding);
-        unk14 = MemBuf.uint32(data, 17, bigEndian);
-        unk18 = MemBuf.uint32(data, 21, bigEndian);
-        unk1C = MemBuf.uint32(data, 25, bigEndian);
+        unk14 = readWord(source, 17);
+        unk18 = readWord(source, 21);
+        unk1C = readWord(source, 25);
         headerPadding = Arrays.copyOfRange(data, 29, 32);
 
         List<long[]> inf1Entries = new ArrayList<>(); // {offset, infoStart, infoEnd}
@@ -137,18 +141,18 @@ public class BinaryMessage
         for (int s = 0; s < sectionCount; s++)
         {
             String sectionMagic = new String(data, off, 4, StandardCharsets.US_ASCII);
-            long sectionLen = MemBuf.uint32(data, off + 4, bigEndian);
+            long sectionLen = readWord(source, off + 4);
             switch (sectionMagic)
             {
                 case "INF1":
                 {
-                    int count = (int) MemBuf.uint16(data, off + 8, bigEndian);
-                    inf1EntryLength = (int) MemBuf.uint16(data, off + 10, bigEndian);
-                    inf1Id = MemBuf.uint32(data, off + 12, bigEndian);
+                    int count = (int) readHalf(source, off + 8);
+                    inf1EntryLength = (int) readHalf(source, off + 10);
+                    inf1Id = readWord(source, off + 12);
                     for (int i = 0; i < count; i++)
                     {
                         int entryOff = off + 16 + i * inf1EntryLength;
-                        long msgOffset = MemBuf.uint32(data, entryOff, bigEndian);
+                        long msgOffset = readWord(source, entryOff);
                         inf1Entries.add(new long[] { msgOffset, entryOff + 4, entryOff + inf1EntryLength });
                     }
                     break;
@@ -160,9 +164,9 @@ public class BinaryMessage
                 case "FLW1":
                 {
                     hasFlw1 = true;
-                    int instructionsCount = (int) MemBuf.uint16(data, off + 8, bigEndian);
-                    int labelsCount = (int) MemBuf.uint16(data, off + 10, bigEndian);
-                    flw1Unk0C = MemBuf.uint32(data, off + 12, bigEndian);
+                    int instructionsCount = (int) readHalf(source, off + 8);
+                    int labelsCount = (int) readHalf(source, off + 10);
+                    flw1Unk0C = readWord(source, off + 12);
                     int instTableStart = off + 16;
                     instructions = new ArrayList<>();
                     for (int i = 0; i < instructionsCount; i++)
@@ -173,7 +177,7 @@ public class BinaryMessage
                     labelBmgIds = new byte[labelsCount];
                     for (int i = 0; i < labelsCount; i++)
                     {
-                        labelIndices[i] = (short) MemBuf.uint16(data, indicesStart + i * 2, bigEndian);
+                        labelIndices[i] = (short) readHalf(source, indicesStart + i * 2);
                         labelBmgIds[i] = data[bmgIdsStart + i];
                     }
                     break;
@@ -181,15 +185,15 @@ public class BinaryMessage
                 case "FLI1":
                 {
                     hasFli1 = true;
-                    int count = (int) MemBuf.uint16(data, off + 8, bigEndian);
-                    int entryLength = (int) MemBuf.uint16(data, off + 10, bigEndian);
-                    fli1Unk0C = MemBuf.uint32(data, off + 12, bigEndian);
+                    int count = (int) readHalf(source, off + 8);
+                    int entryLength = (int) readHalf(source, off + 10);
+                    fli1Unk0C = readWord(source, off + 12);
                     scripts = new ArrayList<>();
                     for (int i = 0; i < count; i++)
                     {
                         int entryOff = off + 16 + i * entryLength;
-                        long id = MemBuf.uint32(data, entryOff, bigEndian);
-                        short index = (short) MemBuf.uint16(data, entryOff + 4, bigEndian);
+                        long id = readWord(source, entryOff);
+                        short index = (short) readHalf(source, entryOff + 4);
                         byte[] padding = Arrays.copyOfRange(data, entryOff + 6, entryOff + entryLength);
                         scripts.add(new Script(id, index, padding));
                     }
@@ -465,6 +469,38 @@ public class BinaryMessage
             data[off + 2] = (byte) (v >> 16);
             data[off + 3] = (byte) (v >> 24);
         }
+    }
+
+    /**
+     * @param source the file reader
+     * @param offset index of a 32-bit field
+     * @return that field in the file's endianness
+     * @see "Nintendo BMG, file header"
+     */
+    private long readWord(MemBuf.MemBufReader source, int offset)
+    {
+        source.setPosition(offset);
+
+        if (bigEndian)
+            return source.readUInt32Be();
+
+        return source.readUInt32();
+    }
+
+    /**
+     * @param source the file reader
+     * @param offset index of a 16-bit field
+     * @return that field in the file's endianness
+     * @see "Nintendo BMG, INF1 section"
+     */
+    private int readHalf(MemBuf.MemBufReader source, int offset)
+    {
+        source.setPosition(offset);
+
+        if (bigEndian)
+            return source.readUInt16Be();
+
+        return source.readUInt16();
     }
 
     // --- accessors -----------------------------------------------------------------------------

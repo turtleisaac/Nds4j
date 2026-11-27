@@ -334,7 +334,15 @@ public class TexturePatternAnimationSet extends G3dFile
 
             for (Map.Entry<Integer, TexturePalette> entry : material.keyframes.entrySet())
             {
-                MemBuf.putUInt16(bytes, index * 4, entry.getKey());
+                {
+                    MemBuf scratch = MemBuf.create(bytes);
+                    MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                    int scratchEnd = scratchWriter.getPosition();
+                    scratchWriter.setPosition(index * 4);
+                    scratch.writer().writeShort((short) entry.getKey().intValue());
+                    scratchWriter.setPosition(scratchEnd);
+                    System.arraycopy(scratch.reader().getBuffer(), 0, bytes, 0, bytes.length);
+                }
                 bytes[index * 4 + 2] = (byte) indexOf(texNames, entry.getValue().getTexture());
                 bytes[index * 4 + 3] = (byte) indexOf(pltNames, entry.getValue().getPalette());
                 index++;
@@ -360,11 +368,35 @@ public class TexturePatternAnimationSet extends G3dFile
             anim[1] = 0;
             anim[2] = 0x50;
             anim[3] = 0x54;
-            MemBuf.putUInt16(anim, 4, frameCount);
+            {
+                MemBuf scratch = MemBuf.create(anim);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(4);
+                scratch.writer().writeShort((short) (frameCount));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, anim, 0, anim.length);
+            }
             anim[6] = (byte) texNames.length;
             anim[7] = (byte) pltNames.length;
-            MemBuf.putUInt16(anim, 8, ofsTex);
-            MemBuf.putUInt16(anim, 10, ofsPlt);
+            {
+                MemBuf scratch = MemBuf.create(anim);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(8);
+                scratch.writer().writeShort((short) (ofsTex));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, anim, 0, anim.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(anim);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(10);
+                scratch.writer().writeShort((short) (ofsPlt));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, anim, 0, anim.length);
+            }
             byte[] dictionary = serialize(G3dDictionary.build(matNames, materialRecords(keys), 8));
             System.arraycopy(dictionary, 0, anim, 12, dictSize);
             copyKeys(anim, keys);
@@ -402,10 +434,42 @@ public class TexturePatternAnimationSet extends G3dFile
         private byte[] materialRecord(int numKf, int offset)
         {
             byte[] record = new byte[8];
-            MemBuf.putUInt16(record, 0, numKf);
-            MemBuf.putUInt16(record, 2, 0);
-            MemBuf.putUInt16(record, 4, keyRatio(numKf));
-            MemBuf.putUInt16(record, 6, offset);
+            {
+                MemBuf scratch = MemBuf.create(record);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(0);
+                scratch.writer().writeShort((short) (numKf));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(record);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(2);
+                scratch.writer().writeShort((short) (0));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(record);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(4);
+                scratch.writer().writeShort((short) (keyRatio(numKf)));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(record);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(6);
+                scratch.writer().writeShort((short) (offset));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+            }
 
             return record;
         }

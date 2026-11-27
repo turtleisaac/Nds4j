@@ -84,7 +84,10 @@ final class NsbBlock
 
         for (byte[] payload : payloads)
         {
-            records.add(MemBuf.le32(cursor));
+            MemBuf word0Buf = MemBuf.create();
+            word0Buf.writer().writeUInt32(cursor);
+            byte[] word0 = word0Buf.reader().getBuffer();
+            records.add(word0);
             cursor += payload.length;
         }
 

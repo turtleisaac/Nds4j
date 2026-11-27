@@ -118,10 +118,42 @@ public class VisibilityAnimationSet extends G3dFile
             blob[1] = 0x00;
             blob[2] = 0x41;
             blob[3] = 0x56; // NNS visibility-anim tag ("V\0AV")
-            MemBuf.putUInt16(blob, 4, nf);
-            MemBuf.putUInt16(blob, 6, nn);
-            MemBuf.putUInt16(blob, 8, size);
-            MemBuf.putUInt16(blob, 10, 0);
+            {
+                MemBuf scratch = MemBuf.create(blob);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(4);
+                scratch.writer().writeShort((short) (nf));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, blob, 0, blob.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(blob);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(6);
+                scratch.writer().writeShort((short) (nn));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, blob, 0, blob.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(blob);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(8);
+                scratch.writer().writeShort((short) (size));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, blob, 0, blob.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(blob);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(10);
+                scratch.writer().writeShort((short) (0));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, blob, 0, blob.length);
+            }
             int bit = 0;
             for (int f = 0; f < nf; f++)
                 for (int n = 0; n < nn; n++)
@@ -137,7 +169,10 @@ public class VisibilityAnimationSet extends G3dFile
         int cursor = 8 + dictSize; // animation data follows magic+size+dict
         for (byte[] blob : blobs)
         {
-            recs.add(MemBuf.le32(cursor));
+            MemBuf word0Buf = MemBuf.create();
+            word0Buf.writer().writeUInt32(cursor);
+            byte[] word0 = word0Buf.reader().getBuffer();
+            recs.add(word0);
             cursor += blob.length;
         }
 
@@ -150,7 +185,10 @@ public class VisibilityAnimationSet extends G3dFile
     private static List<byte[]> placeholders(int n)
     {
         byte[][] rows = new byte[n][];
-        java.util.Arrays.setAll(rows, index -> MemBuf.le32(0));
+        MemBuf word1Buf = MemBuf.create();
+        word1Buf.writer().writeUInt32(0);
+        byte[] word1 = word1Buf.reader().getBuffer();
+        java.util.Arrays.setAll(rows, index -> word1);
 
         return new ArrayList<>(java.util.Arrays.asList(rows));
     }

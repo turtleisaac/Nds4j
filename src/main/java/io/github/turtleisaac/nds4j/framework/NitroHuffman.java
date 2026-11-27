@@ -82,7 +82,7 @@ public final class NitroHuffman
         {
             if (data.length < 9)
                 return false;
-            size = MemBuf.uint32(data, 4);
+            size = wordAt(data, 4);
             headerEnd = 8;
         }
         if (size <= 0 || data.length <= headerEnd)
@@ -147,7 +147,7 @@ public final class NitroHuffman
         if (size != 0)
             return new HuffmanHeader(size, 4);
 
-        return new HuffmanHeader(MemBuf.uint32(data, 4), 8);
+        return new HuffmanHeader(wordAt(data, 4), 8);
     }
 
     /**
@@ -232,7 +232,7 @@ public final class NitroHuffman
         if (cursor.ip + 4 > data.length)
             throw new IllegalArgumentException("truncated Nitro Huffman bitstream");
 
-        cursor.word = (int) MemBuf.uint32(data, cursor.ip);
+        cursor.word = (int) wordAt(data, cursor.ip);
         cursor.ip += 4;
         cursor.bitsLeft = 32;
     }
@@ -585,6 +585,20 @@ public final class NitroHuffman
             n.freq = child0.freq + child1.freq;
             return n;
         }
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param offset index of a little-endian word
+     * @return that word
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static long wordAt(byte[] data, int offset)
+    {
+        byte[] word = new byte[4];
+        System.arraycopy(data, offset, word, 0, 4);
+
+        return MemBuf.create(word).reader().readUInt32();
     }
 
     private static long u24(byte[] d, int off)

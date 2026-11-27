@@ -88,7 +88,10 @@ public class NitroFont extends GenericNtrFile
         {
             if (pos + 8 > blockRegion.length)
                 throw new RuntimeException("Malformed NFTR: block " + i + " runs past end of file");
-            long blockSize = MemBuf.uint32(blockRegion, pos + 4);
+            MemBuf.MemBufReader field0Reader = MemBuf.create(blockRegion).reader();
+            field0Reader.setPosition(pos + 4);
+            long field0 = field0Reader.readUInt32();
+            long blockSize = field0;
             if (blockSize < 8 || pos + blockSize > blockRegion.length)
                 throw new RuntimeException("Malformed NFTR: block " + i + " has an out-of-range size (" + blockSize + ")");
             blockStarts.add(pos);
@@ -412,15 +415,30 @@ public class NitroFont extends GenericNtrFile
             body = b;
             fontType = u8(d, b);
             lineFeed = u8(d, b + 1);
-            defaultCharIndex = MemBuf.uint16(d, b + 2);
+            MemBuf.MemBufReader field1Reader = MemBuf.create(d).reader();
+            field1Reader.setPosition(b + 2);
+            int field1 = field1Reader.readUInt16();
+            defaultCharIndex = field1;
             defaultLeft = s8(d, b + 4);
             defaultGlyphWidth = u8(d, b + 5);
             defaultCharWidth = u8(d, b + 6);
             encoding = u8(d, b + 7);
-            glyphOffset = MemBuf.uint32(d, b + 8);
-            widthOffset = MemBuf.uint32(d, b + 12);
-            mapOffset = MemBuf.uint32(d, b + 16);
-            long blockLen = MemBuf.uint32(d, blockStart + 4);
+            MemBuf.MemBufReader field2Reader = MemBuf.create(d).reader();
+            field2Reader.setPosition(b + 8);
+            long field2 = field2Reader.readUInt32();
+            glyphOffset = field2;
+            MemBuf.MemBufReader field3Reader = MemBuf.create(d).reader();
+            field3Reader.setPosition(b + 12);
+            long field3 = field3Reader.readUInt32();
+            widthOffset = field3;
+            MemBuf.MemBufReader field4Reader = MemBuf.create(d).reader();
+            field4Reader.setPosition(b + 16);
+            long field4 = field4Reader.readUInt32();
+            mapOffset = field4;
+            MemBuf.MemBufReader field5Reader = MemBuf.create(d).reader();
+            field5Reader.setPosition(blockStart + 4);
+            long field5 = field5Reader.readUInt32();
+            long blockLen = field5;
             if (blockLen >= 0x20)
             {
                 height = u8(d, b + 20);
@@ -587,13 +605,19 @@ public class NitroFont extends GenericNtrFile
             int b = blockStart + 8;
             cellWidth = u8(d, b);
             cellHeight = u8(d, b + 1);
-            cellSize = MemBuf.uint16(d, b + 2);
+            MemBuf.MemBufReader field6Reader = MemBuf.create(d).reader();
+            field6Reader.setPosition(b + 2);
+            int field6 = field6Reader.readUInt16();
+            cellSize = field6;
             baselinePos = s8(d, b + 4);
             maxCharWidth = u8(d, b + 5);
             bpp = u8(d, b + 6);
             flags = u8(d, b + 7);
             bitmapStart = b + 8;
-            long blockLen = MemBuf.uint32(d, blockStart + 4);
+            MemBuf.MemBufReader field7Reader = MemBuf.create(d).reader();
+            field7Reader.setPosition(blockStart + 4);
+            long field7 = field7Reader.readUInt32();
+            long blockLen = field7;
             int dataBytes = (int) blockLen - 0x10;
             numGlyphs = cellSize > 0 ? dataBytes / cellSize : 0;
         }
@@ -735,14 +759,26 @@ public class NitroFont extends GenericNtrFile
         {
             file = d;
             int b = blockStart + 8;
-            indexBegin = MemBuf.uint16(d, b);
-            indexEnd = MemBuf.uint16(d, b + 2);
-            nextOffset = MemBuf.uint32(d, b + 4);
+            MemBuf.MemBufReader field8Reader = MemBuf.create(d).reader();
+            field8Reader.setPosition(b);
+            int field8 = field8Reader.readUInt16();
+            indexBegin = field8;
+            MemBuf.MemBufReader field9Reader = MemBuf.create(d).reader();
+            field9Reader.setPosition(b + 2);
+            int field9 = field9Reader.readUInt16();
+            indexEnd = field9;
+            MemBuf.MemBufReader field10Reader = MemBuf.create(d).reader();
+            field10Reader.setPosition(b + 4);
+            long field10 = field10Reader.readUInt32();
+            nextOffset = field10;
             entryBase = b + 8;
             // Some retail (Game Freak) fonts store an ill-formed range (indexEnd < indexBegin); treat that
             // as "no decodable entries" rather than reading garbage. The block is still preserved verbatim.
             int count = indexEnd >= indexBegin ? (indexEnd - indexBegin + 1) : 0;
-            long blockLen = MemBuf.uint32(d, blockStart + 4);
+            MemBuf.MemBufReader field11Reader = MemBuf.create(d).reader();
+            field11Reader.setPosition(blockStart + 4);
+            long field11 = field11Reader.readUInt32();
+            long blockLen = field11;
             int available = ((int) blockLen - 0x10) / 3;
             if (count > available)
                 count = Math.max(available, 0);
@@ -824,25 +860,47 @@ public class NitroFont extends GenericNtrFile
         CharMap(byte[] d, int blockStart)
         {
             int b = blockStart + 8;
-            codeBegin = MemBuf.uint16(d, b);
-            codeEnd = MemBuf.uint16(d, b + 2);
-            mapType = MemBuf.uint16(d, b + 4); // low half of the u32 map-type field
-            nextOffset = MemBuf.uint32(d, b + 8);
+            MemBuf.MemBufReader field12Reader = MemBuf.create(d).reader();
+            field12Reader.setPosition(b);
+            int field12 = field12Reader.readUInt16();
+            codeBegin = field12;
+            MemBuf.MemBufReader field13Reader = MemBuf.create(d).reader();
+            field13Reader.setPosition(b + 2);
+            int field13 = field13Reader.readUInt16();
+            codeEnd = field13;
+            MemBuf.MemBufReader field14Reader = MemBuf.create(d).reader();
+            field14Reader.setPosition(b + 4);
+            int field14 = field14Reader.readUInt16();
+            mapType = field14; // low half of the u32 map-type field
+            MemBuf.MemBufReader field15Reader = MemBuf.create(d).reader();
+            field15Reader.setPosition(b + 8);
+            long field15 = field15Reader.readUInt32();
+            nextOffset = field15;
             int mapBase = b + 12;
             switch (mapType)
             {
                 case 0: // direct: a single base index, incremented per code point
-                    directBase = MemBuf.uint16(d, mapBase);
+                {
+                    MemBuf.MemBufReader field16Reader = MemBuf.create(d).reader();
+                    field16Reader.setPosition(mapBase);
+                    int field16 = field16Reader.readUInt16();
+                    directBase = field16;
                     tableIndices = null;
                     pairCodes = null;
                     pairGlyphs = null;
                     break;
+                }
                 case 1: // table: one u16 glyph index per code point in [begin, end]
                 {
                     int n = codeEnd - codeBegin + 1;
                     tableIndices = new int[Math.max(0, n)];
                     for (int i = 0; i < tableIndices.length; i++)
-                        tableIndices[i] = MemBuf.uint16(d, mapBase + i * 2);
+                    {
+                        MemBuf.MemBufReader field17Reader = MemBuf.create(d).reader();
+                        field17Reader.setPosition(mapBase + i * 2);
+                        int field17 = field17Reader.readUInt16();
+                        tableIndices[i] = field17;
+                    }
                     directBase = -1;
                     pairCodes = null;
                     pairGlyphs = null;
@@ -850,13 +908,22 @@ public class NitroFont extends GenericNtrFile
                 }
                 case 2: // sparse pairs: a count, then (code, glyph) u16 pairs
                 {
-                    int n = MemBuf.uint16(d, mapBase);
+                    MemBuf.MemBufReader field18Reader = MemBuf.create(d).reader();
+                    field18Reader.setPosition(mapBase);
+                    int field18 = field18Reader.readUInt16();
+                    int n = field18;
                     pairCodes = new int[n];
                     pairGlyphs = new int[n];
                     for (int i = 0; i < n; i++)
                     {
-                        pairCodes[i] = MemBuf.uint16(d, mapBase + 2 + i * 4);
-                        pairGlyphs[i] = MemBuf.uint16(d, mapBase + 2 + i * 4 + 2);
+                        MemBuf.MemBufReader field19Reader = MemBuf.create(d).reader();
+                        field19Reader.setPosition(mapBase + 2 + i * 4);
+                        int field19 = field19Reader.readUInt16();
+                        pairCodes[i] = field19;
+                        MemBuf.MemBufReader field20Reader = MemBuf.create(d).reader();
+                        field20Reader.setPosition(mapBase + 2 + i * 4 + 2);
+                        int field20 = field20Reader.readUInt16();
+                        pairGlyphs[i] = field20;
                     }
                     directBase = -1;
                     tableIndices = null;

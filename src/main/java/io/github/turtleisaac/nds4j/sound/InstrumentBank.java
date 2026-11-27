@@ -124,7 +124,10 @@ public class InstrumentBank extends GenericNtrFile
         for (int i = 0; i < count; i++)
         {
             int type = data[tablePos] & 0xFF;
-            int off = MemBuf.uint16(data, tablePos + 1);
+            MemBuf.MemBufReader field0Reader = MemBuf.create(data).reader();
+            field0Reader.setPosition(tablePos + 1);
+            int field0 = field0Reader.readUInt16();
+            int off = field0;
             tablePos += 4; // u8 type, u16 offset, u8 padding
             instruments.add(parseInstrument(data, type, off));
         }
@@ -215,7 +218,10 @@ public class InstrumentBank extends GenericNtrFile
         if (p + 12 > d.length)
             return;
 
-        int subType = MemBuf.uint16(d, p);
+        MemBuf.MemBufReader field1Reader = MemBuf.create(d).reader();
+        field1Reader.setPosition(p);
+        int field1 = field1Reader.readUInt16();
+        int subType = field1;
         inst.regions.add(readBody(d, p + 2, subType));
         fillDrum(d, inst, high, p + 12, note + 1);
     }
@@ -280,7 +286,10 @@ public class InstrumentBank extends GenericNtrFile
     {
         if (p + 12 <= d.length)
         {
-            int subType = MemBuf.uint16(d, p);
+            MemBuf.MemBufReader field2Reader = MemBuf.create(d).reader();
+            field2Reader.setPosition(p);
+            int field2 = field2Reader.readUInt16();
+            int subType = field2;
             NoteRegion region = readBody(d, p + 2, subType);
             inst.regions.add(region);
             fillSplit(d, inst, regionCount, p + 12, i + 1);
@@ -290,8 +299,14 @@ public class InstrumentBank extends GenericNtrFile
     /** 10-byte instrument body: u16 wave, u16 waveArc, u8 note, u8 attack, u8 decay, u8 sustain, u8 release, u8 pan. */
     private NoteRegion readBody(byte[] d, int p, int recordType)
     {
-        int wave = MemBuf.uint16(d, p);
-        int waveArc = MemBuf.uint16(d, p + 2);
+        MemBuf.MemBufReader field3Reader = MemBuf.create(d).reader();
+        field3Reader.setPosition(p);
+        int field3 = field3Reader.readUInt16();
+        int wave = field3;
+        MemBuf.MemBufReader field4Reader = MemBuf.create(d).reader();
+        field4Reader.setPosition(p + 2);
+        int field4 = field4Reader.readUInt16();
+        int waveArc = field4;
         int note = d[p + 4] & 0xFF;
         int attack = d[p + 5] & 0xFF;
         int decay = d[p + 6] & 0xFF;

@@ -40,12 +40,52 @@ class InstrumentBankTest
     {
         byte[] file = new byte[0x120];
         System.arraycopy("SBNK".getBytes(StandardCharsets.US_ASCII), 0, file, 0, 4);
-        MemBuf.putUInt16(file, 4, 0xFEFF);
-        MemBuf.putUInt16(file, 6, 0x0100);
-        MemBuf.putUInt16(file, 12, 0x10);
-        MemBuf.putUInt16(file, 14, 1);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeShort((short) (0xFEFF));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(6);
+            scratch.writer().writeShort((short) (0x0100));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(12);
+            scratch.writer().writeShort((short) (0x10));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(14);
+            scratch.writer().writeShort((short) (1));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         System.arraycopy("DATA".getBytes(StandardCharsets.US_ASCII), 0, file, 0x10, 4);
-        MemBuf.putUInt32(file, 0x38, 5);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x38);
+            scratch.writer().writeUInt32(5);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
 
         int table = 0x3C;
         int pcm = 0x50;
@@ -55,16 +95,48 @@ class InstrumentBankTest
         // drum: notes 36 and 37, each a 12-byte record after the two range bytes
         file[drum] = 36;
         file[drum + 1] = 37;
-        MemBuf.putUInt16(file, drum + 2, 1);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(drum + 2);
+            scratch.writer().writeShort((short) (1));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         body(file, drum + 4, 1, 0, 36, 0, 0, 0, 0, 32);
-        MemBuf.putUInt16(file, drum + 14, 2);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(drum + 14);
+            scratch.writer().writeShort((short) (2));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         body(file, drum + 16, 5, 0, 37, 0, 0, 0, 0, 40);
         // key split: bounds 48 and 72, then two regions
         file[split] = 48;
         file[split + 1] = 72;
-        MemBuf.putUInt16(file, split + 8, 1);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(split + 8);
+            scratch.writer().writeShort((short) (1));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         body(file, split + 10, 9, 1, 48, 8, 7, 6, 5, 10);
-        MemBuf.putUInt16(file, split + 20, 3);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(split + 20);
+            scratch.writer().writeShort((short) (3));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         body(file, split + 22, 0, 0, 72, 1, 1, 1, 1, 20);
 
         entry(file, table, 0, 0);
@@ -110,14 +182,38 @@ class InstrumentBankTest
     private static void entry(byte[] file, int at, int type, int offset)
     {
         file[at] = (byte) type;
-        MemBuf.putUInt16(file, at + 1, offset);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(at + 1);
+            scratch.writer().writeShort((short) (offset));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
     }
 
     private static void body(byte[] file, int at, int wave, int arc, int note, int attack, int decay, int sustain,
             int release, int pan)
     {
-        MemBuf.putUInt16(file, at, wave);
-        MemBuf.putUInt16(file, at + 2, arc);
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(at);
+            scratch.writer().writeShort((short) (wave));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(file);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(at + 2);
+            scratch.writer().writeShort((short) (arc));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, file, 0, file.length);
+        }
         file[at + 4] = (byte) note;
         file[at + 5] = (byte) attack;
         file[at + 6] = (byte) decay;

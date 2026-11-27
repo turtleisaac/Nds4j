@@ -304,6 +304,10 @@
                             <version>4.41</version>
                             <file>${project.basedir}/config/eclipse-formatter.xml</file>
                         </eclipse>
+                        <!-- MemBuf keeps main's formatting so the diff is only the new primitives. -->
+                        <excludes>
+                            <exclude>src/main/java/io/github/turtleisaac/nds4j/framework/MemBuf.java</exclude>
+                        </excludes>
                     </java>
                 </configuration>
                 <executions>

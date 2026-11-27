@@ -77,7 +77,10 @@ final class Fx
      */
     static int uint16(byte[] data, int offset)
     {
-        return MemBuf.uint16(data, offset);
+        // The two field bytes, not the whole block: palette walks call this once per color.
+        MemBuf.MemBufReader reader = MemBuf.create(new byte[] { data[offset], data[offset + 1] }).reader();
+
+        return reader.readUInt16();
     }
 
     /**
@@ -88,7 +91,10 @@ final class Fx
      */
     static long uint32(byte[] data, int offset)
     {
-        return MemBuf.uint32(data, offset);
+        MemBuf.MemBufReader reader = MemBuf.create(new byte[] {
+                data[offset], data[offset + 1], data[offset + 2], data[offset + 3] }).reader();
+
+        return reader.readUInt32();
     }
 
     /**

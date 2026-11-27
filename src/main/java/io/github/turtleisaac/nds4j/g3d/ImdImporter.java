@@ -224,40 +224,181 @@ public final class ImdImporter
         int ofsShp = ofsMat + matSet.length;
         int modelLen = ofsShp + shapeSet.length;
         byte[] model = new byte[modelLen];
-        MemBuf.putUInt32(model, 0, modelLen);
-        MemBuf.putUInt32(model, 4, ofsSbc);
-        MemBuf.putUInt32(model, 8, ofsMat);
-        MemBuf.putUInt32(model, 12, ofsShp);
-        MemBuf.putUInt32(model, 16, modelLen); // ofsEndOrEnvelope: past the last section (no envelope)
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0);
+            scratch.writer().writeUInt32(modelLen);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeUInt32(ofsSbc);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(8);
+            scratch.writer().writeUInt32(ofsMat);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(12);
+            scratch.writer().writeUInt32(ofsShp);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(16);
+            scratchWriter.writeUInt32(modelLen); // ofsEndOrEnvelope: past the last section (no envelope)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+
         int info = 0x14;
         model[info + 3] = (byte) nodes.size(); // numNode
         model[info + 4] = (byte) materials.size(); // matCount
         model[info + 5] = (byte) polygons.size(); // shapeCount
         model[info + 6] = (byte) firstUnused[0]; // firstUnusedMtxStackId (matrix-stack high-water)
-        MemBuf.putUInt32(model, info + 8, (long) posScale * 4096); // posScale (fx32)
-        MemBuf.putUInt32(model, info + 0xC, 4096L / posScale); // inverse posScale
-        MemBuf.putUInt16(model, info + 0x10, numVtx);
-        MemBuf.putUInt16(model, info + 0x12, numPoly);
-        MemBuf.putUInt16(model, info + 0x14, numTri);
-        MemBuf.putUInt16(model, info + 0x16, numQuad);
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 8);
+            scratchWriter.writeUInt32((long) posScale * 4096); // posScale (fx32)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0xC);
+            scratchWriter.writeUInt32(4096L / posScale); // inverse posScale
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x10);
+            scratch.writer().writeShort((short) (numVtx));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x12);
+            scratch.writer().writeShort((short) (numPoly));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x14);
+            scratch.writer().writeShort((short) (numTri));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x16);
+            scratch.writer().writeShort((short) (numQuad));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
         for (int c = 0; c < 3; c++)
         {
-            MemBuf.putUInt16(model, info + 0x18 + c * 2, fx(boxXyz[c], 12) & 0xFFFF); // box min corner
-            MemBuf.putUInt16(model, info + 0x1E + c * 2, fx(boxWhd[c], 12) & 0xFFFF); // box dimensions
+            {
+                MemBuf scratch = MemBuf.create(model);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(info + 0x18 + c * 2);
+                scratchWriter.writeShort((short) (fx(boxXyz[c], 12) & 0xFFFF)); // box min corner
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+            }
+
+            {
+                MemBuf scratch = MemBuf.create(model);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(info + 0x1E + c * 2);
+                scratchWriter.writeShort((short) (fx(boxWhd[c], 12) & 0xFFFF)); // box dimensions
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+            }
+
         }
-        MemBuf.putUInt32(model, info + 0x24, (long) boxScale * 4096); // boxPosScale (fx32)
-        MemBuf.putUInt32(model, info + 0x28, 4096L / boxScale); // inverse boxPosScale
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x24);
+            scratchWriter.writeUInt32((long) boxScale * 4096); // boxPosScale (fx32)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(model);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(info + 0x28);
+            scratchWriter.writeUInt32(4096L / boxScale); // inverse boxPosScale
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, model, 0, model.length);
+        }
+
         System.arraycopy(nodeSet, 0, model, headerLen, nodeSet.length);
         System.arraycopy(sbc, 0, model, ofsSbc, sbc.length);
         System.arraycopy(matSet, 0, model, ofsMat, matSet.length);
         System.arraycopy(shapeSet, 0, model, ofsShp, shapeSet.length);
 
-        int modelStart = 8 + serialize(G3dDictionary.build(List.of(modelName), List.of(MemBuf.le32(0)), 4)).length;
-        byte[] modelDict = serialize(G3dDictionary.build(List.of(modelName), List.of(MemBuf.le32(modelStart)), 4));
+        MemBuf word0Buf = MemBuf.create();
+        word0Buf.writer().writeUInt32(0);
+        byte[] word0 = word0Buf.reader().getBuffer();
+        int modelStart = 8 + serialize(G3dDictionary.build(List.of(modelName), List.of(word0), 4)).length;
+        MemBuf word1Buf = MemBuf.create();
+        word1Buf.writer().writeUInt32(modelStart);
+        byte[] word1 = word1Buf.reader().getBuffer();
+        byte[] modelDict = serialize(G3dDictionary.build(List.of(modelName), List.of(word1), 4));
         int mdl0Len = modelStart + model.length;
         byte[] mdl0 = new byte[mdl0Len];
         System.arraycopy("MDL0".getBytes(StandardCharsets.US_ASCII), 0, mdl0, 0, 4);
-        MemBuf.putUInt32(mdl0, 4, mdl0Len);
+        {
+            MemBuf scratch = MemBuf.create(mdl0);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeUInt32(mdl0Len);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, mdl0, 0, mdl0.length);
+        }
         System.arraycopy(modelDict, 0, mdl0, 8, modelDict.length);
         System.arraycopy(model, 0, mdl0, modelStart, model.length);
         return mdl0;
@@ -296,10 +437,30 @@ public final class ImdImporter
         long texImageParam = ((long) 3 << 26) | ((long) widthSel << 20) | ((long) heightSel << 23)
                 | (color0Transparent ? 1L << 29 : 0);
         byte[] texRec = new byte[8];
-        MemBuf.putUInt32(texRec, 0, texImageParam);
-        MemBuf.putUInt32(texRec, 4, 0x80008010L); // extraParam (observed; texel-key/flags)
+        {
+            MemBuf scratch = MemBuf.create(texRec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0);
+            scratch.writer().writeUInt32(texImageParam);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, texRec, 0, texRec.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(texRec);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratchWriter.writeUInt32(0x80008010L); // extraParam (observed; texel-key/flags)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, texRec, 0, texRec.length);
+        }
+
         byte[] texDict = serialize(G3dDictionary.build(List.of(texName), List.of(texRec), 8));
-        byte[] plttDict = serialize(G3dDictionary.build(List.of(pltName), List.of(MemBuf.le32(0)), 4));
+        MemBuf word2Buf = MemBuf.create();
+        word2Buf.writer().writeUInt32(0);
+        byte[] word2 = word2Buf.reader().getBuffer();
+        byte[] plttDict = serialize(G3dDictionary.build(List.of(pltName), List.of(word2), 4));
 
         int header = 0x3c;
         int ofsDict = header;
@@ -309,16 +470,101 @@ public final class ImdImporter
         int blockSize = ofsPltData + palette.length;
         byte[] b = new byte[blockSize];
         System.arraycopy("TEX0".getBytes(StandardCharsets.US_ASCII), 0, b, 0, 4);
-        MemBuf.putUInt32(b, 4, blockSize);
-        MemBuf.putUInt16(b, 12, texel.length >> 3); // sizeTex (8-byte units)
-        MemBuf.putUInt16(b, 14, ofsDict);
-        MemBuf.putUInt32(b, 20, ofsTexData);
-        MemBuf.putUInt16(b, 30, ofsDict); // Tex4x4Info dict (points at the tex dict; no 4x4 data)
-        MemBuf.putUInt32(b, 36, ofsPltData); // ofsTex4x4Data / PlttIdx point past the texel data
-        MemBuf.putUInt32(b, 40, ofsPltData);
-        MemBuf.putUInt16(b, 48, palette.length >> 3); // sizePltt (8-byte units)
-        MemBuf.putUInt16(b, 52, ofsPltDict);
-        MemBuf.putUInt32(b, 56, ofsPltData); // plttDataOfs
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeUInt32(blockSize);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(12);
+            scratchWriter.writeShort((short) (texel.length >> 3)); // sizeTex (8-byte units)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(14);
+            scratch.writer().writeShort((short) (ofsDict));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(20);
+            scratch.writer().writeUInt32(ofsTexData);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(30);
+            scratchWriter.writeShort((short) (ofsDict)); // Tex4x4Info dict (points at the tex dict; no 4x4 data)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(36);
+            scratchWriter.writeUInt32(ofsPltData); // ofsTex4x4Data / PlttIdx point past the texel data
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(40);
+            scratch.writer().writeUInt32(ofsPltData);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(48);
+            scratchWriter.writeShort((short) (palette.length >> 3)); // sizePltt (8-byte units)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(52);
+            scratch.writer().writeShort((short) (ofsPltDict));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(b);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(56);
+            scratchWriter.writeUInt32(ofsPltData); // plttDataOfs
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, b, 0, b.length);
+        }
+
         System.arraycopy(texDict, 0, b, ofsDict, texDict.length);
         System.arraycopy(plttDict, 0, b, ofsPltDict, plttDict.length);
         System.arraycopy(texel, 0, b, ofsTexData, texel.length);
@@ -426,7 +672,10 @@ public final class ImdImporter
 
         for (int i = 0; i < n; i++)
         {
-            recs.add(MemBuf.le32(cursor));
+            MemBuf word3Buf = MemBuf.create();
+            word3Buf.writer().writeUInt32(cursor);
+            byte[] word3 = word3Buf.reader().getBuffer();
+            recs.add(word3);
             cursor += structs[i].length;
         }
         MemBuf buf = MemBuf.create();
@@ -1156,7 +1405,12 @@ public final class ImdImporter
 
         List<byte[]> dummy = new ArrayList<>();
         for (int i = 0; i < n; i++)
-            dummy.add(MemBuf.le32(0));
+        {
+            MemBuf word4Buf = MemBuf.create();
+            word4Buf.writer().writeUInt32(0);
+            byte[] word4 = word4Buf.reader().getBuffer();
+            dummy.add(word4);
+        }
         int matDictLen = serialize(G3dDictionary.build(matNames, dummy, 4)).length;
         int texDictLen = serialize(G3dDictionary.build(new ArrayList<>(byTex.keySet()), placeholders(byTex.size()), 4)).length;
         int pltDictLen = serialize(G3dDictionary.build(new ArrayList<>(byPlt.keySet()), placeholders(byPlt.size()), 4)).length;
@@ -1170,7 +1424,10 @@ public final class ImdImporter
 
         for (Map.Entry<String, List<Integer>> entry : byTex.entrySet())
         {
-            texRecs.add(MemBuf.le32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
+            MemBuf word5Buf = MemBuf.create();
+            word5Buf.writer().writeUInt32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16));
+            byte[] word5 = word5Buf.reader().getBuffer();
+            texRecs.add(word5);
 
             for (int material : entry.getValue())
                 idx.writeByte((byte) material);
@@ -1180,7 +1437,10 @@ public final class ImdImporter
 
         for (Map.Entry<String, List<Integer>> entry : byPlt.entrySet())
         {
-            pltRecs.add(MemBuf.le32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
+            MemBuf word6Buf = MemBuf.create();
+            word6Buf.writer().writeUInt32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16));
+            byte[] word6 = word6Buf.reader().getBuffer();
+            pltRecs.add(word6);
 
             for (int material : entry.getValue())
                 idx.writeByte((byte) material);
@@ -1190,11 +1450,32 @@ public final class ImdImporter
         int setLen = structsBase + 44 * n;
 
         byte[] set = new byte[setLen];
-        MemBuf.putUInt16(set, 0, ofsTexDict);
-        MemBuf.putUInt16(set, 2, ofsPltDict);
+        {
+            MemBuf scratch = MemBuf.create(set);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0);
+            scratch.writer().writeShort((short) (ofsTexDict));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, set, 0, set.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(set);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(2);
+            scratch.writer().writeShort((short) (ofsPltDict));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, set, 0, set.length);
+        }
         List<byte[]> matRecs = new ArrayList<>();
         for (int i = 0; i < n; i++)
-            matRecs.add(MemBuf.le32(structsBase + i * 44));
+        {
+            MemBuf word7Buf = MemBuf.create();
+            word7Buf.writer().writeUInt32(structsBase + i * 44);
+            byte[] word7 = word7Buf.reader().getBuffer();
+            matRecs.add(word7);
+        }
         System.arraycopy(serialize(G3dDictionary.build(matNames, matRecs, 4)), 0, set, 4, matDictLen);
         System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byTex.keySet()), texRecs, 4)), 0, set, ofsTexDict, texDictLen);
         System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byPlt.keySet()), pltRecs, 4)), 0, set, ofsPltDict, pltDictLen);
@@ -1209,10 +1490,42 @@ public final class ImdImporter
     {
         String tex = blocks("tex_image").get(texIdx);
         byte[] ms = new byte[44];
-        MemBuf.putUInt16(ms, 0, 0);
-        MemBuf.putUInt16(ms, 2, 44);
-        MemBuf.putUInt32(ms, 4, rgb15(doubles(a(m, "diffuse"))) | (1 << 15) | (rgb15(doubles(a(m, "ambient"))) << 16));
-        MemBuf.putUInt32(ms, 8, rgb15(doubles(a(m, "specular"))) | (rgb15(doubles(a(m, "emission"))) << 16));
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0);
+            scratch.writer().writeShort((short) (0));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(2);
+            scratch.writer().writeShort((short) (44));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(4);
+            scratch.writer().writeUInt32(rgb15(doubles(a(m, "diffuse"))) | (1 << 15) | (rgb15(doubles(a(m, "ambient"))) << 16));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(8);
+            scratch.writer().writeUInt32(rgb15(doubles(a(m, "specular"))) | (rgb15(doubles(a(m, "emission"))) << 16));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
         int alpha = Integer.parseInt(a(m, "alpha"));
         int lights = 0;
         for (int i = 0; i < 4; i++)
@@ -1221,17 +1534,100 @@ public final class ImdImporter
         int mode = polygonMode(a(m, "polygon_mode")); // modulate=0, decal=1, toon=2, shadow=3
         String face = a(m, "face");
         int cull = "back".equals(face) ? 0x40 : "both".equals(face) ? 0xC0 : 0x80; // render front (default)
-        MemBuf.putUInt32(ms, 0x0C, ((long) alpha << 16) | cull | ((long) mode << 4) | lights); // polygon_attr
-        MemBuf.putUInt32(ms, 0x10, 0x3f1ff8ffL); // polygon_attr_mask (constant)
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x0C);
+            scratchWriter.writeUInt32(((long) alpha << 16) | cull | ((long) mode << 4) | lights); // polygon_attr
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x10);
+            scratchWriter.writeUInt32(0x3f1ff8ffL); // polygon_attr_mask (constant)
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+
         String[] tiling = a(m, "tex_tiling").split("\\s+");
-        MemBuf.putUInt32(ms, 0x14, wrapBits(tiling[0], 16, 18) | wrapBits(tiling[1], 17, 19)); // teximage_param wrap/flip
-        MemBuf.putUInt32(ms, 0x18, 0xffffffffL);
-        MemBuf.putUInt16(ms, 0x1C, 0);
-        MemBuf.putUInt16(ms, 0x1E, 0x1fce);
-        MemBuf.putUInt16(ms, 0x20, Integer.parseInt(a(tex, "width")));
-        MemBuf.putUInt16(ms, 0x22, Integer.parseInt(a(tex, "height")));
-        MemBuf.putUInt32(ms, 0x24, 0x1000);
-        MemBuf.putUInt32(ms, 0x28, 0x1000);
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x14);
+            scratchWriter.writeUInt32(wrapBits(tiling[0], 16, 18) | wrapBits(tiling[1], 17, 19)); // teximage_param wrap/flip
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x18);
+            scratch.writer().writeUInt32(0xffffffffL);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x1C);
+            scratch.writer().writeShort((short) (0));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x1E);
+            scratch.writer().writeShort((short) (0x1fce));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x20);
+            scratch.writer().writeShort((short) (Integer.parseInt(a(tex, "width"))));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x22);
+            scratch.writer().writeShort((short) (Integer.parseInt(a(tex, "height"))));
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x24);
+            scratch.writer().writeUInt32(0x1000);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
+        {
+            MemBuf scratch = MemBuf.create(ms);
+            MemBuf.MemBufWriter scratchWriter = scratch.writer();
+            int scratchEnd = scratchWriter.getPosition();
+            scratchWriter.setPosition(0x28);
+            scratch.writer().writeUInt32(0x1000);
+            scratchWriter.setPosition(scratchEnd);
+            System.arraycopy(scratch.reader().getBuffer(), 0, ms, 0, ms.length);
+        }
         return ms;
     }
 
@@ -1250,13 +1646,49 @@ public final class ImdImporter
         for (int i = 0; i < n; i++)
         {
             int structOfs = dictLen + i * 16;
-            recs.add(MemBuf.le32(structOfs));
+            MemBuf word8Buf = MemBuf.create();
+            word8Buf.writer().writeUInt32(structOfs);
+            byte[] word8 = word8Buf.reader().getBuffer();
+            recs.add(word8);
             String prim = polygons.get(i).replaceAll("(?s).*<primitive[^>]*>(.*?)</primitive>.*", "$1");
             int vtxFlags = (prim.contains("<nrm") ? 1 : 0) | (prim.contains("<clr") ? 2 : 0) | (prim.contains("<tex") ? 4 : 0);
-            MemBuf.putUInt16(structs[i], 2, 0x10);
-            MemBuf.putUInt32(structs[i], 4, vtxFlags);
-            MemBuf.putUInt32(structs[i], 8, dlCursor - structOfs); // dlOffset relative to this struct
-            MemBuf.putUInt32(structs[i], 12, dls.get(i).length);
+            {
+                MemBuf scratch = MemBuf.create(structs[i]);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(2);
+                scratch.writer().writeShort((short) (0x10));
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, structs[i], 0, structs[i].length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(structs[i]);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(4);
+                scratch.writer().writeUInt32(vtxFlags);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, structs[i], 0, structs[i].length);
+            }
+            {
+                MemBuf scratch = MemBuf.create(structs[i]);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(8);
+                scratchWriter.writeUInt32(dlCursor - structOfs); // dlOffset relative to this struct
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, structs[i], 0, structs[i].length);
+            }
+
+            {
+                MemBuf scratch = MemBuf.create(structs[i]);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(12);
+                scratch.writer().writeUInt32(dls.get(i).length);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, structs[i], 0, structs[i].length);
+            }
             dlCursor += dls.get(i).length;
         }
         byte[] set = new byte[dlCursor];
@@ -1350,7 +1782,10 @@ public final class ImdImporter
 
         while (left > 0)
         {
-            records.add(0, MemBuf.le32(0));
+            MemBuf word9Buf = MemBuf.create();
+            word9Buf.writer().writeUInt32(0);
+            byte[] word9 = word9Buf.reader().getBuffer();
+            records.add(0, word9);
             left--;
         }
 

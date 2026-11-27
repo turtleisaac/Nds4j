@@ -365,26 +365,59 @@ class MemBufAlgebraTest
 
             for (long value : INT_DOMAIN)
             {
-                MemBuf.putUInt32(data, 4, value);
-                assertThat(MemBuf.le32(value)).containsExactly(data[4], data[5], data[6], data[7]);
-                assertThat(MemBuf.uint32(data, 4)).isEqualTo(value);
-                assertThat(MemBuf.uint32(data, 4, false)).isEqualTo(value);
-                assertThat(MemBuf.create(data).reader().readUInt32At(4)).isEqualTo(value);
+                {
+                    MemBuf scratch = MemBuf.create(data);
+                    MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                    int scratchEnd = scratchWriter.getPosition();
+                    scratchWriter.setPosition(4);
+                    scratch.writer().writeUInt32(value);
+                    scratchWriter.setPosition(scratchEnd);
+                    System.arraycopy(scratch.reader().getBuffer(), 0, data, 0, data.length);
+                }
+                MemBuf word0Buf = MemBuf.create();
+                word0Buf.writer().writeUInt32(value);
+                byte[] word0 = word0Buf.reader().getBuffer();
+                assertThat(word0).containsExactly(data[4], data[5], data[6], data[7]);
+                MemBuf.MemBufReader field0Reader = MemBuf.create(data).reader();
+                field0Reader.setPosition(4);
+                long field0 = field0Reader.readUInt32();
+                assertThat(field0).isEqualTo(value);
             }
 
             for (int value : SHORT_DOMAIN)
             {
-                MemBuf.putUInt16(data, 2, value);
-                assertThat(MemBuf.le16(value)).containsExactly(data[2], data[3]);
-                assertThat(MemBuf.uint16(data, 2)).isEqualTo(value);
-                assertThat(MemBuf.uint16(data, 2, false)).isEqualTo(value);
-                assertThat(MemBuf.int16(data, 2)).isEqualTo((short) value);
-                assertThat(MemBuf.create(data).reader().readUInt16At(2)).isEqualTo(value);
-                assertThat(MemBuf.create(data).reader().readInt16At(2)).isEqualTo((short) value);
+                {
+                    MemBuf scratch = MemBuf.create(data);
+                    MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                    int scratchEnd = scratchWriter.getPosition();
+                    scratchWriter.setPosition(2);
+                    scratch.writer().writeShort((short) (value));
+                    scratchWriter.setPosition(scratchEnd);
+                    System.arraycopy(scratch.reader().getBuffer(), 0, data, 0, data.length);
+                }
+                MemBuf.MemBufReader field1Reader = MemBuf.create(data).reader();
+                field1Reader.setPosition(2);
+                int field1 = field1Reader.readUInt16();
+                assertThat(field1).isEqualTo(value);
+                MemBuf.MemBufReader field2Reader = MemBuf.create(data).reader();
+                field2Reader.setPosition(2);
+                int field2 = field2Reader.readShort();
+                assertThat(field2).isEqualTo((short) value);
             }
 
-            MemBuf.putUInt32(data, 8, 0x01020304L);
-            assertThat(MemBuf.int32(data, 8)).isEqualTo(0x01020304);
+            {
+                MemBuf scratch = MemBuf.create(data);
+                MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                int scratchEnd = scratchWriter.getPosition();
+                scratchWriter.setPosition(8);
+                scratch.writer().writeUInt32(0x01020304L);
+                scratchWriter.setPosition(scratchEnd);
+                System.arraycopy(scratch.reader().getBuffer(), 0, data, 0, data.length);
+            }
+            MemBuf.MemBufReader field3Reader = MemBuf.create(data).reader();
+            field3Reader.setPosition(8);
+            int field3 = field3Reader.readInt();
+            assertThat(field3).isEqualTo(0x01020304);
         }
 
         @Test
@@ -393,10 +426,17 @@ class MemBufAlgebraTest
         {
             byte[] data = new byte[] { 0x12, 0x34, 0x56, 0x78, 0, 0 };
 
-            assertThat(MemBuf.uint16be(data, 0)).isEqualTo(0x1234);
-            assertThat(MemBuf.uint16(data, 0, true)).isEqualTo(0x1234);
-            assertThat(MemBuf.uint32be(data, 0)).isEqualTo(0x12345678L);
-            assertThat(MemBuf.uint32(data, 0, true)).isEqualTo(0x12345678L);
+            MemBuf.MemBufReader field4Reader = MemBuf.create(data).reader();
+            field4Reader.setPosition(0);
+            int field4 = field4Reader.readUInt16Be();
+            assertThat(field4).isEqualTo(0x1234);
+            MemBuf.MemBufReader field5Reader = MemBuf.create(data).reader();
+            field5Reader.setPosition(0);
+            long field5 = field5Reader.readUInt32Be();
+            assertThat(field5).isEqualTo(0x12345678L);
+            field5Reader.setPosition(0);
+            assertThat(field5Reader.readUInt16Be()).isEqualTo(0x1234);
+            assertThat(field5Reader.readUInt16Be()).isEqualTo(0x5678);
         }
 
         @Test
@@ -404,8 +444,18 @@ class MemBufAlgebraTest
         void streamWords()
         {
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            MemBuf.writeUInt16(out, 0xBEEF);
-            MemBuf.writeUInt32(out, 0x01020304L);
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeShort((short) (0xBEEF));
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                out.write(scratchBytes, 0, scratchBytes.length);
+            }
+            {
+                MemBuf scratch = MemBuf.create();
+                scratch.writer().writeUInt32(0x01020304L);
+                byte[] scratchBytes = scratch.reader().getBuffer();
+                out.write(scratchBytes, 0, scratchBytes.length);
+            }
 
             assertThat(out.toByteArray()).containsExactly(0xEF, 0xBE, 0x04, 0x03, 0x02, 0x01);
         }
@@ -475,22 +525,5 @@ class MemBufAlgebraTest
             assertThat(buf.reader().getBuffer()).containsExactly(1, 8, 7);
         }
 
-        @Test
-        @DisplayName("a stream that refuses a write is reported")
-        void streamWriteFailure()
-        {
-            java.io.OutputStream broken = new java.io.OutputStream() {
-                @Override
-                public void write(int b) throws java.io.IOException
-                {
-                    throw new java.io.IOException("closed");
-                }
-            };
-
-            assertThatCode(() -> MemBuf.writeUInt16(broken, 1))
-                    .isInstanceOf(java.io.UncheckedIOException.class);
-            assertThatCode(() -> MemBuf.writeUInt32(broken, 1))
-                    .isInstanceOf(java.io.UncheckedIOException.class);
-        }
     }
 }

@@ -144,7 +144,10 @@ public class MaterialColorAnimationSet extends G3dFile
         MemBuf mat0 = MemBuf.create();
         MemBuf.MemBufWriter writer = mat0.writer();
         writer.write("MAT0".getBytes(StandardCharsets.US_ASCII));
-        writer.write(MemBuf.le32(NsbBlock.end(blobs, origin)));
+        MemBuf word0Buf = MemBuf.create();
+        word0Buf.writer().writeUInt32(NsbBlock.end(blobs, origin));
+        byte[] word0 = word0Buf.reader().getBuffer();
+        writer.write(word0);
         writer.write(serialize(G3dDictionary.build(listed, NsbBlock.offsets(blobs, origin), 4)));
 
         for (byte[] blob : blobs)
@@ -473,7 +476,15 @@ public class MaterialColorAnimationSet extends G3dFile
 
             while (channel < 5)
             {
-                MemBuf.putUInt32(record, channel * 4, retarget(material, channel, newOff));
+                {
+                    MemBuf scratch = MemBuf.create(record);
+                    MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                    int scratchEnd = scratchWriter.getPosition();
+                    scratchWriter.setPosition(channel * 4);
+                    scratch.writer().writeUInt32(retarget(material, channel, newOff));
+                    scratchWriter.setPosition(scratchEnd);
+                    System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+                }
                 channel++;
             }
 

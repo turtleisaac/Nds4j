@@ -138,7 +138,10 @@ public class TextureSrtAnimationSet extends G3dFile
 
         while (index < blobs.length)
         {
-            records.add(MemBuf.le32(cursor));
+            MemBuf word0Buf = MemBuf.create();
+            word0Buf.writer().writeUInt32(cursor);
+            byte[] word0 = word0Buf.reader().getBuffer();
+            records.add(word0);
             cursor += blobs[index].length;
             index++;
         }
@@ -446,9 +449,18 @@ public class TextureSrtAnimationSet extends G3dFile
             long off = param[channel * 2 + 1];
 
             if ((info & ELEM_FX16) != 0)
-                return MemBuf.le32(off & 0xFFFF);
+            {
+                MemBuf word1Buf = MemBuf.create();
+                word1Buf.writer().writeUInt32(off & 0xFFFF);
+                byte[] word1 = word1Buf.reader().getBuffer();
 
-            return MemBuf.le32(off);
+                return word1;
+            }
+
+            MemBuf word2Buf = MemBuf.create();
+            word2Buf.writer().writeUInt32(off);
+            byte[] word2 = word2Buf.reader().getBuffer();
+            return word2;
         }
 
         /**
@@ -511,7 +523,15 @@ public class TextureSrtAnimationSet extends G3dFile
 
             while (index < 10)
             {
-                MemBuf.putUInt32(record, index * 4, param[index]);
+                {
+                    MemBuf scratch = MemBuf.create(record);
+                    MemBuf.MemBufWriter scratchWriter = scratch.writer();
+                    int scratchEnd = scratchWriter.getPosition();
+                    scratchWriter.setPosition(index * 4);
+                    scratch.writer().writeUInt32(param[index]);
+                    scratchWriter.setPosition(scratchEnd);
+                    System.arraycopy(scratch.reader().getBuffer(), 0, record, 0, record.length);
+                }
                 index++;
             }
 
