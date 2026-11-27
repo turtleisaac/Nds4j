@@ -56,8 +56,7 @@ public class Model
     private final int expectedTriangleCount;
     private final int expectedQuadCount;
     private final int nodeCount;
-    private final float[] headerBoxMin = new float[3];
-    private final float[] headerBoxMax = new float[3];
+    private final Box headerBox;
     private final List<Mesh> meshes = new ArrayList<>();
     private final List<Material> materials = new ArrayList<>();
     // Bind-pose skeleton, retained so an animation can re-pose the model: each node's local transform,
@@ -78,17 +77,20 @@ public class Model
     private double[][] invBind;
     private StackPose.Frame bindFrame;
     // Bind-pose world translation/scale per node (the billboard pivot and its accumulated scale).
-    private double[][] bindWorldTranslation;
-    private double[][] bindWorldScale;
+    private Vec3[] bindWorldTranslation;
+    private Vec3[] bindWorldScale;
 
     Model(byte[] mdl0, int modelStart, String name)
     {
         this.name = name;
 
         MemBuf.MemBufReader model = MemBuf.create(mdl0).reader();
-        int ofsSbc = (int) readU32(mdl0, modelStart + 4);
-        int ofsMat = (int) readU32(mdl0, modelStart + 8);
-        int ofsShp = (int) readU32(mdl0, modelStart + 12);
+        model.setPosition(modelStart + 4);
+        int ofsSbc = model.readInt();
+        model.setPosition(modelStart + 8);
+        int ofsMat = model.readInt();
+        model.setPosition(modelStart + 12);
+        int ofsShp = model.readInt();
         model.setPosition(modelStart);
         int modelSize = model.readInt();
         model.setPosition(modelStart + 16);
@@ -96,10 +98,12 @@ public class Model
 
         // model header (NNS_G3dModelInfo)
         int info = modelStart + 0x14;
-        nodeCount = mdl0[info + 3] & 0xFF;
-        int matCount = mdl0[info + 4] & 0xFF;
-        int shapeCountHeader = mdl0[info + 5] & 0xFF;
-        posScale = readU32(mdl0, info + 8) / 4096.0;
+        model.setPosition(info + 3);
+        nodeCount = model.readByte();
+        int matCount = model.readByte();
+        int shapeCountHeader = model.readByte();
+        model.setPosition(info + 8);
+        posScale = model.readUInt32() / 4096.0;
         model.setPosition(info + 12);
         invPosScale = model.readInt() / 4096.0;
         model.setPosition(info + 1);
@@ -108,20 +112,15 @@ public class Model
         if (ofsEvp != 0)
             invBind = readInvBind(model, modelStart + ofsEvp, modelStart + modelSize, nodeCount, mdl0.length);
 
-        expectedVertexCount = readU16(mdl0, info + 16);
-        expectedTriangleCount = readU16(mdl0, info + 20);
-        expectedQuadCount = readU16(mdl0, info + 22);
+        model.setPosition(info + 16);
+        expectedVertexCount = model.readUInt16();
+        model.setPosition(info + 20);
+        expectedTriangleCount = model.readUInt16();
+        expectedQuadCount = model.readUInt16();
 
         // header bounding box: min corner (x,y,z) then dimensions (w,h,d) as 1.3.12 fixed at info+0x18,
         // scaled by boxPosScale (1.19.12 fixed at info+0x24). This is the placement oracle.
-        double boxScale = readU32(mdl0, info + 0x24) / 4096.0;
-        for (int c = 0; c < 3; c++)
-        {
-            double lo = (short) readU16(mdl0, info + 0x18 + c * 2) / 4096.0 * boxScale;
-            double dim = (short) readU16(mdl0, info + 0x1E + c * 2) / 4096.0 * boxScale;
-            headerBoxMin[c] = (float) lo;
-            headerBoxMax[c] = (float) (lo + dim);
-        }
+        headerBox = readHeaderBox(model, info);
 
         // Materials: name -> texture/palette + texture size, so each shape's UVs can be normalised and
         // pointed at the right texture in the embedded (or sibling) TEX0.
@@ -138,13 +137,13 @@ public class Model
 
         // Retain each node's bind-pose world translation/scale so a billboard node can be re-oriented to
         // face the camera at render time (its authored rotation is discarded for BB/BBY).
-        bindWorldTranslation = new double[nodeWorld.length][];
-        bindWorldScale = new double[nodeWorld.length][];
+        bindWorldTranslation = new Vec3[nodeWorld.length];
+        bindWorldScale = new Vec3[nodeWorld.length];
         for (int n = 0; n < nodeWorld.length; n++)
         {
             Srt w = nodeWorld[n] != null ? nodeWorld[n] : Srt.identity();
-            bindWorldTranslation[n] = w.t.clone();
-            bindWorldScale[n] = w.s.clone();
+            bindWorldTranslation[n] = w.t;
+            bindWorldScale[n] = w.s;
         }
 
         // shape set: a dictionary of shapes, each record a byte offset (relative to the shape set) to a
@@ -155,13 +154,14 @@ public class Model
 
         for (int i = 0; i < shapeDict.size(); i++)
         {
-            int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(i), 0);
+            int shapeStruct = shapeSet + recordOffset(shapeDict.getRecord(i));
             model.setPosition(shapeStruct + 4);
             if ((model.readUInt32() & 8) != 0)
                 envelopeCmd = true;
 
-            int dlOffset = (int) readU32(mdl0, shapeStruct + 8); // relative to the shape struct
-            int dlSize = (int) readU32(mdl0, shapeStruct + 12);
+            model.setPosition(shapeStruct + 8);
+            int dlOffset = model.readInt();
+            int dlSize = model.readInt();
             Mesh mesh = interpretDisplayList(mdl0, shapeStruct + dlOffset, dlSize, shapeDict.getName(i));
 
             int node = (i < shapeNode.length) ? shapeNode[i] : 0;
@@ -187,24 +187,32 @@ public class Model
     // ({@code v' = v * r}), matching the reference {@code renderer.TransfMatrix}.
     private static final class Srt
     {
-        final double[] t; // translation (x,y,z), model units
-        final double[] s; // per-axis scale
-        final double[] r; // 3x3 rotation, row-major
+        final Vec3 t;
+        final Vec3 s;
+        final Mat3 r;
 
-        Srt(double[] t, double[] s, double[] r)
+        /**
+         * @param t translation
+         * @param s per-axis scale
+         * @param r row-major rotation
+         */
+        Srt(Vec3 t, Vec3 s, Mat3 r)
         {
             this.t = t;
             this.s = s;
             this.r = r;
         }
 
+        /**
+         * @return a zero translation, unit scale and identity rotation
+         * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+         */
         static Srt identity()
         {
-            return new Srt(new double[] { 0, 0, 0 }, new double[] { 1, 1, 1 }, IDENT.clone());
+            // A missing node is placed at the origin with no scale or rotation.
+            return new Srt(Vec3.zero(), Vec3.one(), Mat3.identity());
         }
     }
-
-    private static final double[] IDENT = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 
     // Parses each node's local transform (NNS node data): u16 flags, fx16 rotation[0][0], then optional
     // translation (3x fx32), rotation remainder (8x fx16 for a full 3x3, or a compressed pivot form),
@@ -214,118 +222,216 @@ public class Model
     // renderer avoids by composing scale separately (verified against renderer.TransfMatrix).
     private Srt[] parseNodeLocals(byte[] d, int nodeSet)
     {
-        int count = d[nodeSet + 1] & 0xFF;
-        int recordsOffset = nodeSet + 2 + 10 + count * 4 + 4; // dict header + patricia + elemSize/ofsData
-        Srt[] local = new Srt[count];
+        // The node dictionary's records are offsets to each NNSG3dResNodeData.
+        MemBuf.MemBufReader reader = MemBuf.create(d).reader();
+        reader.setPosition(nodeSet);
+        G3dDictionary dict = new G3dDictionary(reader);
+        Srt[] local = new Srt[dict.size()];
 
-        for (int n = 0; n < count; n++)
-        {
-            int p = nodeSet + (int) readU32(d, recordsOffset + n * 4);
-            int flags = readU16(d, p);
-            p += 2;
-            double r00 = (short) readU16(d, p) / 4096.0;
-            p += 2;
-
-            double[] t = { 0, 0, 0 };
-            double[] r = { r00, 0, 0, 0, 1, 0, 0, 0, 1 };
-            double[] s = { 1, 1, 1 };
-
-            p = readVec3(d, p, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_TRANS_ZERO.mask) != 0, t);
-            p = readRotation(d, p, flags, r);
-            readVec3(d, p, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SCALE_ONE.mask) != 0, s);
-
-            local[n] = new Srt(t, s, r);
-        }
+        for (int n = 0; n < dict.size(); n++)
+            local[n] = readNode(d, nodeSet + recordOffset(dict.getRecord(n)));
 
         return local;
     }
 
     /**
-     * @param d model bytes
-     * @param p cursor on the optional vector
-     * @param omit true when the record stores nothing because the vector is the identity
-     * @param dest translation or scale, written when it is stored
-     * @return cursor after the vector
-     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     * @param record a 4-byte dictionary record
+     * @return the little-endian offset it stores
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResDict"
      */
-    private static int readVec3(byte[] d, int p, boolean omit, double[] dest)
+    private static int recordOffset(byte[] record)
     {
-        if (omit)
-            return p;
+        // Node, shape and material records store one offset.
+        MemBuf.MemBufReader reader = MemBuf.create(record).reader();
 
-        dest[0] = readFx32(d, p);
-        dest[1] = readFx32(d, p + 4);
-        dest[2] = readFx32(d, p + 8);
+        return reader.readInt();
+    }
 
-        return p + 12;
+    /**
+     * @param reader a reader on the model bytes
+     * @param info offset of the model info header
+     * @return the header bounding box
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+     */
+    private static Box readHeaderBox(MemBuf.MemBufReader reader, int info)
+    {
+        // Dimensions are fx16, scaled by the header's box position scale.
+        reader.setPosition(info + 0x24);
+        double boxScale = reader.readUInt32() / 4096.0;
+        reader.setPosition(info + 0x18);
+        double x = Fx.fx16(reader.readUInt16()) * boxScale;
+        double y = Fx.fx16(reader.readUInt16()) * boxScale;
+        double z = Fx.fx16(reader.readUInt16()) * boxScale;
+        double w = Fx.fx16(reader.readUInt16()) * boxScale;
+        double h = Fx.fx16(reader.readUInt16()) * boxScale;
+        double d = Fx.fx16(reader.readUInt16()) * boxScale;
+        // Store the same single precision the old header arrays kept.
+        return Box.of(
+                Vec3.of((float) x, (float) y, (float) z),
+                Vec3.of((float) (x + w), (float) (y + h), (float) (z + d)));
     }
 
     /**
      * @param d model bytes
-     * @param p cursor on the optional rotation
-     * @param flags node flag word
-     * @param r rotation, with {@code r[0]} already read
-     * @return cursor after the rotation
+     * @param at absolute offset of one node record
+     * @return that node's translation, rotation and scale
      * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static int readRotation(byte[] d, int p, int flags, double[] r)
+    private static Srt readNode(byte[] d, int at)
     {
+        // Flags, then the stored rotation cell, then the optional vectors.
+        MemBuf.MemBufReader reader = MemBuf.create(d).reader();
+        reader.setPosition(at);
+        int flags = reader.readUInt16();
+        double r00 = Fx.fx16(reader.readUInt16());
+        Vec3 t = optionalVec(reader, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_TRANS_ZERO.mask) != 0, Vec3.zero());
+        Mat3 r = readRotation(reader, flags, r00);
+        Vec3 s = optionalVec(reader, (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SCALE_ONE.mask) != 0, Vec3.one());
+
+        return new Srt(t, s, r);
+    }
+
+    /**
+     * @param reader a reader on the optional vector
+     * @param omit true when the record stores nothing because the vector is the identity
+     * @param identity the value used when {@code omit} is set
+     * @return the stored vector, or {@code identity}
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     */
+    private static Vec3 optionalVec(MemBuf.MemBufReader reader, boolean omit, Vec3 identity)
+    {
+        if (omit)
+            return identity;
+
+        return Fx.readVec3(reader);
+    }
+
+    /**
+     * @param reader a reader on the optional rotation
+     * @param flags node flag word
+     * @param r00 the rotation cell stored ahead of the flag-controlled data
+     * @return the 3×3 rotation
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     */
+    private static Mat3 readRotation(MemBuf.MemBufReader reader, int flags, double r00)
+    {
+        // The leading cell stays in place when the rest of the rotation is omitted.
+        Mat3 partial = Mat3.of(r00, 0, 0, 0, 1, 0, 0, 0, 1);
         if ((flags & NodeSrtFlag.NNS_G3D_SRTFLAG_ROT_ZERO.mask) != 0)
-            return p;
+            return partial;
 
         if ((flags & NodeSrtFlag.NNS_G3D_SRTFLAG_PIVOT_EXIST.mask) != 0)
-            return readPivot(d, p, flags, r);
+            return readPivot(reader, flags, partial);
 
-        r[1] = readFx16(d, p);
-        r[2] = readFx16(d, p + 2);
-        r[3] = readFx16(d, p + 4);
-        r[4] = readFx16(d, p + 6);
-        r[5] = readFx16(d, p + 8);
-        r[6] = readFx16(d, p + 10);
-        r[7] = readFx16(d, p + 12);
-        r[8] = readFx16(d, p + 14);
+        return readFullRotation(reader, r00);
+    }
 
-        return p + 16;
+    /**
+     * @param reader a reader on the eight remaining fx16 cells
+     * @param r00 the cell already consumed
+     * @return the full rotation
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+     */
+    private static Mat3 readFullRotation(MemBuf.MemBufReader reader, double r00)
+    {
+        // The other eight cells follow the one stored before the translation.
+        double r01 = Fx.fx16(reader.readUInt16());
+        double r02 = Fx.fx16(reader.readUInt16());
+        double r10 = Fx.fx16(reader.readUInt16());
+        double r11 = Fx.fx16(reader.readUInt16());
+        double r12 = Fx.fx16(reader.readUInt16());
+        double r20 = Fx.fx16(reader.readUInt16());
+        double r21 = Fx.fx16(reader.readUInt16());
+        double r22 = Fx.fx16(reader.readUInt16());
+
+        return Mat3.of(r00, r01, r02, r10, r11, r12, r20, r21, r22);
     }
 
     /**
      * Pivot-compressed rotation: two values fill a 2x2 minor with a +/-1 pivot cell. The pivot index is
      * flag bits 4-7.
-     * @param d model bytes
-     * @param p cursor on the two pivot values
+     * @param reader a reader on the two pivot values
      * @param flags node flag word
-     * @param r rotation to fill
-     * @return cursor after the two values
+     * @param partial rotation kept when the pivot index is out of range
+     * @return the filled rotation
      * @see "NitroSystem g3d/src/sbc.c getPivotMatrix"
      */
-    private static int readPivot(byte[] d, int p, int flags, double[] r)
+    private static Mat3 readPivot(MemBuf.MemBufReader reader, int flags, Mat3 partial)
     {
-        double av = readFx16(d, p);
-        double bv = readFx16(d, p + 2);
-        double c = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVC.mask) != 0 ? -bv : bv;
-        double dd = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVD.mask) != 0 ? -av : av;
-        double one = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_PIVOT_MINUS.mask) != 0 ? -1.0 : 1.0;
+        // Two fx16 values and the sign bits reconstruct the minor.
+        double av = Fx.fx16(reader.readUInt16());
+        double bv = Fx.fx16(reader.readUInt16());
         int sel = (flags >> 4) & 0xF;
+        if (sel > 8)
+            return partial;
 
-        if (sel <= 8)
+        return pivotMatrix(flags, av, bv, sel);
+    }
+
+    /**
+     * @param flags node flag word
+     * @param av the first stored pivot value
+     * @param bv the second stored pivot value
+     * @param sel pivot cell index, 0 through 8
+     * @return the reconstructed rotation
+     * @see "NitroSystem g3d/src/sbc.c getPivotMatrix"
+     */
+    private static Mat3 pivotMatrix(int flags, double av, double bv, int sel)
+    {
+        double c = signed(flags, NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVC, bv);
+        double dd = signed(flags, NodeSrtFlag.NNS_G3D_SRTFLAG_SIGN_REVD, av);
+        double one = (flags & NodeSrtFlag.NNS_G3D_SRTFLAG_PIVOT_MINUS.mask) != 0 ? -1.0 : 1.0;
+        int row = sel / 3;
+        int col = sel % 3;
+        double[] cells = new double[9];
+        double[] minor = { av, bv, c, dd };
+        int k = 0;
+
+        for (int i = 0; i < 9; i++)
+            k = placePivot(cells, minor, row, col, i, k);
+
+        cells[row * 3 + col] = one;
+
+        return Mat3.of(cells[0], cells[1], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[8]);
+    }
+
+    /**
+     * @param flags node flag word
+     * @param flag the sign bit
+     * @param value the stored value
+     * @return {@code value}, negated when the flag is set
+     * @see "NitroSystem g3d/src/sbc.c getPivotMatrix"
+     */
+    private static double signed(int flags, NodeSrtFlag flag, double value)
+    {
+        if ((flags & flag.mask) != 0)
+            return -value;
+
+        return value;
+    }
+
+    /**
+     * @param cells nine rotation cells being filled
+     * @param minor the four values that fill the off-pivot cells
+     * @param row pivot row
+     * @param col pivot column
+     * @param i cell index
+     * @param k next minor index
+     * @return the minor index after this cell
+     * @see "NitroSystem g3d/src/sbc.c getPivotMatrix"
+     */
+    private static int placePivot(double[] cells, double[] minor, int row, int col, int i, int k)
+    {
+        // The pivot row and column stay zero until the +/-1 cell is written.
+        if (i / 3 == row || i % 3 == col)
         {
-            int row = sel / 3;
-            int col = sel % 3;
-            double[] arr = { av, bv, c, dd };
-            int k = 0;
-
-            for (int ii = 0; ii < 3; ii++)
-            {
-                for (int jj = 0; jj < 3; jj++)
-                {
-                    r[ii * 3 + jj] = (jj == col || ii == row) ? 0 : arr[k++];
-                }
-            }
-
-            r[row * 3 + col] = one;
+            cells[i] = 0;
+            return k;
         }
 
-        return p + 4;
+        cells[i] = minor[k];
+
+        return k + 1;
     }
 
     // Walks the SBC render-command stream to record each node's parent (for the world-matrix hierarchy)
@@ -341,11 +447,11 @@ public class Model
     // normalisation and texturing need. Layout verified against nitroreader.nsbmd.Model.readMaterialSet.
     private void parseMaterials(byte[] d, int matSet, int matCount)
     {
-        int ofsTexDict = readU16(d, matSet);
-        int ofsPltDict = readU16(d, matSet + 2);
+        MemBuf.MemBufReader r = MemBuf.create(d).reader();
+        r.setPosition(matSet);
+        int ofsTexDict = r.readUInt16();
+        int ofsPltDict = r.readUInt16();
 
-        MemBuf buf = MemBuf.create(d);
-        MemBuf.MemBufReader r = buf.reader();
         r.setPosition(matSet + 4);
         G3dDictionary matDict = new G3dDictionary(r);
 
@@ -355,15 +461,13 @@ public class Model
             // zero here (the NNS renderer takes the texture's true size from the TEX0 texture at bind
             // time, not the material). So only the wrap/flip flags are read; UV normalisation uses the
             // bound texture's own dimensions.
-            int structOfs = matSet + (int) readU32(matDict.getRecord(i), 0);
-            long texImageParam = readU32(d, structOfs + 0x14);
+            int structOfs = matSet + recordOffset(matDict.getRecord(i));
+            r.setPosition(structOfs + 0x14);
+            long texImageParam = r.readUInt32();
 
-            boolean repeatS = (texImageParam & (1 << 16)) != 0;
-            boolean repeatT = (texImageParam & (1 << 17)) != 0;
-            boolean flipS = (texImageParam & (1 << 18)) != 0;
-            boolean flipT = (texImageParam & (1 << 19)) != 0;
-
-            materials.add(new Material(matDict.getName(i), repeatS, repeatT, flipS, flipT));
+            materials.add(new Material(matDict.getName(i),
+                    TexWrap.REPEAT_S.set(texImageParam), TexWrap.REPEAT_T.set(texImageParam),
+                    TexWrap.FLIP_S.set(texImageParam), TexWrap.FLIP_T.set(texImageParam)));
         }
 
         bindNames(d, matSet, matSet + ofsTexDict, true);
@@ -382,8 +486,9 @@ public class Model
 
         for (int i = 0; i < dict.size(); i++)
         {
-            long entry = readU32(dict.getRecord(i), 0);
-            if ((entry & 0x01000000L) != 0)
+            MemBuf.MemBufReader entryReader = MemBuf.create(dict.getRecord(i)).reader();
+            long entry = entryReader.readUInt32();
+            if (MatDictFlag.UNBOUND.set(entry))
                 continue;
 
             int listOfs = (int) (entry & 0xFFFF);
@@ -391,7 +496,8 @@ public class Model
 
             for (int k = 0; k < listLen; k++)
             {
-                int matIdx = d[matSet + listOfs + k] & 0xFF;
+                r.setPosition(matSet + listOfs + k);
+                int matIdx = r.readByte();
                 if (matIdx < materials.size())
                 {
                     if (texture)
@@ -692,39 +798,12 @@ public class Model
     // and the scales multiply componentwise.
     private static Srt compose(Srt parent, Srt child)
     {
-        double[] s = { child.s[0] * parent.s[0], child.s[1] * parent.s[1], child.s[2] * parent.s[2] };
-        double[] ts = { child.t[0] * parent.s[0], child.t[1] * parent.s[1], child.t[2] * parent.s[2] };
+        // Scale multiplies per axis. The child's translation is scaled, rotated, then offset.
+        Vec3 s = child.s.mul(parent.s);
+        Vec3 tr = parent.r.mul(child.t.mul(parent.s));
+        Vec3 t = parent.t.add(tr);
 
-        double[] tr = rowMul(parent.r, ts);
-        double[] t = { parent.t[0] + tr[0], parent.t[1] + tr[1], parent.t[2] + tr[2] };
-
-        return new Srt(t, s, matMul(child.r, parent.r));
-    }
-
-    // Row-vector times matrix: out = v * r (out[i] = sum_j v[j] * r[j][i]), r row-major.
-    private static double[] rowMul(double[] r, double[] v)
-    {
-        return new double[] {
-                v[0] * r[0] + v[1] * r[3] + v[2] * r[6],
-                v[0] * r[1] + v[1] * r[4] + v[2] * r[7],
-                v[0] * r[2] + v[1] * r[5] + v[2] * r[8] };
-    }
-
-    // 3x3 * 3x3 (row-major): out[i][j] = sum_k a[i][k] * b[k][j].
-    private static double[] matMul(double[] a, double[] b)
-    {
-        double[] r = new double[9];
-        for (int i = 0; i < 3; i++)
-            for (int j = 0; j < 3; j++)
-            {
-                double s = 0;
-                for (int k = 0; k < 3; k++)
-                    s += a[i * 3 + k] * b[k * 3 + j];
-
-                r[i * 3 + j] = s;
-            }
-
-        return r;
+        return new Srt(t, s, child.r.mul(parent.r));
     }
 
     // Applies a node's world placement to raw (pre-posScale) vertices, matching the NNS vertex path
@@ -737,14 +816,12 @@ public class Model
 
         for (int i = 0; i < positions.length; i += 3)
         {
-            double x = positions[i] * w.s[0], y = positions[i + 1] * w.s[1], z = positions[i + 2] * w.s[2];
-            double rx = x * w.r[0] + y * w.r[3] + z * w.r[6];
-            double ry = x * w.r[1] + y * w.r[4] + z * w.r[7];
-            double rz = x * w.r[2] + y * w.r[5] + z * w.r[8];
+            Vec3 scaled = Vec3.of(positions[i] * w.s.x, positions[i + 1] * w.s.y, positions[i + 2] * w.s.z);
+            Vec3 rotated = w.r.mul(scaled);
 
-            positions[i] = (float) (rx * posScale + w.t[0]);
-            positions[i + 1] = (float) (ry * posScale + w.t[1]);
-            positions[i + 2] = (float) (rz * posScale + w.t[2]);
+            positions[i] = (float) (rotated.x * posScale + w.t.x);
+            positions[i + 1] = (float) (rotated.y * posScale + w.t.y);
+            positions[i + 2] = (float) (rotated.z * posScale + w.t.z);
         }
     }
 
@@ -753,26 +830,22 @@ public class Model
     // each command's parameters in order.
     private Mesh interpretDisplayList(byte[] d, int dlStart, int dlSize, String meshName)
     {
-        List<float[]> positions = new ArrayList<>();
-        List<float[]> texcoords = new ArrayList<>();
+        List<Vec3> positions = new ArrayList<>();
+        List<Uv> texcoords = new ArrayList<>();
         List<Integer> triangles = new ArrayList<>();
-
-        double[] vtx = new double[3];
-        double[] uv = new double[2];
+        Draw draw = new Draw();
         int[] primitive = { -1 };
         List<Integer> primVerts = new ArrayList<>();
 
-        int pos = dlStart;
+        // Four opcodes share a word. Their parameters follow that word, in order.
+        MemBuf.MemBufReader commands = MemBuf.create(d).reader();
+        commands.setPosition(dlStart);
         int end = dlStart + dlSize;
-        while (pos + 4 <= end)
+        while (commands.getPosition() + 4 <= end)
         {
-            int[] ops = { d[pos] & 0xFF, d[pos + 1] & 0xFF, d[pos + 2] & 0xFF, d[pos + 3] & 0xFF };
-            pos += 4;
-
-            for (int op : ops)
-            {
-                pos = applyCommand(d, pos, op, vtx, uv, primitive, primVerts, positions, texcoords, triangles, meshName);
-            }
+            DlWord word = DlWord.read(commands);
+            for (int i = 0; i < 4; i++)
+                applyCommand(commands, word.at(i), draw, primitive, primVerts, positions, texcoords, triangles, meshName);
         }
 
         if (primitive[0] >= 0)
@@ -784,11 +857,13 @@ public class Model
         float[] uv2 = new float[texcoords.size() * 2];
         for (int i = 0; i < positions.size(); i++)
         {
-            pos3[i * 3] = positions.get(i)[0];
-            pos3[i * 3 + 1] = positions.get(i)[1];
-            pos3[i * 3 + 2] = positions.get(i)[2];
-            uv2[i * 2] = texcoords.get(i)[0];
-            uv2[i * 2 + 1] = texcoords.get(i)[1];
+            Vec3 v = positions.get(i);
+            Uv uv = texcoords.get(i);
+            pos3[i * 3] = (float) v.x;
+            pos3[i * 3 + 1] = (float) v.y;
+            pos3[i * 3 + 2] = (float) v.z;
+            uv2[i * 2] = (float) uv.s;
+            uv2[i * 2 + 1] = (float) uv.t;
         }
 
         int[] idx = new int[triangles.size()];
@@ -798,6 +873,13 @@ public class Model
         Mesh mesh = new Mesh(meshName, pos3, uv2, idx);
         mesh.rawDisplayList = java.util.Arrays.copyOfRange(d, dlStart, dlStart + dlSize);
         return mesh;
+    }
+
+    /** Running vertex and texcoord while a display list is walked. */
+    private static final class Draw
+    {
+        private Vec3 vtx = Vec3.zero();
+        private Uv uv = Uv.zero();
     }
 
     /**
@@ -815,18 +897,17 @@ public class Model
      * @return the cursor after the command
      * @see "GBATEK DS 3D Video"
      */
-    private int applyCommand(byte[] d, int pos, int op, double[] vtx, double[] uv, int[] primitive,
-            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords, List<Integer> triangles,
-            String meshName)
+    private void applyCommand(MemBuf.MemBufReader commands, int op, Draw draw, int[] primitive,
+            List<Integer> primVerts, List<Vec3> positions, List<Uv> texcoords, List<Integer> triangles, String meshName)
     {
         GeometryCommand cmd = GeometryCommand.from(op);
         if (cmd == null || !cmd.inMesh)
-            throw unknownCommand(op, pos, meshName);
+            throw unknownCommand(op, commands.getPosition(), meshName);
 
         if (cmd.emitsVertex)
-            return readMeshVertex(cmd, d, pos, vtx, uv, primVerts, positions, texcoords);
-
-        return readMeshState(cmd, d, pos, uv, primitive, primVerts, triangles);
+            readMeshVertex(commands, cmd, draw, primVerts, positions, texcoords);
+        else
+            readMeshState(commands, cmd, draw, primitive, primVerts, triangles);
     }
 
     /**
@@ -840,22 +921,17 @@ public class Model
      * @return the cursor after the command
      * @see "GBATEK DS 3D Video, MTX_SCALE"
      */
-    private int readMeshState(GeometryCommand cmd, byte[] d, int pos, double[] uv, int[] primitive,
+    private void readMeshState(MemBuf.MemBufReader commands, GeometryCommand cmd, Draw draw, int[] primitive,
             List<Integer> primVerts, List<Integer> triangles)
     {
         if (cmd == GeometryCommand.MTX_SCALE)
-            return readMeshScale(pos);
-
-        if (cmd == GeometryCommand.TEXCOORD)
-            return readMeshTexcoord(d, pos, uv);
-
-        if (cmd == GeometryCommand.BEGIN_VTXS)
-            return readMeshBegin(d, pos, primitive, primVerts, triangles);
-
-        if (cmd == GeometryCommand.NOP || cmd == GeometryCommand.END_VTXS)
-            return pos;
-
-        return pos + 4;
+            readMeshScale(commands);
+        else if (cmd == GeometryCommand.TEXCOORD)
+            draw.uv = Fx.texcoord(commands.readInt());
+        else if (cmd == GeometryCommand.BEGIN_VTXS)
+            readMeshBegin(commands, primitive, primVerts, triangles);
+        else if (cmd != GeometryCommand.NOP && cmd != GeometryCommand.END_VTXS)
+            commands.skip(4);
     }
 
     /**
@@ -866,10 +942,11 @@ public class Model
      * @return the cursor after those words
      * @see "GBATEK DS 3D Video, MTX_SCALE"
      */
-    private int readMeshScale(int pos)
+    private void readMeshScale(MemBuf.MemBufReader commands)
     {
+        // The three scale words are consumed and not applied.
         usesMtxScale = true;
-        return pos + 12;
+        commands.skip(12);
     }
 
     /**
@@ -879,34 +956,22 @@ public class Model
      * @return the cursor after the word
      * @see "GBATEK DS 3D Video, TEXCOORD"
      */
-    private static int readMeshTexcoord(byte[] d, int pos, double[] uv)
-    {
-        long p = readU32(d, pos);
-
-        uv[0] = (short) (p & 0xFFFF) / 16.0;
-        uv[1] = (short) ((p >> 16) & 0xFFFF) / 16.0;
-        return pos + 4;
-    }
-
     /**
-     * @param d display-list bytes
-     * @param pos cursor on the primitive word
+     * @param commands display-list reader, on the primitive word
      * @param primitive current primitive type, or -1
      * @param primVerts vertices of the open primitive
      * @param triangles triangle indices
-     * @return the cursor after the word
      * @see "GBATEK DS 3D Video, BEGIN_VTXS"
      */
-    private static int readMeshBegin(byte[] d, int pos, int[] primitive, List<Integer> primVerts, List<Integer> triangles)
+    private static void readMeshBegin(MemBuf.MemBufReader commands, int[] primitive, List<Integer> primVerts, List<Integer> triangles)
     {
-        int p = (int) readU32(d, pos);
-
+        // The low two bits select triangles, quads, or a strip.
+        int p = commands.readInt();
         if (primitive[0] >= 0)
             triangulate(primitive[0], primVerts, triangles);
 
         primitive[0] = p & 3;
         primVerts.clear();
-        return pos + 4;
     }
 
     /**
@@ -921,24 +986,19 @@ public class Model
      * @return the cursor after the vertex
      * @see "GBATEK DS 3D Video, VTX_16"
      */
-    private static int readMeshVertex(GeometryCommand cmd, byte[] d, int pos, double[] vtx, double[] uv,
-            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords)
+    private static void readMeshVertex(MemBuf.MemBufReader commands, GeometryCommand cmd, Draw draw,
+            List<Integer> primVerts, List<Vec3> positions, List<Uv> texcoords)
     {
-        switch (cmd)
-        {
-            case VTX_16:
-                return readVtx16(d, pos, vtx, uv, primVerts, positions, texcoords);
-            case VTX_10:
-                return readVtx10(d, pos, vtx, false, uv, primVerts, positions, texcoords);
-            case VTX_DIFF:
-                return readVtx10(d, pos, vtx, true, uv, primVerts, positions, texcoords);
-            case VTX_XY:
-                return readVtxPair(d, pos, vtx, 0, 1, uv, primVerts, positions, texcoords);
-            case VTX_XZ:
-                return readVtxPair(d, pos, vtx, 0, 2, uv, primVerts, positions, texcoords);
-            default:
-                return readVtxPair(d, pos, vtx, 1, 2, uv, primVerts, positions, texcoords);
-        }
+        if (cmd == GeometryCommand.VTX_16)
+            draw.vtx = Fx.vtx16(commands.readInt(), commands.readInt());
+        else if (cmd == GeometryCommand.VTX_10)
+            draw.vtx = Fx.vtx10(commands.readInt(), 64.0);
+        else if (cmd == GeometryCommand.VTX_DIFF)
+            draw.vtx = draw.vtx.add(Fx.vtx10(commands.readInt(), 4096.0));
+        else
+            draw.vtx = Fx.vertexPair(commands.readInt(), cmd, draw.vtx);
+
+        emit(draw, positions, texcoords, primVerts);
     }
 
     /**
@@ -952,86 +1012,9 @@ public class Model
      * @return the cursor after the vertex
      * @see "GBATEK DS 3D Video, VTX_16"
      */
-    private static int readVtx16(byte[] d, int pos, double[] vtx, double[] uv, List<Integer> primVerts,
-            List<float[]> positions, List<float[]> texcoords)
-    {
-        long p1 = readU32(d, pos);
-        long p2 = readU32(d, pos + 4);
-
-        vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
-        vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
-        vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
-
-        emit(vtx, uv, positions, texcoords, primVerts);
-        return pos + 8;
-    }
-
-    /**
-     * @param d display-list bytes
-     * @param pos cursor on the packed word
-     * @param vtx running vertex
-     * @param delta true for {@link GeometryCommand#VTX_DIFF}, which adds to the running vertex
-     * @param uv running texcoord
-     * @param primVerts vertices of the open primitive
-     * @param positions emitted positions
-     * @param texcoords emitted texcoords
-     * @return the cursor after the word
-     * @see "GBATEK DS 3D Video, VTX_10 and VTX_DIFF"
-     */
-    private static int readVtx10(byte[] d, int pos, double[] vtx, boolean delta, double[] uv, List<Integer> primVerts,
-            List<float[]> positions, List<float[]> texcoords)
-    {
-        long p = readU32(d, pos);
-        double k = delta ? 4096.0 : 64.0;
-        double x = signed10((int) p) / k;
-        double y = signed10((int) (p >> 10)) / k;
-        double z = signed10((int) (p >> 20)) / k;
-
-        if (delta)
-        {
-            vtx[0] += x;
-            vtx[1] += y;
-            vtx[2] += z;
-        }
-        else
-        {
-            vtx[0] = x;
-            vtx[1] = y;
-            vtx[2] = z;
-        }
-
-        emit(vtx, uv, positions, texcoords, primVerts);
-        return pos + 4;
-    }
-
-    /**
-     * @param d display-list bytes
-     * @param pos cursor on the packed word
-     * @param vtx running vertex
-     * @param first component index written from the low half
-     * @param second component index written from the high half
-     * @param uv running texcoord
-     * @param primVerts vertices of the open primitive
-     * @param positions emitted positions
-     * @param texcoords emitted texcoords
-     * @return the cursor after the word
-     * @see "GBATEK DS 3D Video, VTX_XY, VTX_XZ and VTX_YZ"
-     */
-    private static int readVtxPair(byte[] d, int pos, double[] vtx, int first, int second, double[] uv,
-            List<Integer> primVerts, List<float[]> positions, List<float[]> texcoords)
-    {
-        long p = readU32(d, pos);
-
-        vtx[first] = (short) (p & 0xFFFF) / 4096.0;
-        vtx[second] = (short) ((p >> 16) & 0xFFFF) / 4096.0;
-
-        emit(vtx, uv, positions, texcoords, primVerts);
-        return pos + 4;
-    }
-
     /**
      * @param op geometry opcode
-     * @param pos cursor just after the parameters already consumed
+     * @param pos cursor on the parameters, just after the opcode word
      * @param meshName mesh that held the opcode
      * @return the rejection
      * @see "GBATEK DS 3D Video"
@@ -1042,11 +1025,19 @@ public class Model
                 "Unhandled display-list opcode 0x%02X at offset 0x%X in mesh %s", op, pos - 4, meshName));
     }
 
-    private static void emit(double[] vtx, double[] uv, List<float[]> positions, List<float[]> texcoords, List<Integer> primVerts)
+    /**
+     * @param draw the vertex and texcoord just decoded
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param primVerts vertices of the open primitive
+     * @see "GBATEK DS 3D Video, VTX_16"
+     */
+    private static void emit(Draw draw, List<Vec3> positions, List<Uv> texcoords, List<Integer> primVerts)
     {
+        // The index is assigned before the vertex is appended.
         primVerts.add(positions.size());
-        positions.add(new float[] { (float) vtx[0], (float) vtx[1], (float) vtx[2] });
-        texcoords.add(new float[] { (float) uv[0], (float) uv[1] });
+        positions.add(draw.vtx);
+        texcoords.add(draw.uv);
     }
 
     // Converts a primitive's ordered vertices into triangle index triples. 0=separate triangles,
@@ -1118,7 +1109,7 @@ public class Model
      */
     private StackPose.Frame playStack(SkeletalAnimationSet.Animation animation, int frame, boolean writeMeshes)
     {
-        double[][][] local = sampleLocals(animation, frame);
+        Srt[] local = sampleLocals(animation, frame);
 
         byte[][] dls = new byte[meshes.size()][];
         float[][] raw = new float[meshes.size()][];
@@ -1128,7 +1119,7 @@ public class Model
             raw[i] = meshes.get(i).rawPositions;
         }
 
-        StackPose.Frame played = StackPose.play(sbcBytes, maya, posScale, invPosScale, local[0], local[1], local[2],
+        StackPose.Frame played = StackPose.play(sbcBytes, maya, posScale, invPosScale, toNodes(local),
                 invBind, dls, raw);
 
         if (writeMeshes)
@@ -1138,43 +1129,56 @@ public class Model
     }
 
     /**
+     * @param local bind or posed locals
+     * @return the same transforms as public node values
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEDESC"
+     */
+    private static NodeTransform[] toNodes(Srt[] local)
+    {
+        // The stack player does not need the private Srt type.
+        NodeTransform[] nodes = new NodeTransform[local.length];
+        for (int i = 0; i < local.length; i++)
+            nodes[i] = new NodeTransform(local[i].t, local[i].s, local[i].r);
+
+        return nodes;
+    }
+
+    /**
      * @param animation skeletal animation, or null for the bind locals
      * @param frame frame index
-     * @return {@code {translation, rotation, scale}} per node
+     * @return one local transform per node
      * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
      */
-    private double[][][] sampleLocals(SkeletalAnimationSet.Animation animation, int frame)
+    private Srt[] sampleLocals(SkeletalAnimationSet.Animation animation, int frame)
     {
-        int n = nodeLocals.length;
-        double[][] t = new double[n][];
-        double[][] r = new double[n][];
-        double[][] s = new double[n][];
+        // A null animation keeps every node at its bind pose.
+        Srt[] local = new Srt[nodeLocals.length];
         List<SkeletalAnimationSet.NodeAnim> animNodes = animation == null ? null : animation.getNodes();
+        for (int i = 0; i < local.length; i++)
+            local[i] = posed(i, frame, animNodes);
 
-        for (int i = 0; i < n; i++)
-            copyLocal(i, frame, animNodes, t, r, s);
-
-        return new double[][][] { t, r, s };
+        return local;
     }
 
     /**
      * @param i node index
      * @param frame frame index
      * @param animNodes animation nodes, or null
-     * @param t translation out
-     * @param r rotation out
-     * @param s scale out
+     * @return the bind pose, with any sampled channel written over it
      * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
      */
-    private void copyLocal(int i, int frame, List<SkeletalAnimationSet.NodeAnim> animNodes,
-            double[][] t, double[][] r, double[][] s)
+    private Srt posed(int i, int frame, List<SkeletalAnimationSet.NodeAnim> animNodes)
     {
         Srt bind = nodeLocals[i];
         SkeletalAnimationSet.NodeAnim na = animNode(animNodes, i);
+        if (na == null)
+            return bind;
 
-        t[i] = orBind(channel(na, frame, 0), bind.t);
-        r[i] = orBind(channel(na, frame, 1), bind.r);
-        s[i] = orBind(channel(na, frame, 2), bind.s);
+        Vec3 t = na.translationAt(frame);
+        Vec3 s = na.scaleAt(frame);
+        Mat3 r = na.rotationAt(frame);
+
+        return new Srt(t != null ? t : bind.t, s != null ? s : bind.s, r != null ? r : bind.r);
     }
 
     /**
@@ -1189,59 +1193,6 @@ public class Model
             return null;
 
         return animNodes.get(i);
-    }
-
-    /**
-     * @param na a node animation, or null
-     * @param frame frame index
-     * @param kind 0 translation, 1 rotation, 2 scale
-     * @return the sampled channel, or null to keep the bind value
-     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
-     */
-    private static double[] channel(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
-    {
-        if (na == null)
-            return null;
-
-        return sample(na, frame, kind);
-    }
-
-    /**
-     * @param na a node animation
-     * @param frame frame index
-     * @param kind 0 translation, 1 rotation, 2 scale
-     * @return the sampled channel
-     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
-     */
-    private static double[] sample(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
-    {
-        if (kind == 0)
-            return na.translationAt(frame);
-
-        return later(na, frame, kind);
-    }
-
-    /**
-     * @param na a node animation
-     * @param frame frame index
-     * @param kind 1 rotation or 2 scale
-     * @return the sampled channel
-     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
-     */
-    private static double[] later(SkeletalAnimationSet.NodeAnim na, int frame, int kind)
-    {
-        return kind == 1 ? na.rotationAt(frame) : na.scaleAt(frame);
-    }
-
-    /**
-     * @param sampled an animated channel, or null
-     * @param bind the bind-pose value
-     * @return {@code sampled} when present, otherwise {@code bind}
-     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
-     */
-    private static double[] orBind(double[] sampled, double[] bind)
-    {
-        return sampled != null ? sampled : bind;
     }
 
     /**
@@ -1384,24 +1335,10 @@ public class Model
     // hierarchy.
     private Srt[] poseWorld(SkeletalAnimationSet.Animation animation, int frame)
     {
-        int count = nodeLocals.length;
-        List<SkeletalAnimationSet.NodeAnim> animNodes = animation.getNodes();
-        Srt[] local = new Srt[count];
-
-        for (int n = 0; n < count; n++)
-        {
-            Srt bind = nodeLocals[n];
-            SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
-
-            double[] t = na != null ? na.translationAt(frame) : null;
-            double[] s = na != null ? na.scaleAt(frame) : null;
-            double[] r = na != null ? na.rotationAt(frame) : null;
-
-            local[n] = new Srt(t != null ? t : bind.t, s != null ? s : bind.s, r != null ? r : bind.r);
-        }
-
-        Srt[] world = new Srt[count];
-        for (int n = 0; n < count; n++)
+        // Sample the locals, then fold each one under its parent.
+        Srt[] local = sampleLocals(animation, frame);
+        Srt[] world = new Srt[local.length];
+        for (int n = 0; n < local.length; n++)
             world[n] = resolveWorld(n, nodeParent, local, world);
 
         return world;
@@ -1416,18 +1353,28 @@ public class Model
      * @param frame the frame index
      * @return each node's posed world translation (x,y,z)
      */
-    public double[][] poseNodeWorldTranslations(SkeletalAnimationSet.Animation animation, int frame)
+    public Vec3[] poseNodeWorldTranslations(SkeletalAnimationSet.Animation animation, int frame)
     {
+        // A missing world transform still reports the origin.
         Srt[] world = poseWorld(animation, frame);
-
-        double[][] out = new double[world.length][];
+        Vec3[] out = new Vec3[world.length];
         for (int n = 0; n < world.length; n++)
-        {
-            Srt w = world[n] != null ? world[n] : Srt.identity();
-            out[n] = w.t.clone();
-        }
+            out[n] = translationOf(world[n]);
 
         return out;
+    }
+
+    /**
+     * @param world a world transform, or null
+     * @return its translation, or the origin
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static Vec3 translationOf(Srt world)
+    {
+        if (world == null)
+            return Vec3.zero();
+
+        return world.t;
     }
 
     /**
@@ -1520,35 +1467,8 @@ public class Model
      */
     public NodeTransform[] localTransforms(SkeletalAnimationSet.Animation animation, int frame)
     {
-        int count = nodeLocals.length;
-        List<SkeletalAnimationSet.NodeAnim> animNodes = animation != null ? animation.getNodes() : null;
-        NodeTransform[] out = new NodeTransform[count];
-
-        for (int n = 0; n < count; n++)
-        {
-            Srt bind = nodeLocals[n];
-            double[] t = bind.t, s = bind.s, r = bind.r;
-
-            if (animNodes != null)
-            {
-                SkeletalAnimationSet.NodeAnim na = n < animNodes.size() ? animNodes.get(n) : null;
-
-                double[] at = na != null ? na.translationAt(frame) : null;
-                double[] as = na != null ? na.scaleAt(frame) : null;
-                double[] ar = na != null ? na.rotationAt(frame) : null;
-
-                if (at != null)
-                    t = at;
-                if (as != null)
-                    s = as;
-                if (ar != null)
-                    r = ar;
-            }
-
-            out[n] = new NodeTransform(t.clone(), s.clone(), r.clone());
-        }
-
-        return out;
+        // The same sample the stack uses, exposed as the public transform type.
+        return toNodes(sampleLocals(animation, frame));
     }
 
     /**
@@ -1561,32 +1481,49 @@ public class Model
      */
     public static final class NodeTransform
     {
-        private final double[] translation;
-        private final double[] scale;
-        private final double[] rotation;
+        private final Vec3 translation;
+        private final Vec3 scale;
+        private final Mat3 rotation;
 
-        NodeTransform(double[] translation, double[] scale, double[] rotation)
+        /**
+         * @param translation translation in model units
+         * @param scale per-axis scale
+         * @param rotation row-major rotation
+         */
+        NodeTransform(Vec3 translation, Vec3 scale, Mat3 rotation)
         {
             this.translation = translation;
             this.scale = scale;
             this.rotation = rotation;
         }
 
-        /** @return translation (x,y,z), model units (not scaled by the model's position scale) */
-        public double[] getTranslation()
+        /**
+         * @return translation (x,y,z), model units (not scaled by the model's position scale)
+         * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+         */
+        public Vec3 getTranslation()
         {
+            // The exporter places this under the node before the model position scale.
             return translation;
         }
 
-        /** @return per-axis scale (x,y,z) */
-        public double[] getScale()
+        /**
+         * @return per-axis scale (x,y,z)
+         * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
+         */
+        public Vec3 getScale()
         {
+            // Scale stays apart from rotation so a parent does not shear its children.
             return scale;
         }
 
-        /** @return the 3&times;3 rotation, row-major, row-vector convention */
-        public double[] getRotation()
+        /**
+         * @return the 3×3 rotation, row-major, row-vector convention
+         * @see "NitroSDK include/nitro/fx/fx_mtx33.h MtxFx33"
+         */
+        public Mat3 getRotation()
         {
+            // glTF takes the transpose of this when it builds a column-vector quaternion.
             return rotation;
         }
     }
@@ -1715,32 +1652,63 @@ public class Model
      * @return the node's bind-pose world translation (x,y,z) &mdash; the pivot a billboard's camera-facing
      *         geometry is placed at &mdash; or {@code {0,0,0}} if unknown
      */
-    public double[] getNodeWorldTranslation(int node)
+    public Vec3 getNodeWorldTranslation(int node)
     {
-        return (bindWorldTranslation != null && node >= 0 && node < bindWorldTranslation.length)
-                ? bindWorldTranslation[node].clone()
-                : new double[] { 0, 0, 0 };
+        if (missingVector(bindWorldTranslation, node))
+            return Vec3.zero();
+
+        return bindWorldTranslation[node];
     }
 
     /**
      * @param node a node index
      * @return the node's bind-pose world (accumulated) scale (x,y,z), or {@code {1,1,1}} if unknown
      */
-    public double[] getNodeWorldScale(int node)
+    public Vec3 getNodeWorldScale(int node)
     {
-        return (bindWorldScale != null && node >= 0 && node < bindWorldScale.length)
-                ? bindWorldScale[node].clone()
-                : new double[] { 1, 1, 1 };
+        if (missingVector(bindWorldScale, node))
+            return Vec3.one();
+
+        return bindWorldScale[node];
     }
 
     /**
-     * Gets the model's axis-aligned bounding box as declared in its header: a 2x3 array
-     * {@code {{minX,minY,minZ},{maxX,maxY,maxZ}}} in model space.
-     * @return a <code>float[2][3]</code>
+     * @param values stored vectors, or null
+     * @param node a node index
+     * @return true when that node has no value
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
      */
-    public float[][] getHeaderBoundingBox()
+    private static boolean missingVector(Vec3[] values, int node)
     {
-        return new float[][] { headerBoxMin.clone(), headerBoxMax.clone() };
+        if (values == null)
+            return true;
+
+        return outsideNode(node, values.length);
+    }
+
+    /**
+     * @param node a node index
+     * @param length how many nodes are stored
+     * @return true when the index is outside that range
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static boolean outsideNode(int node, int length)
+    {
+        if (node < 0)
+            return true;
+
+        return node >= length;
+    }
+
+    /**
+     * Gets the model's axis-aligned bounding box as declared in its header.
+     * @return the header box, in model space
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+     */
+    public Box getHeaderBoundingBox()
+    {
+        // The constructor already reduced the fixed-point corners to float precision.
+        return headerBox;
     }
 
     /**
@@ -1749,62 +1717,84 @@ public class Model
      * @return a <code>float[2][3]</code> {@code {{minX,minY,minZ},{maxX,maxY,maxZ}}}, or a zero box if
      *         there are no vertices
      */
-    public float[][] getDecodedBoundingBox()
+    public Box getDecodedBoundingBox()
     {
-        float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
-        float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
-        boolean any = false;
+        // Grow one box over every decoded vertex.
+        Bounds bounds = measureBounds();
+        if (!bounds.any)
+            return Box.of(Vec3.zero(), Vec3.zero());
 
+        return bounds.toBox();
+    }
+
+    /**
+     * @return the box around every decoded vertex
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+     */
+    private Bounds measureBounds()
+    {
+        Bounds bounds = new Bounds();
         for (Mesh mesh : meshes)
-        {
-            for (int i = 0; i < mesh.positions.length; i += 3)
-            {
-                any = true;
+            include(bounds, mesh);
 
-                for (int c = 0; c < 3; c++)
-                {
-                    min[c] = Math.min(min[c], mesh.positions[i + c]);
-                    max[c] = Math.max(max[c], mesh.positions[i + c]);
-                }
-            }
+        return bounds;
+    }
+
+    /**
+     * @param bounds the box being grown
+     * @param mesh a mesh whose positions are included
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+     */
+    private static void include(Bounds bounds, Mesh mesh)
+    {
+        for (int i = 0; i < mesh.positions.length; i += 3)
+            bounds.include(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]);
+    }
+
+    /** Mutable corners while a decoded box is measured. */
+    private static final class Bounds
+    {
+        private float minX = Float.POSITIVE_INFINITY;
+        private float minY = Float.POSITIVE_INFINITY;
+        private float minZ = Float.POSITIVE_INFINITY;
+        private float maxX = Float.NEGATIVE_INFINITY;
+        private float maxY = Float.NEGATIVE_INFINITY;
+        private float maxZ = Float.NEGATIVE_INFINITY;
+        private boolean any;
+
+        /**
+         * @param x vertex X
+         * @param y vertex Y
+         * @param z vertex Z
+         * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+         */
+        private void include(float x, float y, float z)
+        {
+            // Each axis tracks its own minimum and maximum.
+            any = true;
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
         }
 
-        if (!any)
-            return new float[][] { { 0, 0, 0 }, { 0, 0, 0 } };
-
-        return new float[][] { min, max };
+        /**
+         * @return the measured box
+         * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+         */
+        private Box toBox()
+        {
+            // The comparison test reads these corners back as floats.
+            return Box.of(Vec3.of(minX, minY, minZ), Vec3.of(maxX, maxY, maxZ));
+        }
     }
 
     @Override
     public String toString()
     {
         return String.format("Model[%s, %d meshes, %d vertices]", name, meshes.size(), getVertexCount());
-    }
-
-    private static int signed10(int v)
-    {
-        v &= 0x3FF;
-        return v >= 0x200 ? v - 0x400 : v;
-    }
-
-    private static int readU16(byte[] d, int o)
-    {
-        return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8);
-    }
-
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
-    }
-
-    private static double readFx16(byte[] d, int o)
-    {
-        return (short) readU16(d, o) / 4096.0;
-    }
-
-    private static double readFx32(byte[] d, int o)
-    {
-        return (int) readU32(d, o) / 4096.0;
     }
 
     /** A single drawable mesh: interleaved-free position and texcoord arrays plus triangle indices. */

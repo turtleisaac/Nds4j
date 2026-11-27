@@ -31,15 +31,13 @@ final class StackPose
     {
         final float[][] positions;
         final double[][] joints;
-        final int[][][] jointIndex;
-        final double[][][] weight;
+        final SbcMachine.Bind[][] skin;
 
-        private Frame(float[][] positions, double[][] joints, int[][][] jointIndex, double[][][] weight)
+        private Frame(float[][] positions, double[][] joints, SbcMachine.Bind[][] skin)
         {
             this.positions = positions;
             this.joints = joints;
-            this.jointIndex = jointIndex;
-            this.weight = weight;
+            this.skin = skin;
         }
     }
 
@@ -47,36 +45,29 @@ final class StackPose
     private final boolean maya;
     private final double posScale;
     private final double invPosScale;
-    private final double[][] trans;
-    private final double[][] rot;
-    private final double[][] scale;
+    private final Model.NodeTransform[] locals;
     private final double[][] invBind;
     private final byte[][] dls;
     private final float[][] raw;
     private final SbcMachine machine;
     private final float[][] positions;
-    private final int[][][] jointIndex;
-    private final double[][][] weight;
+    private final SbcMachine.Bind[][] skin;
 
     private StackPose(byte[] sbc, boolean maya, double posScale, double invPosScale,
-            double[][] trans, double[][] rot, double[][] scale, double[][] invBind,
-            byte[][] dls, float[][] raw)
+            Model.NodeTransform[] locals, double[][] invBind, byte[][] dls, float[][] raw)
     {
         this.sbc = sbc;
         this.maya = maya;
         this.posScale = posScale;
         this.invPosScale = invPosScale;
-        this.trans = trans;
-        this.rot = rot;
-        this.scale = scale;
+        this.locals = locals;
         this.invBind = invBind;
         this.dls = dls;
         this.raw = raw;
 
-        this.machine = new SbcMachine(trans.length);
+        this.machine = new SbcMachine(locals.length);
         this.positions = new float[raw.length][];
-        this.jointIndex = new int[raw.length][][];
-        this.weight = new double[raw.length][][];
+        this.skin = new SbcMachine.Bind[raw.length][];
     }
 
     /**
@@ -84,9 +75,7 @@ final class StackPose
      * @param maya true for {@code NNS_G3D_SCALINGRULE_MAYA}
      * @param posScale model position scale
      * @param invPosScale inverse position scale from the model header
-     * @param trans per-node translation
-     * @param rot per-node rotation
-     * @param scale per-node scale
+     * @param locals per-node translation, rotation and scale
      * @param invBind per-node inverse bind, or null when the model has no envelope
      * @param dls one display list per shape
      * @param raw pre-scale vertices per shape
@@ -94,17 +83,16 @@ final class StackPose
      * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
      */
     static Frame play(byte[] sbc, boolean maya, double posScale, double invPosScale,
-            double[][] trans, double[][] rot, double[][] scale, double[][] invBind,
-            byte[][] dls, float[][] raw)
+            Model.NodeTransform[] locals, double[][] invBind, byte[][] dls, float[][] raw)
     {
-        StackPose pose = new StackPose(sbc, maya, posScale, invPosScale, trans, rot, scale, invBind, dls, raw);
+        StackPose pose = new StackPose(sbc, maya, posScale, invPosScale, locals, invBind, dls, raw);
         pose.walk();
 
-        double[][] joints = new double[trans.length][];
+        double[][] joints = new double[locals.length][];
         for (int i = 0; i < joints.length; i++)
             joints[i] = pose.machine.jointWorld(i);
 
-        return new Frame(pose.positions, joints, pose.jointIndex, pose.weight);
+        return new Frame(pose.positions, joints, pose.skin);
     }
 
     /**
@@ -204,8 +192,7 @@ final class StackPose
             DlVerts.Out out = DlVerts.transform(dls[shp], raw[shp], machine.current(), machine.binding(), machine);
 
             positions[shp] = out.positions;
-            jointIndex[shp] = out.joints;
-            weight[shp] = out.weights;
+            skin[shp] = out.binds;
         }
     }
 
@@ -220,9 +207,10 @@ final class StackPose
         int parent = commands.readByte();
         int opt = commands.readByte();
         int[] picked = slots(commands, flags);
-        int n = node < trans.length ? node : 0;
+        int n = node < locals.length ? node : 0;
+        Model.NodeTransform local = locals[n];
 
-        machine.nodeDesc(n, parent, opt, picked[0], picked[1], trans[n], rot[n], scale[n], maya);
+        machine.nodeDesc(n, parent, opt, picked[0], picked[1], local.getTranslation(), local.getRotation(), local.getScale(), maya);
     }
 
     /**
@@ -271,16 +259,15 @@ final class StackPose
         int terms = commands.readByte();
 
         int[] stackSlots = new int[terms];
-        int[] joints = new int[terms];
-        double[] weights = new double[terms];
+        EnvelopeWeight[] weights = new EnvelopeWeight[terms];
         for (int i = 0; i < terms; i++)
         {
             stackSlots[i] = commands.readByte() & 31;
-            joints[i] = commands.readByte();
-            weights[i] = (commands.readByte() << 4) / 4096.0;
+            int joint = commands.readByte();
+            weights[i] = EnvelopeWeight.of(joint, (commands.readByte() << 4) / 4096.0);
         }
 
-        machine.nodeMix(dest, stackSlots, joints, weights, invBind);
+        machine.nodeMix(dest, stackSlots, weights, invBind);
     }
 
     /**

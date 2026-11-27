@@ -62,7 +62,7 @@ class SbcStackTest
         double[] s = { 2, 3, 4 };
         double[] invParent = { 0.5, 1, 1 };
 
-        double[] joint = NitroMtx.mayaJoint(t, r, s, invParent);
+        double[] joint = NitroMtx.mayaJoint(vec(t), mat(r), vec(s), vec(invParent));
         float[] out = new float[3];
         NitroMtx.apply(joint, 1, 0, 0, out, 0);
 
@@ -82,15 +82,17 @@ class SbcStackTest
         double[] r = { 0, 1, 0, -1, 0, 0, 0, 0, 1 };
         double[] s = { 2, 3, 4 };
 
-        double[] joint = NitroMtx.mayaJoint(t, r, s, UNIT);
-        double[][] parts = NitroMtx.decompose(joint);
+        double[] joint = NitroMtx.mayaJoint(vec(t), mat(r), vec(s), vec(UNIT));
+        Model.NodeTransform parts = NitroMtx.decompose(joint);
 
-        assertThat(parts[0]).containsExactly(t);
-        assertThat(parts[2][0]).isCloseTo(2, within(1e-9));
-        assertThat(parts[2][1]).isCloseTo(3, within(1e-9));
-        assertThat(parts[2][2]).isCloseTo(4, within(1e-9));
+        assertThat(parts.getTranslation().x).isCloseTo(t[0], within(1e-9));
+        assertThat(parts.getTranslation().y).isCloseTo(t[1], within(1e-9));
+        assertThat(parts.getTranslation().z).isCloseTo(t[2], within(1e-9));
+        assertThat(parts.getScale().x).isCloseTo(2, within(1e-9));
+        assertThat(parts.getScale().y).isCloseTo(3, within(1e-9));
+        assertThat(parts.getScale().z).isCloseTo(4, within(1e-9));
 
-        double[] back = NitroMtx.mayaJoint(parts[0], parts[1], parts[2], UNIT);
+        double[] back = NitroMtx.mayaJoint(parts.getTranslation(), parts.getRotation(), parts.getScale(), vec(UNIT));
         float[] out = new float[3];
         NitroMtx.apply(back, 1, 2, 3, out, 0);
         float[] expect = new float[3];
@@ -129,8 +131,8 @@ class SbcStackTest
     void storeThenRestore()
     {
         SbcMachine machine = new SbcMachine(1);
-        machine.nodeDesc(0, 0, 0, -1, 2, new double[] { 4, 0, 0 }, IDENT_R, UNIT, false);
-        machine.nodeDesc(0, 0, 0, -1, -1, new double[] { 0, 9, 0 }, IDENT_R, UNIT, false);
+        machine.nodeDesc(0, 0, 0, -1, 2, vec(4, 0, 0), mat(IDENT_R), vec(UNIT), false);
+        machine.nodeDesc(0, 0, 0, -1, -1, vec(0, 9, 0), mat(IDENT_R), vec(UNIT), false);
         machine.restore(2);
 
         float[] out = new float[3];
@@ -151,7 +153,8 @@ class SbcStackTest
         machine.putSlot(0, NitroMtx.identity(), SbcMachine.Bind.joint(0));
         machine.putSlot(1, translation(0, 10, 0), SbcMachine.Bind.joint(1));
         double[][] inv = { NitroMtx.identity(), NitroMtx.identity() };
-        machine.nodeMix(2, new int[] { 0, 1 }, new int[] { 0, 1 }, new double[] { 0.5, 0.5 }, inv);
+        machine.nodeMix(2, new int[] { 0, 1 },
+                new EnvelopeWeight[] { EnvelopeWeight.of(0, 0.5), EnvelopeWeight.of(1, 0.5) }, inv);
 
         float[] out = new float[3];
         NitroMtx.apply(machine.current(), 0, 0, 0, out, 0);
@@ -182,7 +185,7 @@ class SbcStackTest
         };
 
         byte[] dl = vtx16(1, 0, 0);
-        StackPose.Frame frame = StackPose.play(sbc, true, 1, 1, trans, rot, scale, null,
+        StackPose.Frame frame = StackPose.play(sbc, true, 1, 1, nodes(trans, rot, scale), null,
                 new byte[][] { dl }, new float[][] { { 0, 0, 0 } });
 
         near(frame.positions[0][0], 1);
@@ -222,14 +225,15 @@ class SbcStackTest
         put32(dl, 28, 4096);
         put32(dl, 32, 0);
 
-        StackPose.Frame frame = StackPose.play(sbc, false, 2, 0.5, trans, rot, scale, inv,
+        StackPose.Frame frame = StackPose.play(sbc, false, 2, 0.5, nodes(trans, rot, scale), inv,
                 new byte[][] { dl }, new float[][] { { 1, 0, 0 } });
 
         near(frame.positions[0][0], 2);
         near(frame.positions[0][1], 5);
         near(frame.positions[0][2], 0);
-        assertThat(frame.jointIndex[0][0]).containsExactly(0, 1);
-        assertThat(frame.weight[0][0][0]).isCloseTo(0.5, within(1e-9));
+        assertThat(frame.skin[0][0].terms[0].joint).isEqualTo(0);
+        assertThat(frame.skin[0][0].terms[1].joint).isEqualTo(1);
+        assertThat(frame.skin[0][0].terms[0].weight).isCloseTo(0.5, within(1e-9));
     }
 
     /**
@@ -322,7 +326,7 @@ class SbcStackTest
                 0x1F
         };
 
-        StackPose.Frame frame = StackPose.play(sbc, true, 4, 0.25, trans, rot, scale, inv,
+        StackPose.Frame frame = StackPose.play(sbc, true, 4, 0.25, nodes(trans, rot, scale), inv,
                 new byte[][] { vtx16(1, 0, 0) }, new float[][] { { 1, 0, 0 } });
 
         near(frame.positions[0][0], 4);
@@ -331,8 +335,8 @@ class SbcStackTest
 
         SbcMachine machine = new SbcMachine(1);
         int parent = NodeDescFlag.NNS_G3D_SBC_NODEDESC_FLAG_MAYASSC_PARENT.mask;
-        machine.nodeDesc(-1, -1, parent, -1, -1, new double[] { 0, 0, 0 }, IDENT_R, UNIT, true);
-        machine.nodeDesc(5, 0, parent, -1, -1, new double[] { 0, 0, 0 }, IDENT_R, UNIT, true);
+        machine.nodeDesc(-1, -1, parent, -1, -1, vec(0, 0, 0), mat(IDENT_R), vec(UNIT), true);
+        machine.nodeDesc(5, 0, parent, -1, -1, vec(0, 0, 0), mat(IDENT_R), vec(UNIT), true);
     }
 
     /**
@@ -443,5 +447,57 @@ class SbcStackTest
         }
 
         return (byte) b;
+    }
+
+    /**
+     * @param v three components
+     * @return that vector
+     * @see "NitroSDK include/nitro/fx/fx.h VecFx32"
+     */
+    private static Vec3 vec(double[] v)
+    {
+        // Test fixtures still list the three numbers together.
+        return Vec3.of(v[0], v[1], v[2]);
+    }
+
+    /**
+     * @param x X
+     * @param y Y
+     * @param z Z
+     * @return that vector
+     * @see "NitroSDK include/nitro/fx/fx.h VecFx32"
+     */
+    private static Vec3 vec(double x, double y, double z)
+    {
+        // A translation written out as three numbers.
+        return Vec3.of(x, y, z);
+    }
+
+    /**
+     * @param r nine row-major cells
+     * @return that rotation
+     * @see "NitroSDK include/nitro/fx/fx_mtx33.h MtxFx33"
+     */
+    private static Mat3 mat(double[] r)
+    {
+        // The fixture stores the rotation in row-major order.
+        return Mat3.of(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]);
+    }
+
+    /**
+     * @param t per-node translation
+     * @param r per-node rotation
+     * @param s per-node scale
+     * @return one node transform per node
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEDESC"
+     */
+    private static Model.NodeTransform[] nodes(double[][] t, double[][] r, double[][] s)
+    {
+        // The stack player takes one transform per node.
+        Model.NodeTransform[] out = new Model.NodeTransform[t.length];
+        for (int i = 0; i < t.length; i++)
+            out[i] = new Model.NodeTransform(vec(t[i]), vec(s[i]), mat(r[i]));
+
+        return out;
     }
 }

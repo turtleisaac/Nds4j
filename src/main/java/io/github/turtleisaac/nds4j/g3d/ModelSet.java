@@ -77,8 +77,9 @@ public class ModelSet extends G3dFile
         G3dDictionary modelDict = new G3dDictionary(reader);
         for (int i = 0; i < modelDict.size(); i++)
         {
-            byte[] rec = modelDict.getRecord(i); // 4-byte offset to the model, relative to the MDL0 block
-            int modelStart = (rec[0] & 0xFF) | ((rec[1] & 0xFF) << 8) | ((rec[2] & 0xFF) << 16) | ((rec[3] & 0xFF) << 24);
+            // 4-byte offset to the model, relative to the MDL0 block
+            MemBuf.MemBufReader record = MemBuf.create(modelDict.getRecord(i)).reader();
+            int modelStart = record.readInt();
             models.add(new Model(mdl0, modelStart, modelDict.getName(i)));
         }
     }
@@ -128,37 +129,115 @@ public class ModelSet extends G3dFile
     {
         int mdl0Index = indexOfBlock("MDL0");
         byte[] mdl0 = block(mdl0Index).clone();
-        MemBuf buf = MemBuf.create(mdl0);
         G3dDictionary modelDict = readDict(mdl0, 8);
         rebuildDictInPlace(mdl0, 8);
         for (int m = 0; m < modelDict.size(); m++)
-        {
-            int modelStart = (int) readU32(modelDict.getRecord(m), 0);
-            int ofsMat = (int) readU32(mdl0, modelStart + 8);
-            int ofsShp = (int) readU32(mdl0, modelStart + 12);
-            rebuildDictInPlace(mdl0, modelStart + 0x40);          // node dictionary
-            int matSet = modelStart + ofsMat;
-            rebuildDictInPlace(mdl0, matSet + 4);                 // material dictionary
-            rebuildDictInPlace(mdl0, matSet + readU16(mdl0, matSet));     // texture->material dictionary
-            rebuildDictInPlace(mdl0, matSet + readU16(mdl0, matSet + 2)); // palette->material dictionary
-            int shapeSet = modelStart + ofsShp;
-            G3dDictionary shapeDict = readDict(mdl0, shapeSet);
-            rebuildDictInPlace(mdl0, shapeSet);                   // shape dictionary
-            for (int s = 0; s < shapeDict.size(); s++)
-            {
-                int shapeStruct = shapeSet + (int) readU32(shapeDict.getRecord(s), 0);
-                int dlOffset = (int) readU32(mdl0, shapeStruct + 8);
-                int dlSize = (int) readU32(mdl0, shapeStruct + 12);
-                if (dlOffset <= 0 || dlSize <= 0 || shapeStruct + dlOffset + dlSize > mdl0.length)
-                    continue;
-                byte[] dl = new byte[dlSize];
-                System.arraycopy(mdl0, shapeStruct + dlOffset, dl, 0, dlSize);
-                byte[] rebuilt = DisplayList.encodeCommands(DisplayList.decodeCommands(dl));
-                if (rebuilt.length == dlSize)
-                    System.arraycopy(rebuilt, 0, mdl0, shapeStruct + dlOffset, dlSize);
-            }
-        }
+            rebuildModel(mdl0, modelDict.getRecord(m));
+
         return saveReplacing(mdl0Index, mdl0);
+    }
+
+    /**
+     * @param mdl0 the MDL0 block being rebuilt
+     * @param record the model dictionary record
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdl"
+     */
+    private static void rebuildModel(byte[] mdl0, byte[] record)
+    {
+        // Dictionaries inside the model are rebuilt in place. Display lists are re-encoded.
+        MemBuf.MemBufReader reader = MemBuf.create(mdl0).reader();
+        int modelStart = MemBuf.create(record).reader().readInt();
+        reader.setPosition(modelStart + 8);
+        int ofsMat = reader.readInt();
+        int ofsShp = reader.readInt();
+        rebuildDictInPlace(mdl0, modelStart + 0x40);
+        int matSet = modelStart + ofsMat;
+        rebuildDictInPlace(mdl0, matSet + 4);
+        reader.setPosition(matSet);
+        int ofsTex = reader.readUInt16();
+        int ofsPlt = reader.readUInt16();
+        rebuildDictInPlace(mdl0, matSet + ofsTex);
+        rebuildDictInPlace(mdl0, matSet + ofsPlt);
+        rebuildShapes(mdl0, modelStart + ofsShp);
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param shapeSet offset of the shape dictionary
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResShp"
+     */
+    private static void rebuildShapes(byte[] mdl0, int shapeSet)
+    {
+        G3dDictionary shapeDict = readDict(mdl0, shapeSet);
+        rebuildDictInPlace(mdl0, shapeSet);
+        for (int s = 0; s < shapeDict.size(); s++)
+            rebuildList(mdl0, shapeSet + MemBuf.create(shapeDict.getRecord(s)).reader().readInt());
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param shapeStruct offset of one shape struct
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static void rebuildList(byte[] mdl0, int shapeStruct)
+    {
+        // The display list sits at the offset and size stored after the shape flags.
+        MemBuf.MemBufReader reader = MemBuf.create(mdl0).reader();
+        reader.setPosition(shapeStruct + 8);
+        int dlOffset = reader.readInt();
+        int dlSize = reader.readInt();
+
+        if (listMissing(mdl0, shapeStruct, dlOffset, dlSize))
+            return;
+
+        copyList(mdl0, shapeStruct, dlOffset, dlSize);
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param shapeStruct offset of one shape struct
+     * @param dlOffset display-list offset from the shape struct
+     * @param dlSize display-list size in bytes
+     * @return whether there is no list to rebuild
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static boolean listMissing(byte[] mdl0, int shapeStruct, int dlOffset, int dlSize)
+    {
+        if (emptyList(dlOffset, dlSize))
+            return true;
+
+        return shapeStruct + dlOffset + dlSize > mdl0.length;
+    }
+
+    /**
+     * @param dlOffset display-list offset
+     * @param dlSize display-list size
+     * @return whether the shape stores no list
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static boolean emptyList(int dlOffset, int dlSize)
+    {
+        if (dlOffset <= 0)
+            return true;
+
+        return dlSize <= 0;
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param shapeStruct offset of one shape struct
+     * @param dlOffset display-list offset from the shape struct
+     * @param dlSize display-list size in bytes
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static void copyList(byte[] mdl0, int shapeStruct, int dlOffset, int dlSize)
+    {
+        byte[] dl = new byte[dlSize];
+        System.arraycopy(mdl0, shapeStruct + dlOffset, dl, 0, dlSize);
+        byte[] rebuilt = DisplayList.encodeCommands(DisplayList.decodeCommands(dl));
+
+        if (rebuilt.length == dlSize)
+            System.arraycopy(rebuilt, 0, mdl0, shapeStruct + dlOffset, dlSize);
     }
 
     private static G3dDictionary readDict(byte[] block, int offset)
@@ -175,7 +254,8 @@ public class ModelSet extends G3dFile
     {
         G3dDictionary dict = readDict(block, offset);
         int n = dict.size();
-        if (n == 0) return;
+        if (n == 0)
+            return;
         List<String> names = new ArrayList<>();
         List<byte[]> records = new ArrayList<>();
         java.util.Set<String> unique = new java.util.HashSet<>();
@@ -185,19 +265,13 @@ public class ModelSet extends G3dFile
             records.add(dict.getRecord(i));
             unique.add(dict.getName(i));
         }
-        if (unique.size() != n) return; // duplicate names: not name-keyable
+        if (unique.size() != n)
+            return; // duplicate names: not name-keyable
         MemBuf b = MemBuf.create();
         G3dDictionary.build(names, records, dict.getElementSize()).write(b.writer());
         byte[] rebuilt = b.reader().getBuffer();
         System.arraycopy(rebuilt, 0, block, offset, rebuilt.length);
     }
-
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
-    }
-
-    private static int readU16(byte[] d, int o) { return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8); }
 
     @Override
     public String toString()

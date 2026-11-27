@@ -70,10 +70,15 @@ public class MaterialColorAnimationSet extends G3dFile
         int mat0 = indexOfBlock("MAT0");
         if (mat0 < 0)
             throw new RuntimeException("Not a valid BMA0 file: missing MAT0 block.");
-        BlockWriter writer = new BlockWriter()
-        {
-            public void u16(int offset, int value) { writeBlockU16(mat0, offset, value); }
-            public void u8(int offset, int value) { writeBlockU8(mat0, offset, value); }
+        BlockWriter writer = new BlockWriter() {
+            public void u16(int offset, int value)
+            {
+                writeBlockU16(mat0, offset, value);
+            }
+            public void u8(int offset, int value)
+            {
+                writeBlockU8(mat0, offset, value);
+            }
         };
         parseMat0(block(mat0), writer);
     }
@@ -85,41 +90,96 @@ public class MaterialColorAnimationSet extends G3dFile
     public byte[] encode()
     {
         List<String> names = new ArrayList<>();
-        for (Animation a : animations) names.add(a.name);
+        for (Animation a : animations)
+            names.add(a.name);
         int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
         byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++) blobs[i] = animations.get(i).encodeBlob();
+        for (int i = 0; i < animations.size(); i++)
+            blobs[i] = animations.get(i).encodeBlob();
 
         List<byte[]> recs = new ArrayList<>();
         int cursor = 8 + dictSize;
-        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+        for (byte[] blob : blobs)
+        {
+            recs.add(rec4(cursor));
+            cursor += blob.length;
+        }
 
         ByteArrayOutputStream mat0 = new ByteArrayOutputStream();
         mat0.writeBytes("MAT0".getBytes(StandardCharsets.US_ASCII));
         mat0.writeBytes(rec4(cursor));
         mat0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs) mat0.writeBytes(blob);
+        for (byte[] blob : blobs)
+            mat0.writeBytes(blob);
         return G3dFile.assembleContainer("BMA0", version, mat0.toByteArray());
     }
 
+    /**
+     * Reads the MAT0 animation dictionary.
+     * @param d the MAT0 block
+     * @param writer where a later edit writes a constant channel back
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
     private void parseMat0(byte[] d, BlockWriter writer)
     {
+        // The dictionary follows the magic and the block size.
+        animations.addAll(matAnims(d, matDict(d), writer));
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @return the animation dictionary
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static G3dDictionary matDict(byte[] d)
+    {
         MemBuf buf = MemBuf.create(d);
-        MemBuf.MemBufReader reader = buf.reader();
-        reader.setPosition(8); // MAT0 magic + block size, then the animation dictionary
-        G3dDictionary dict = new G3dDictionary(reader);
-        for (int i = 0; i < dict.size(); i++)
-            animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i), writer));
+        buf.reader().setPosition(8);
+
+        return new G3dDictionary(buf.reader());
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param dict the animation dictionary
+     * @param writer where a later edit writes a constant channel back
+     * @return the animations in dictionary order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static List<Animation> matAnims(byte[] d, G3dDictionary dict, BlockWriter writer)
+    {
+        List<Animation> found = new ArrayList<>();
+        int i = 0;
+
+        while (i < dict.size())
+        {
+            found.add(new Animation(d, (int) Fx.uint32(dict.getRecord(i), 0), dict.getName(i), writer));
+            i++;
+        }
+
+        return found;
     }
 
     private static List<byte[]> placeholders(int n, int recSize)
     {
         List<byte[]> l = new ArrayList<>();
-        for (int i = 0; i < n; i++) l.add(new byte[recSize]);
+        for (int i = 0; i < n; i++)
+            l.add(new byte[recSize]);
         return l;
     }
-    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
-    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
+    private static byte[] serialize(G3dDictionary d)
+    {
+        MemBuf b = MemBuf.create();
+        d.write(b.writer());
+        return b.reader().getBuffer();
+    }
+    private static byte[] rec4(long v)
+    {
+        byte[] r = new byte[4];
+        for (int i = 0; i < 4; i++)
+            r[i] = (byte) (v >> (8 * i));
+        return r;
+    }
 
     /**
      * Gets the animations in this file.
@@ -144,7 +204,7 @@ public class MaterialColorAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final List<MaterialColor> materials = new ArrayList<>();
-        private final byte[] header = new byte[8];        // tag, numFrames and flags — retained verbatim
+        private final byte[] header = new byte[8]; // tag, numFrames and flags — retained verbatim
 
         Animation(byte[] d, int animStart, String name, BlockWriter writer)
         {
@@ -152,7 +212,7 @@ public class MaterialColorAnimationSet extends G3dFile
             // header: char[4] tag, u16 numFrames, u16; then a material dictionary (20-byte records =
             // 5 u32 channels: diffuse, ambient, specular, emission, alpha).
             System.arraycopy(d, animStart, header, 0, 8);
-            frameCount = readU16(d, animStart + 4);
+            frameCount = Fx.uint16(d, animStart + 4);
             MemBuf buf = MemBuf.create(d);
             MemBuf.MemBufReader reader = buf.reader();
             reader.setPosition(animStart + 8);
@@ -165,19 +225,20 @@ public class MaterialColorAnimationSet extends G3dFile
             {
                 byte[] r = dict.getRecord(i);
                 int rec = recordBase + i * 20;
-                ColorChannel diffuse = colorChannel(d, animStart, readU32(r, 0), rec, writer);
-                ColorChannel ambient = colorChannel(d, animStart, readU32(r, 4), rec + 4, writer);
-                ColorChannel specular = colorChannel(d, animStart, readU32(r, 8), rec + 8, writer);
-                ColorChannel emission = colorChannel(d, animStart, readU32(r, 12), rec + 12, writer);
-                ScalarChannel alpha = alphaChannel(d, animStart, readU32(r, 16), rec + 16, writer);
+                ColorChannel diffuse = colorChannel(d, animStart, Fx.uint32(r, 0), rec, writer);
+                ColorChannel ambient = colorChannel(d, animStart, Fx.uint32(r, 4), rec + 4, writer);
+                ColorChannel specular = colorChannel(d, animStart, Fx.uint32(r, 8), rec + 8, writer);
+                ColorChannel emission = colorChannel(d, animStart, Fx.uint32(r, 12), rec + 12, writer);
+                ScalarChannel alpha = alphaChannel(d, animStart, Fx.uint32(r, 16), rec + 16, writer);
                 MaterialColor mat = new MaterialColor(dict.getName(i), diffuse, ambient, specular, emission, alpha);
                 // retain the raw channel u32s and each variable channel's raw per-frame bytes, for re-encode
-                mat.rawCh = new long[]{readU32(r, 0), readU32(r, 4), readU32(r, 8), readU32(r, 12), readU32(r, 16)};
+                mat.rawCh = new long[] { Fx.uint32(r, 0), Fx.uint32(r, 4), Fx.uint32(r, 8), Fx.uint32(r, 12), Fx.uint32(r, 16) };
                 mat.rawArr = new byte[5][];
                 for (int k = 0; k < 5; k++)
                 {
                     long ch = mat.rawCh[k];
-                    if ((((ch >> 24) & 0xFF) & CONST) != 0) continue;      // constant → value is inline
+                    if ((((ch >> 24) & 0xFF) & CONST) != 0)
+                        continue; // constant → value is inline
                     int off = (int) (ch & 0xFFFF), len = frameCount * (k < 4 ? 2 : 1);
                     // copyOfRange never throws for a too-large "to" (it zero-pads), only for a "from"
                     // outside the buffer, so this stays safe even for the unrecognized-encoding channels
@@ -195,7 +256,8 @@ public class MaterialColorAnimationSet extends G3dFile
         byte[] encodeBlob()
         {
             List<String> matNames = new ArrayList<>();
-            for (MaterialColor m : materials) matNames.add(m.name);
+            for (MaterialColor m : materials)
+                matNames.add(m.name);
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 20), 20)).length;
             int base = 8 + dictSize;
 
@@ -204,17 +266,28 @@ public class MaterialColorAnimationSet extends G3dFile
             for (MaterialColor m : materials)
                 for (int k = 0; k < 5; k++)
                 {
-                    if (m.rawArr[k] == null) continue;
+                    if (m.rawArr[k] == null)
+                        continue;
                     int off = (int) (m.rawCh[k] & 0xFFFF);
                     (k < 4 ? colorArrays : alphaArrays).put(off, m.rawArr[k]);
                 }
 
             ByteArrayOutputStream data = new ByteArrayOutputStream();
             java.util.Map<Integer, Integer> newOff = new java.util.HashMap<>();
-            for (java.util.Map.Entry<Integer, byte[]> e : colorArrays.entrySet()) { newOff.put(e.getKey(), base + data.size()); data.writeBytes(e.getValue()); }
-            while (data.size() % 4 != 0) data.write(0);
-            for (java.util.Map.Entry<Integer, byte[]> e : alphaArrays.entrySet()) { newOff.put(e.getKey(), base + data.size()); data.writeBytes(e.getValue()); }
-            while (data.size() % 4 != 0) data.write(0);
+            for (java.util.Map.Entry<Integer, byte[]> e : colorArrays.entrySet())
+            {
+                newOff.put(e.getKey(), base + data.size());
+                data.writeBytes(e.getValue());
+            }
+            while (data.size() % 4 != 0)
+                data.write(0);
+            for (java.util.Map.Entry<Integer, byte[]> e : alphaArrays.entrySet())
+            {
+                newOff.put(e.getKey(), base + data.size());
+                data.writeBytes(e.getValue());
+            }
+            while (data.size() % 4 != 0)
+                data.write(0);
 
             byte[] anim = new byte[base + data.size()];
             System.arraycopy(header, 0, anim, 0, 8);
@@ -225,8 +298,10 @@ public class MaterialColorAnimationSet extends G3dFile
                 for (int k = 0; k < 5; k++)
                 {
                     long ch = m.rawCh[k];
-                    if (m.rawArr[k] != null) ch = (ch & ~0xFFFFL) | (newOff.get((int) (ch & 0xFFFF)) & 0xFFFF); // repoint offset
-                    for (int b = 0; b < 4; b++) rec[k * 4 + b] = (byte) (ch >> (8 * b));
+                    if (m.rawArr[k] != null)
+                        ch = (ch & ~0xFFFFL) | (newOff.get((int) (ch & 0xFFFF)) & 0xFFFF); // repoint offset
+                    for (int b = 0; b < 4; b++)
+                        rec[k * 4 + b] = (byte) (ch >> (8 * b));
                 }
                 recs.add(rec);
             }
@@ -236,11 +311,20 @@ public class MaterialColorAnimationSet extends G3dFile
         }
 
         /** @return this animation's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the number of frames */
-        public int getFrameCount() { return frameCount; }
+        public int getFrameCount()
+        {
+            return frameCount;
+        }
         /** @return the per-material color tracks */
-        public List<MaterialColor> getMaterials() { return materials; }
+        public List<MaterialColor> getMaterials()
+        {
+            return materials;
+        }
 
         @Override
         public String toString()
@@ -249,36 +333,162 @@ public class MaterialColorAnimationSet extends G3dFile
         }
     }
 
-    // A 15-bit color channel: constant (value inline in the record) or a per-frame u16 array at
-    // animStart+offset. fieldOffset is the channel's u32 in the block (for editing a constant); when
-    // animated, the array's block offset is retained instead.
+    /**
+     * A 15-bit color channel, constant or one u16 per frame.
+     * @param d the MAT0 block
+     * @param animStart start of this animation
+     * @param ch the packed channel word
+     * @param fieldOffset where a constant channel is written back
+     * @param writer the in-place editor
+     * @return the channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
     private static ColorChannel colorChannel(byte[] d, int animStart, long ch, int fieldOffset, BlockWriter writer)
+    {
+        if (channelConst(ch))
+            return new ColorChannel(new int[] { (int) (ch & 0xFFFF) }, writer, fieldOffset, true);
+
+        return animatedColor(d, animStart, ch, writer);
+    }
+
+    /**
+     * @param ch the packed channel word
+     * @return whether the value is stored in the word itself
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static boolean channelConst(long ch)
+    {
+        int flags = (int) ((ch >> 24) & 0xFF);
+
+        return (flags & CONST) != 0;
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param animStart start of this animation
+     * @param ch the packed channel word
+     * @param writer the in-place editor
+     * @return the per-frame color channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static ColorChannel animatedColor(byte[] d, int animStart, long ch, BlockWriter writer)
     {
         int value = (int) (ch & 0xFFFF);
         int frames = (int) ((ch >> 16) & 0xFF);
-        int flags = (int) ((ch >> 24) & 0xFF);
-        if ((flags & CONST) != 0)
-            return new ColorChannel(new int[]{value}, writer, fieldOffset, true);
         int p = animStart + value;
         int[] keys = new int[clampFrameCount(d.length, p, Math.max(1, frames), 2)];
-        for (int i = 0; i < keys.length && p + i * 2 + 1 < d.length; i++)
-            keys[i] = readU16(d, p + i * 2);
+        fillColorKeys(d, p, keys);
+
         return new ColorChannel(keys, writer, p, false);
     }
 
-    // A 5-bit alpha channel: constant (value inline) or a per-frame u8 array at animStart+offset.
+    /**
+     * @param d the MAT0 block
+     * @param p start of the u16 keys
+     * @param keys filled with each frame, or 0 past the buffer
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static void fillColorKeys(byte[] d, int p, int[] keys)
+    {
+        for (int i = 0; i < keys.length; i++)
+        {
+            keys[i] = colorKey(d, p, i);
+        }
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param p start of the u16 keys
+     * @param i frame index
+     * @return that frame's 15-bit color, or 0 when the pair would run off the buffer
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static int colorKey(byte[] d, int p, int i)
+    {
+        if (p + i * 2 + 1 >= d.length)
+            return 0;
+
+        return Fx.uint16(d, p + i * 2);
+    }
+
+    /**
+     * A 5-bit alpha channel, constant or one byte per frame.
+     * @param d the MAT0 block
+     * @param animStart start of this animation
+     * @param ch the packed channel word
+     * @param fieldOffset where a constant channel is written back
+     * @param writer the in-place editor
+     * @return the channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
     private static ScalarChannel alphaChannel(byte[] d, int animStart, long ch, int fieldOffset, BlockWriter writer)
+    {
+        if (channelConst(ch))
+            return constantAlpha(ch, fieldOffset, writer);
+
+        return animatedAlpha(d, animStart, ch, writer);
+    }
+
+    /**
+     * @param ch the packed channel word
+     * @param fieldOffset where the constant is written back
+     * @param writer the in-place editor
+     * @return the constant alpha, keeping its low 5 bits
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static ScalarChannel constantAlpha(long ch, int fieldOffset, BlockWriter writer)
+    {
+        int value = (int) (ch & 0x1F);
+
+        return new ScalarChannel(new int[] { value }, writer, fieldOffset, true);
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param animStart start of this animation
+     * @param ch the packed channel word
+     * @param writer the in-place editor
+     * @return the per-frame alpha channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static ScalarChannel animatedAlpha(byte[] d, int animStart, long ch, BlockWriter writer)
     {
         int value = (int) (ch & 0xFFFF);
         int frames = (int) ((ch >> 16) & 0xFF);
-        int flags = (int) ((ch >> 24) & 0xFF);
-        if ((flags & CONST) != 0)
-            return new ScalarChannel(new int[]{value & 0x1F}, writer, fieldOffset, true);
         int p = animStart + value;
         int[] keys = new int[clampFrameCount(d.length, p, Math.max(1, frames), 1)];
-        for (int i = 0; i < keys.length && p + i < d.length; i++)
-            keys[i] = d[p + i] & 0xFF;
+        fillAlphaKeys(d, p, keys);
+
         return new ScalarChannel(keys, writer, p, false);
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param p start of the bytes
+     * @param keys filled with each frame, or 0 past the buffer
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static void fillAlphaKeys(byte[] d, int p, int[] keys)
+    {
+        for (int i = 0; i < keys.length; i++)
+        {
+            keys[i] = alphaKey(d, p, i);
+        }
+    }
+
+    /**
+     * @param d the MAT0 block
+     * @param p start of the bytes
+     * @param i frame index
+     * @return that frame's byte, or 0 when it would run off the buffer
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private static int alphaKey(byte[] d, int p, int i)
+    {
+        if (p + i >= d.length)
+            return 0;
+
+        return Fx.uint8(d, p + i);
     }
 
     // Some non-Pokemon titles (first seen in Animal Crossing: Wild World and Phantom Hourglass) carry a
@@ -300,29 +510,50 @@ public class MaterialColorAnimationSet extends G3dFile
         private final String name;
         private final ColorChannel diffuse, ambient, specular, emission;
         private final ScalarChannel alpha;
-        long[] rawCh;             // the 5 raw channel u32s, retained for byte-exact re-encode
-        byte[][] rawArr;          // per channel, the raw per-frame bytes (null for const channels)
+        long[] rawCh; // the 5 raw channel u32s, retained for byte-exact re-encode
+        byte[][] rawArr; // per channel, the raw per-frame bytes (null for const channels)
 
         MaterialColor(String name, ColorChannel diffuse, ColorChannel ambient, ColorChannel specular,
-                      ColorChannel emission, ScalarChannel alpha)
+                ColorChannel emission, ScalarChannel alpha)
         {
             this.name = name;
-            this.diffuse = diffuse; this.ambient = ambient; this.specular = specular;
-            this.emission = emission; this.alpha = alpha;
+            this.diffuse = diffuse;
+            this.ambient = ambient;
+            this.specular = specular;
+            this.emission = emission;
+            this.alpha = alpha;
         }
 
         /** @return the material's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the diffuse-color track */
-        public ColorChannel getDiffuse() { return diffuse; }
+        public ColorChannel getDiffuse()
+        {
+            return diffuse;
+        }
         /** @return the ambient-color track */
-        public ColorChannel getAmbient() { return ambient; }
+        public ColorChannel getAmbient()
+        {
+            return ambient;
+        }
         /** @return the specular-color track */
-        public ColorChannel getSpecular() { return specular; }
+        public ColorChannel getSpecular()
+        {
+            return specular;
+        }
         /** @return the emission-color track */
-        public ColorChannel getEmission() { return emission; }
+        public ColorChannel getEmission()
+        {
+            return emission;
+        }
         /** @return the alpha (0&ndash;31) track */
-        public ScalarChannel getAlpha() { return alpha; }
+        public ScalarChannel getAlpha()
+        {
+            return alpha;
+        }
     }
 
     /** A 15-bit ({@code BGR555}) color channel, constant or keyed per frame. Editable in place. */
@@ -330,16 +561,22 @@ public class MaterialColorAnimationSet extends G3dFile
     {
         private final int[] keys; // one 15-bit color per frame, or a single constant
         private final BlockWriter writer;
-        private final int offset;  // constant: the channel's u32 field; animated: the array's block offset
+        private final int offset; // constant: the channel's u32 field; animated: the array's block offset
         private final boolean constant;
 
         ColorChannel(int[] keys, BlockWriter writer, int offset, boolean constant)
         {
-            this.keys = keys; this.writer = writer; this.offset = offset; this.constant = constant;
+            this.keys = keys;
+            this.writer = writer;
+            this.offset = offset;
+            this.constant = constant;
         }
 
         /** @return true if this channel holds one constant color */
-        public boolean isConstant() { return constant; }
+        public boolean isConstant()
+        {
+            return constant;
+        }
 
         /** @param frame a frame index @return the raw 15-bit {@code BGR555} color at that frame */
         public int rawAt(int frame)
@@ -408,11 +645,17 @@ public class MaterialColorAnimationSet extends G3dFile
 
         ScalarChannel(int[] keys, BlockWriter writer, int offset, boolean constant)
         {
-            this.keys = keys; this.writer = writer; this.offset = offset; this.constant = constant;
+            this.keys = keys;
+            this.writer = writer;
+            this.offset = offset;
+            this.constant = constant;
         }
 
         /** @return true if this channel holds one constant value */
-        public boolean isConstant() { return constant; }
+        public boolean isConstant()
+        {
+            return constant;
+        }
 
         /** @param frame a frame index @return the value (0&ndash;31) at that frame */
         public int at(int frame)
@@ -451,13 +694,4 @@ public class MaterialColorAnimationSet extends G3dFile
 
     private static final int CONST = 0x20;
 
-    private static int readU16(byte[] d, int o)
-    {
-        return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8);
-    }
-
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
-    }
 }

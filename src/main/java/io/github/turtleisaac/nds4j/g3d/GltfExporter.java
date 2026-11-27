@@ -458,49 +458,141 @@ public final class GltfExporter
 
     // Converts a rotation held in NNS row-vector convention (v' = v * r, r row-major) to the unit
     // quaternion glTF wants for a column-vector node rotation (v' = R_gltf * v), i.e. the transpose.
-    static float[] matrixToQuat(double[] r)
+    static float[] matrixToQuat(Mat3 r)
     {
-        // M = r^T (column-vector rotation): M[i][j] = r[j*3+i]
-        double m00 = r[0], m01 = r[3], m02 = r[6];
-        double m10 = r[1], m11 = r[4], m12 = r[7];
-        double m20 = r[2], m21 = r[5], m22 = r[8];
+        // Column-vector quaternion of the transpose, then normalised.
+        double[] q = quat(r.m00, r.m10, r.m20, r.m01, r.m11, r.m21, r.m02, r.m12, r.m22);
 
+        return unit(q[0], q[1], q[2], q[3]);
+    }
+
+    /**
+     * @param m00 transposed cell
+     * @param m01 transposed cell
+     * @param m02 transposed cell
+     * @param m10 transposed cell
+     * @param m11 transposed cell
+     * @param m12 transposed cell
+     * @param m20 transposed cell
+     * @param m21 transposed cell
+     * @param m22 transposed cell
+     * @return an unnormalised quaternion
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static double[] quat(double m00, double m01, double m02, double m10, double m11, double m12,
+            double m20, double m21, double m22)
+    {
         double tr = m00 + m11 + m22;
-        double x, y, z, w;
-
         if (tr > 0)
-        {
-            double s = Math.sqrt(tr + 1.0) * 2;
-            w = 0.25 * s;
-            x = (m21 - m12) / s;
-            y = (m02 - m20) / s;
-            z = (m10 - m01) / s;
-        }
-        else if (m00 > m11 && m00 > m22)
+            return traceQuat(tr, m12, m20, m21, m02, m10, m01);
+
+        return axisQuat(m00, m01, m02, m10, m11, m12, m20, m21, m22);
+    }
+
+    /**
+     * @param tr the matrix trace
+     * @param m12 transposed cell
+     * @param m20 transposed cell
+     * @param m21 transposed cell
+     * @param m02 transposed cell
+     * @param m10 transposed cell
+     * @param m01 transposed cell
+     * @return the quaternion for a positive trace
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static double[] traceQuat(double tr, double m12, double m20, double m21, double m02, double m10, double m01)
+    {
+        double s = Math.sqrt(tr + 1.0) * 2;
+
+        return new double[] { (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s };
+    }
+
+    /**
+     * @param m00 transposed cell
+     * @param m01 transposed cell
+     * @param m02 transposed cell
+     * @param m10 transposed cell
+     * @param m11 transposed cell
+     * @param m12 transposed cell
+     * @param m20 transposed cell
+     * @param m21 transposed cell
+     * @param m22 transposed cell
+     * @return the quaternion when the trace is not positive
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static double[] axisQuat(double m00, double m01, double m02, double m10, double m11, double m12,
+            double m20, double m21, double m22)
+    {
+        if (m00 > m11)
+            return xOrLater(m00, m01, m02, m10, m11, m12, m20, m21, m22);
+
+        return yOrZ(m00, m01, m02, m10, m11, m12, m20, m21, m22);
+    }
+
+    /**
+     * @param m00 transposed cell
+     * @param m01 transposed cell
+     * @param m02 transposed cell
+     * @param m10 transposed cell
+     * @param m11 transposed cell
+     * @param m12 transposed cell
+     * @param m20 transposed cell
+     * @param m21 transposed cell
+     * @param m22 transposed cell
+     * @return the X-axis case, or Y/Z when X is not the largest diagonal
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static double[] xOrLater(double m00, double m01, double m02, double m10, double m11, double m12,
+            double m20, double m21, double m22)
+    {
+        if (m00 > m22)
         {
             double s = Math.sqrt(1.0 + m00 - m11 - m22) * 2;
-            w = (m21 - m12) / s;
-            x = 0.25 * s;
-            y = (m01 + m10) / s;
-            z = (m02 + m20) / s;
-        }
-        else if (m11 > m22)
-        {
-            double s = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
-            w = (m02 - m20) / s;
-            x = (m01 + m10) / s;
-            y = 0.25 * s;
-            z = (m12 + m21) / s;
-        }
-        else
-        {
-            double s = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
-            w = (m10 - m01) / s;
-            x = (m02 + m20) / s;
-            y = (m12 + m21) / s;
-            z = 0.25 * s;
+
+            return new double[] { 0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s };
         }
 
+        return yOrZ(m00, m01, m02, m10, m11, m12, m20, m21, m22);
+    }
+
+    /**
+     * @param m00 transposed cell
+     * @param m01 transposed cell
+     * @param m02 transposed cell
+     * @param m10 transposed cell
+     * @param m11 transposed cell
+     * @param m12 transposed cell
+     * @param m20 transposed cell
+     * @param m21 transposed cell
+     * @param m22 transposed cell
+     * @return the Y- or Z-diagonal quaternion
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static double[] yOrZ(double m00, double m01, double m02, double m10, double m11, double m12,
+            double m20, double m21, double m22)
+    {
+        if (m11 > m22)
+        {
+            double s = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
+
+            return new double[] { (m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s };
+        }
+
+        double s = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
+
+        return new double[] { (m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s };
+    }
+
+    /**
+     * @param x quaternion X
+     * @param y quaternion Y
+     * @param z quaternion Z
+     * @param w quaternion W
+     * @return the unit quaternion, or identity when the input is zero
+     * @see "Khronos glTF 2.0, node.rotation"
+     */
+    private static float[] unit(double x, double y, double z, double w)
+    {
         double n = Math.sqrt(x * x + y * y + z * z + w * w);
         if (n == 0)
             return new float[] { 0, 0, 0, 1 };
@@ -758,11 +850,11 @@ public final class GltfExporter
          */
         private static int[] jointsOf(StackPose.Frame bind, int mesh, int vertex)
         {
-            int[][] table = bind.jointIndex[mesh];
-            if (missing(table, vertex))
+            SbcMachine.Bind skin = skinAt(bind, mesh, vertex);
+            if (skin == null)
                 return null;
 
-            return table[vertex];
+            return jointIds(skin);
         }
 
         /**
@@ -771,6 +863,54 @@ public final class GltfExporter
          * @return true when {@code vertex} has no entry
          * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
          */
+        /**
+         * @param bind bind-pose stack frame
+         * @param mesh mesh index
+         * @param vertex vertex index
+         * @return that vertex's binding, or null
+         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
+         */
+        private static SbcMachine.Bind skinAt(StackPose.Frame bind, int mesh, int vertex)
+        {
+            if (bind.skin[mesh] == null)
+                return null;
+
+            if (vertex >= bind.skin[mesh].length)
+                return null;
+
+            return bind.skin[mesh][vertex];
+        }
+
+        /**
+         * @param skin a vertex binding
+         * @return its joint indices
+         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
+         */
+        private static int[] jointIds(SbcMachine.Bind skin)
+        {
+            // glTF still wants the joint numbers in a packed list.
+            int[] joints = new int[skin.terms.length];
+            for (int i = 0; i < joints.length; i++)
+                joints[i] = skin.terms[i].joint;
+
+            return joints;
+        }
+
+        /**
+         * @param skin a mixed binding
+         * @return its blend weights
+         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
+         */
+        private static double[] weightValues(SbcMachine.Bind skin)
+        {
+            // A rigid binding reports null so the exporter writes one full weight.
+            double[] weights = new double[skin.terms.length];
+            for (int i = 0; i < weights.length; i++)
+                weights[i] = skin.terms[i].weight;
+
+            return weights;
+        }
+
         private static boolean missing(int[][] table, int vertex)
         {
             if (table == null)
@@ -787,11 +927,11 @@ public final class GltfExporter
          */
         private static double[] weightsOf(StackPose.Frame bind, int mesh, int vertex)
         {
-            double[][] table = bind.weight[mesh];
-            if (table == null)
+            SbcMachine.Bind skin = skinAt(bind, mesh, vertex);
+            if (skin == null || !skin.mixed)
                 return null;
 
-            return atWeight(table, vertex);
+            return weightValues(skin);
         }
 
         /**
@@ -1021,8 +1161,8 @@ public final class GltfExporter
          */
         private static Model.NodeTransform decomposed(double[] joint)
         {
-            double[][] parts = NitroMtx.decompose(joint);
-            return new Model.NodeTransform(parts[0], parts[2], parts[1]);
+            // Translation, rotation and scale of one posed joint.
+            return NitroMtx.decompose(joint);
         }
 
         /**
@@ -1099,12 +1239,13 @@ public final class GltfExporter
 
         private String trsJson(Model.NodeTransform t)
         {
-            double[] tr = t.getTranslation(), sc = t.getScale();
+            Vec3 tr = t.getTranslation();
+            Vec3 sc = t.getScale();
             float[] q = matrixToQuat(t.getRotation());
             // node translation includes the model position scale (geometry is raw*posScale in local space)
-            return "\"translation\":[" + f((float) (tr[0])) + "," + f((float) (tr[1])) + "," + f((float) (tr[2])) + "]"
+            return "\"translation\":[" + f((float) tr.x) + "," + f((float) tr.y) + "," + f((float) tr.z) + "]"
                     + ",\"rotation\":[" + f(q[0]) + "," + f(q[1]) + "," + f(q[2]) + "," + f(q[3]) + "]"
-                    + ",\"scale\":[" + f((float) sc[0]) + "," + f((float) sc[1]) + "," + f((float) sc[2]) + "]";
+                    + ",\"scale\":[" + f((float) sc.x) + "," + f((float) sc.y) + "," + f((float) sc.z) + "]";
         }
 
         // One glTF animation: for each node, a T/R/S sampler+channel, emitted only when that channel
@@ -1206,16 +1347,34 @@ public final class GltfExporter
         private float[] sampleComponent(Model.NodeTransform t, int kind)
         {
             if (kind == 0)
-            {
-                double[] v = t.getTranslation();
-                return new float[] { (float) v[0], (float) v[1], (float) v[2] };
-            }
+                return components(t.getTranslation());
+
+            return otherComponent(t, kind);
+        }
+
+        /**
+         * @param t a node transform
+         * @param kind 1 rotation or 2 scale
+         * @return that channel as glTF floats
+         * @see "Khronos glTF 2.0, node"
+         */
+        private static float[] otherComponent(Model.NodeTransform t, int kind)
+        {
             if (kind == 2)
-            {
-                double[] v = t.getScale();
-                return new float[] { (float) v[0], (float) v[1], (float) v[2] };
-            }
+                return components(t.getScale());
+
             return matrixToQuat(t.getRotation());
+        }
+
+        /**
+         * @param v a vector
+         * @return its three components
+         * @see "Khronos glTF 2.0, accessor VEC3"
+         */
+        private static float[] components(Vec3 v)
+        {
+            // glTF accessors store the vector as three floats.
+            return new float[] { (float) v.x, (float) v.y, (float) v.z };
         }
 
         private static boolean moves(float[][] vals, float[] bind)

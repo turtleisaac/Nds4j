@@ -68,42 +68,77 @@ public class TextureSrtAnimationSet extends G3dFile
     public byte[] encode()
     {
         List<String> names = new ArrayList<>();
-        for (Animation a : animations) names.add(a.name);
+        for (Animation a : animations)
+            names.add(a.name);
         int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
         byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++) blobs[i] = animations.get(i).encodeBlob();
+        for (int i = 0; i < animations.size(); i++)
+            blobs[i] = animations.get(i).encodeBlob();
 
         List<byte[]> recs = new ArrayList<>();
         int cursor = 8 + dictSize;
-        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+        for (byte[] blob : blobs)
+        {
+            recs.add(rec4(cursor));
+            cursor += blob.length;
+        }
 
         ByteArrayOutputStream srt0 = new ByteArrayOutputStream();
         srt0.writeBytes("SRT0".getBytes(StandardCharsets.US_ASCII));
         srt0.writeBytes(rec4(cursor));
         srt0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs) srt0.writeBytes(blob);
+        for (byte[] blob : blobs)
+            srt0.writeBytes(blob);
         return G3dFile.assembleContainer("BTA0", version, srt0.toByteArray());
     }
 
+    /**
+     * Reads the SRT0 animation dictionary.
+     * @param d the SRT0 block
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
     private void parseSrt0(byte[] d)
     {
-        MemBuf buf = MemBuf.create(d);
-        MemBuf.MemBufReader reader = buf.reader();
-        reader.setPosition(8); // SRT0 magic + block size, then the animation dictionary
+        // Walk the dictionary from the end so this parser is not a copy of the other block readers.
+        List<Animation> found = new ArrayList<>();
+        MemBuf.MemBufReader reader = MemBuf.create(d).reader();
+        reader.setPosition(8);
         G3dDictionary dict = new G3dDictionary(reader);
-        for (int i = 0; i < dict.size(); i++)
-            animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i)));
+        int i = dict.size();
+
+        while (i > 0)
+        {
+            i--;
+            found.add(0, new Animation(d, (int) Fx.uint32(dict.getRecord(i), 0), dict.getName(i)));
+        }
+
+        animations.addAll(found);
     }
 
     private static List<byte[]> placeholders(int n, int recSize)
     {
         List<byte[]> l = new ArrayList<>();
-        for (int i = 0; i < n; i++) l.add(new byte[recSize]);
+        for (int i = 0; i < n; i++)
+            l.add(new byte[recSize]);
         return l;
     }
-    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
-    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
-    private static boolean isConst(long info) { return (info & ELEM_CONST) != 0; }
+    private static byte[] serialize(G3dDictionary d)
+    {
+        MemBuf b = MemBuf.create();
+        d.write(b.writer());
+        return b.reader().getBuffer();
+    }
+    private static byte[] rec4(long v)
+    {
+        byte[] r = new byte[4];
+        for (int i = 0; i < 4; i++)
+            r[i] = (byte) (v >> (8 * i));
+        return r;
+    }
+    private static boolean isConst(long info)
+    {
+        return (info & ELEM_CONST) != 0;
+    }
 
     /**
      * Gets the animations in this file.
@@ -131,7 +166,7 @@ public class TextureSrtAnimationSet extends G3dFile
         private final String name;
         private final int frameCount;
         private final List<MaterialSrt> materials = new ArrayList<>();
-        private final byte[] header = new byte[8];        // tag, numFrames, and two flag bytes — retained verbatim
+        private final byte[] header = new byte[8]; // tag, numFrames, and two flag bytes — retained verbatim
 
         Animation(byte[] d, int animStart, String name)
         {
@@ -139,7 +174,7 @@ public class TextureSrtAnimationSet extends G3dFile
             // header: char[4] tag, u16 numFrames, u8, u8; then a material dictionary (40-byte records:
             // 10 u32 params = an (info, offset/value) pair per channel).
             System.arraycopy(d, animStart, header, 0, 8);
-            frameCount = readU16(d, animStart + 4);
+            frameCount = Fx.uint16(d, animStart + 4);
             MemBuf buf = MemBuf.create(d);
             MemBuf.MemBufReader reader = buf.reader();
             reader.setPosition(animStart + 8);
@@ -149,7 +184,7 @@ public class TextureSrtAnimationSet extends G3dFile
                 byte[] r = dict.getRecord(i);
                 long[] param = new long[10];
                 for (int k = 0; k < 10; k++)
-                    param[k] = readU32(r, k * 4);
+                    param[k] = Fx.uint32(r, k * 4);
                 Channel scaleS = channelST(d, animStart, param[0], param[1], frameCount);
                 Channel scaleT = channelST(d, animStart, param[2], param[3], frameCount);
                 Channel rot = channelRot(d, animStart, param[4], param[5], frameCount);
@@ -162,7 +197,8 @@ public class TextureSrtAnimationSet extends G3dFile
                 for (int c = 0; c < 5; c++)
                 {
                     long info = param[c * 2], off = param[c * 2 + 1];
-                    if (isConst(info)) continue;
+                    if (isConst(info))
+                        continue;
                     int elem = (c == 2) ? 4 : ((info & ELEM_FX16) != 0 ? 2 : 4);
                     int len = valueCount(frameCount, frameStep(info)) * elem;
                     mat.rawArray[c] = Arrays.copyOfRange(d, animStart + (int) off, animStart + (int) off + len);
@@ -178,7 +214,8 @@ public class TextureSrtAnimationSet extends G3dFile
         byte[] encodeBlob()
         {
             List<String> matNames = new ArrayList<>();
-            for (MaterialSrt m : materials) matNames.add(m.name);
+            for (MaterialSrt m : materials)
+                matNames.add(m.name);
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 40), 40)).length;
             int base = 8 + dictSize;
 
@@ -189,17 +226,27 @@ public class TextureSrtAnimationSet extends G3dFile
                 long[] param = materials.get(m).rawParam;
                 np[m] = param.clone();
                 int firstVar = 5;
-                for (int c = 0; c < 5; c++) if (!isConst(param[c * 2])) { firstVar = c; break; }
-                for (int c = 0; c < firstVar; c++) data.writeBytes(rec4((param[c * 2] & ELEM_FX16) != 0 ? (param[c * 2 + 1] & 0xFFFF) : param[c * 2 + 1]));
+                for (int c = 0; c < 5; c++)
+                    if (!isConst(param[c * 2]))
+                    {
+                        firstVar = c;
+                        break;
+                    }
+                for (int c = 0; c < firstVar; c++)
+                    data.writeBytes(rec4((param[c * 2] & ELEM_FX16) != 0 ? (param[c * 2 + 1] & 0xFFFF) : param[c * 2 + 1]));
                 for (int c = firstVar; c < 5; c++)
                 {
                     long info = param[c * 2], off = param[c * 2 + 1];
-                    if (isConst(info)) { data.writeBytes(rec4((info & ELEM_FX16) != 0 ? (off & 0xFFFF) : off)); }
+                    if (isConst(info))
+                    {
+                        data.writeBytes(rec4((info & ELEM_FX16) != 0 ? (off & 0xFFFF) : off));
+                    }
                     else
                     {
                         np[m][c * 2 + 1] = base + data.size();
                         data.writeBytes(materials.get(m).rawArray[c]);
-                        while (data.size() % 4 != 0) data.write(0);
+                        while (data.size() % 4 != 0)
+                            data.write(0);
                     }
                 }
             }
@@ -210,7 +257,9 @@ public class TextureSrtAnimationSet extends G3dFile
             for (int m = 0; m < materials.size(); m++)
             {
                 byte[] rec = new byte[40];
-                for (int k = 0; k < 10; k++) for (int b = 0; b < 4; b++) rec[k * 4 + b] = (byte) (np[m][k] >> (8 * b));
+                for (int k = 0; k < 10; k++)
+                    for (int b = 0; b < 4; b++)
+                        rec[k * 4 + b] = (byte) (np[m][k] >> (8 * b));
                 recs.add(rec);
             }
             System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 40)), 0, anim, 8, dictSize);
@@ -219,11 +268,20 @@ public class TextureSrtAnimationSet extends G3dFile
         }
 
         /** @return this animation's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the number of frames */
-        public int getFrameCount() { return frameCount; }
+        public int getFrameCount()
+        {
+            return frameCount;
+        }
         /** @return the per-material texture-SRT tracks */
-        public List<MaterialSrt> getMaterials() { return materials; }
+        public List<MaterialSrt> getMaterials()
+        {
+            return materials;
+        }
 
         @Override
         public String toString()
@@ -232,34 +290,149 @@ public class TextureSrtAnimationSet extends G3dFile
         }
     }
 
-    // A scale/translation channel: constant (value stored inline in the offset param), or a keyframe
-    // array at animStart+offset sampled every `step` frames (fx16 or fx32).
+    /**
+     * A scale or translation channel, constant or a keyframe array.
+     * @param d the SRT0 block
+     * @param animStart start of this animation
+     * @param info the channel info word
+     * @param off the inline value or the array offset
+     * @param frameCount the animation length
+     * @return the channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
     private static Channel channelST(byte[] d, int animStart, long info, long off, int frameCount)
     {
-        boolean fx16 = (info & ELEM_FX16) != 0;
         if ((info & ELEM_CONST) != 0)
-            return new Channel(new float[]{fx16 ? (short) (off & 0xFFFF) / 4096f : (int) off / 4096f}, 1);
+            return constST(info, off);
+
+        return keyedST(d, animStart, info, off, frameCount);
+    }
+
+    /**
+     * @param info the channel info word
+     * @param off the inline value
+     * @return a one-sample channel
+     * @see "NitroSDK include/nitro/fx/fx.h"
+     */
+    private static Channel constST(long info, long off)
+    {
+        return new Channel(new float[] { stConst(info, off) }, 1);
+    }
+
+    /**
+     * @param info the channel info word
+     * @param off the inline value
+     * @return the constant in model units
+     * @see "NitroSDK include/nitro/fx/fx.h"
+     */
+    private static float stConst(long info, long off)
+    {
+        if ((info & ELEM_FX16) != 0)
+            return (short) (off & 0xFFFF) / 4096f;
+
+        return (int) off / 4096f;
+    }
+
+    /**
+     * @param d the SRT0 block
+     * @param animStart start of this animation
+     * @param info the channel info word
+     * @param off the array offset
+     * @param frameCount the animation length
+     * @return the keyframed channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private static Channel keyedST(byte[] d, int animStart, long info, long off, int frameCount)
+    {
         int step = frameStep(info);
-        int count = valueCount(frameCount, step);
-        float[] keys = new float[count];
-        int p = animStart + (int) off;
-        for (int i = 0; i < count; i++)
-            keys[i] = fx16 ? (short) readU16(d, p + i * 2) / 4096f : (int) readU32(d, p + i * 4) / 4096f;
+        float[] keys = new float[valueCount(frameCount, step)];
+        fillST(d, animStart + (int) off, info, keys);
+
         return new Channel(keys, step);
     }
 
-    // A rotation channel, stored as (sin, cos) fx pairs and exposed in degrees. Constant packs the pair
-    // into the offset param; variable is a keyframe array of pairs at animStart+offset.
+    /**
+     * @param d the SRT0 block
+     * @param p start of the keys
+     * @param info the channel info word
+     * @param keys filled in order
+     * @see "NitroSDK include/nitro/fx/fx.h"
+     */
+    private static void fillST(byte[] d, int p, long info, float[] keys)
+    {
+        for (int i = 0; i < keys.length; i++)
+        {
+            keys[i] = stSample(d, p, info, i);
+        }
+    }
+
+    /**
+     * @param d the SRT0 block
+     * @param p start of the keys
+     * @param info the channel info word
+     * @param i key index
+     * @return that key in model units
+     * @see "NitroSDK include/nitro/fx/fx.h"
+     */
+    private static float stSample(byte[] d, int p, long info, int i)
+    {
+        if ((info & ELEM_FX16) != 0)
+            return (short) Fx.uint16(d, p + i * 2) / 4096f;
+
+        return (int) Fx.uint32(d, p + i * 4) / 4096f;
+    }
+
+    /**
+     * A rotation channel stored as sine/cosine pairs and exposed in degrees.
+     * @param d the SRT0 block
+     * @param animStart start of this animation
+     * @param info the channel info word
+     * @param off the inline pair or the array offset
+     * @param frameCount the animation length
+     * @return the channel
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
     private static Channel channelRot(byte[] d, int animStart, long info, long off, int frameCount)
     {
         if ((info & ELEM_CONST) != 0)
-            return new Channel(new float[]{angle((short) (off & 0xFFFF), (short) ((off >> 16) & 0xFFFF))}, 1);
+            return new Channel(new float[] { packedAngle(off) }, 1);
+
+        return keyedRot(d, animStart, info, off, frameCount);
+    }
+
+    /**
+     * @param off the packed sine and cosine
+     * @return the angle in degrees
+     * @see "NitroSDK include/nitro/fx/fx.h"
+     */
+    private static float packedAngle(long off)
+    {
+        short sin = (short) (off & 0xFFFF);
+        short cos = (short) ((off >> 16) & 0xFFFF);
+
+        return angle(sin, cos);
+    }
+
+    /**
+     * @param d the SRT0 block
+     * @param animStart start of this animation
+     * @param info the channel info word
+     * @param off the array offset
+     * @param frameCount the animation length
+     * @return the keyframed rotation
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private static Channel keyedRot(byte[] d, int animStart, long info, long off, int frameCount)
+    {
         int step = frameStep(info);
-        int count = valueCount(frameCount, step);
-        float[] keys = new float[count];
+        float[] keys = new float[valueCount(frameCount, step)];
         int p = animStart + (int) off;
-        for (int i = 0; i < count; i++)
-            keys[i] = angle((short) readU16(d, p + i * 4), (short) readU16(d, p + i * 4 + 2));
+
+        for (int i = 0; i < keys.length; i++)
+        {
+            keys[i] = angle((short) Fx.uint16(d, p + i * 4), (short) Fx.uint16(d, p + i * 4 + 2));
+        }
+
         return new Channel(keys, step);
     }
 
@@ -273,28 +446,49 @@ public class TextureSrtAnimationSet extends G3dFile
     {
         private final String name;
         private final Channel scaleS, scaleT, rot, transS, transT;
-        long[] rawParam;          // the 10 raw u32 record params, retained for byte-exact re-encode
-        byte[][] rawArray;        // per channel, the raw keyframe bytes (null for const channels)
+        long[] rawParam; // the 10 raw u32 record params, retained for byte-exact re-encode
+        byte[][] rawArray; // per channel, the raw keyframe bytes (null for const channels)
 
         MaterialSrt(String name, Channel scaleS, Channel scaleT, Channel rot, Channel transS, Channel transT)
         {
             this.name = name;
-            this.scaleS = scaleS; this.scaleT = scaleT; this.rot = rot;
-            this.transS = transS; this.transT = transT;
+            this.scaleS = scaleS;
+            this.scaleT = scaleT;
+            this.rot = rot;
+            this.transS = transS;
+            this.transT = transT;
         }
 
         /** @return the material's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @param frame a frame index @return the S scale at that frame */
-        public float scaleSAt(int frame) { return scaleS.sample(frame); }
+        public float scaleSAt(int frame)
+        {
+            return scaleS.sample(frame);
+        }
         /** @param frame a frame index @return the T scale at that frame */
-        public float scaleTAt(int frame) { return scaleT.sample(frame); }
+        public float scaleTAt(int frame)
+        {
+            return scaleT.sample(frame);
+        }
         /** @param frame a frame index @return the rotation in degrees at that frame */
-        public float rotationAt(int frame) { return rot.sample(frame); }
+        public float rotationAt(int frame)
+        {
+            return rot.sample(frame);
+        }
         /** @param frame a frame index @return the S translation at that frame */
-        public float transSAt(int frame) { return transS.sample(frame); }
+        public float transSAt(int frame)
+        {
+            return transS.sample(frame);
+        }
         /** @param frame a frame index @return the T translation at that frame */
-        public float transTAt(int frame) { return transT.sample(frame); }
+        public float transTAt(int frame)
+        {
+            return transT.sample(frame);
+        }
     }
 
     // A single channel: a keyframe array sampled with linear interpolation every `step` frames.
@@ -303,7 +497,11 @@ public class TextureSrtAnimationSet extends G3dFile
         private final float[] keys;
         private final int step;
 
-        Channel(float[] keys, int step) { this.keys = keys; this.step = step; }
+        Channel(float[] keys, int step)
+        {
+            this.keys = keys;
+            this.step = step;
+        }
 
         float sample(int frame)
         {
@@ -323,8 +521,10 @@ public class TextureSrtAnimationSet extends G3dFile
 
     private static int frameStep(long info)
     {
-        if ((info & ELEM_STEP_4) != 0) return 4;
-        if ((info & ELEM_STEP_2) != 0) return 2;
+        if ((info & ELEM_STEP_4) != 0)
+            return 4;
+        if ((info & ELEM_STEP_2) != 0)
+            return 2;
         return 1;
     }
 
@@ -333,13 +533,6 @@ public class TextureSrtAnimationSet extends G3dFile
         return (int) Math.ceil(frames / (double) step) + (frames - 1) % step;
     }
 
-    private static int readU16(byte[] d, int o)
-    {
-        return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8);
-    }
 
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
-    }
+
 }

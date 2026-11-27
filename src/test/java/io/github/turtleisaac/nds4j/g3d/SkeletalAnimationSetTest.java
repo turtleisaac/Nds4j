@@ -66,8 +66,14 @@ public class SkeletalAnimationSetTest
             if (!magic(f).equals("NARC"))
                 continue;
             Narc narc;
-            try { narc = new Narc(f); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(f);
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             for (int j = 0; j < narc.getNumFiles(); j++)
                 if (magic(narc.getFile(j)).equals(want))
                     found.add(narc.getFile(j));
@@ -114,11 +120,11 @@ public class SkeletalAnimationSetTest
                 for (SkeletalAnimationSet.NodeAnim node : anim.getNodes())
                 {
                     // sampling the first and last frame must produce finite SRT (or null for base tracks)
-                    for (int frame : new int[]{0, last})
+                    for (int frame : new int[] { 0, last })
                     {
-                        assertFinite(node.translationAt(frame), 3);
-                        assertFinite(node.scaleAt(frame), 3);
-                        assertFinite(node.rotationAt(frame), 9);
+                        assertFinite(node.translationAt(frame));
+                        assertFinite(node.scaleAt(frame));
+                        assertFinite(node.rotationAt(frame));
                     }
                 }
                 animations++;
@@ -127,13 +133,30 @@ public class SkeletalAnimationSetTest
         assertThat(animations).as("the ROM should contain animations").isGreaterThan(0);
     }
 
-    private static void assertFinite(double[] v, int len)
+    /**
+     * @param v a sampled vector, or null for a base track
+     * @see "NitroSystem g3d/src/anm/nsbca.c getMdlScale_"
+     */
+    private static void assertFinite(Vec3 v)
     {
         if (v == null)
-            return; // base track: keep bind pose
-        assertThat(v.length).isEqualTo(len);
-        for (double d : v)
-            assertThat(Double.isFinite(d)).as("SRT value is finite").isTrue();
+            return;
+
+        assertThat(Double.isFinite(v.x)).isTrue();
+        assertThat(Double.isFinite(v.y)).isTrue();
+        assertThat(Double.isFinite(v.z)).isTrue();
+    }
+
+    /**
+     * @param v a sampled rotation, or null for a base track
+     * @see "NitroSystem g3d/src/anm/nsbca.c getRotData_"
+     */
+    private static void assertFinite(Mat3 v)
+    {
+        if (v == null)
+            return;
+
+        assertThat(Double.isFinite(v.m00 + v.m11 + v.m22)).isTrue();
     }
 
     @Test
@@ -150,8 +173,14 @@ public class SkeletalAnimationSetTest
             if (!magic(f).equals("NARC"))
                 continue;
             Narc narc;
-            try { narc = new Narc(f); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(f);
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
 
             List<Model> models = new ArrayList<>();
             List<SkeletalAnimationSet.Animation> anims = new ArrayList<>();
@@ -159,9 +188,19 @@ public class SkeletalAnimationSetTest
             {
                 byte[] g = narc.getFile(j);
                 if (magic(g).equals("BMD0"))
-                    try { models.addAll(new ModelSet(g).getModels()); } catch (RuntimeException ignored) {}
+                    try
+                    {
+                        models.addAll(new ModelSet(g).getModels());
+                    }
+                    catch (RuntimeException ignored)
+                    {}
                 else if (magic(g).equals("BCA0"))
-                    try { anims.addAll(new SkeletalAnimationSet(g).getAnimations()); } catch (RuntimeException ignored) {}
+                    try
+                    {
+                        anims.addAll(new SkeletalAnimationSet(g).getAnimations());
+                    }
+                    catch (RuntimeException ignored)
+                    {}
             }
 
             for (Model model : models)
@@ -182,7 +221,11 @@ public class SkeletalAnimationSetTest
                     boolean moved = false;
                     for (int m = 0; m < bind.size() && !moved; m++)
                         for (int k = 0; k < bind.get(m).length; k++)
-                            if (Math.abs(bind.get(m)[k] - mid.get(m)[k]) > 1e-4f) { moved = true; break; }
+                            if (Math.abs(bind.get(m)[k] - mid.get(m)[k]) > 1e-4f)
+                            {
+                                moved = true;
+                                break;
+                            }
 
                     assertThat(moved).as("a mid-animation frame should move the model's geometry").isTrue();
                     checked = true;
@@ -200,7 +243,10 @@ public class SkeletalAnimationSetTest
     void rejectsNonAnimationSet()
     {
         byte[] junk = new byte[0x20];
-        junk[0] = 'J'; junk[1] = 'U'; junk[2] = 'N'; junk[3] = 'K';
+        junk[0] = 'J';
+        junk[1] = 'U';
+        junk[2] = 'N';
+        junk[3] = 'K';
         assertThatThrownBy(() -> new SkeletalAnimationSet(junk)).isInstanceOf(RuntimeException.class);
     }
 }

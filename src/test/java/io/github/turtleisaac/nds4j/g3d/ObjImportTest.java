@@ -43,12 +43,12 @@ public class ObjImportTest
         String obj = String.join("\n",
                 "v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0",
                 "vt 0 0", "vt 1 0", "vt 1 1", "vt 0 1",
-                "f 1/1 2/2 3/3 4/4",          // a quad -> fan-triangulated into 2 triangles
-                "f -4/1 -1/4 -2/3");           // negative (relative) indices
+                "f 1/1 2/2 3/3 4/4", // a quad -> fan-triangulated into 2 triangles
+                "f -4/1 -1/4 -2/3"); // negative (relative) indices
         ObjImporter imp = ObjImporter.parse(obj);
 
         assertThat(imp.hasTexcoords()).isTrue();
-        assertThat(imp.getPositions()).hasSize(4 * 3);   // 4 unique v/vt corners
+        assertThat(imp.getPositions()).hasSize(4 * 3); // 4 unique v/vt corners
         // quad -> 2 tris, plus 1 explicit tri = 3 triangles = 9 indices
         assertThat(imp.getTriangles()).hasSize(9);
         for (int idx : imp.getTriangles())
@@ -85,11 +85,11 @@ public class ObjImportTest
         assertThat(m.getVertexCount()).isEqualTo(8 * 3);
 
         // Decoded geometry reproduces the authored octahedron extents (±2 on each axis).
-        float[][] box = m.getHeaderBoundingBox();
+        Box box = m.getHeaderBoundingBox();
         for (int c = 0; c < 3; c++)
         {
-            assertThat(box[0][c]).as("box min axis %d", c).isCloseTo(-2f, Offset.offset(0.01f));
-            assertThat(box[1][c]).as("box max axis %d", c).isCloseTo(2f, Offset.offset(0.01f));
+            assertThat(box.min(c)).as("box min axis %d", c).isCloseTo(-2f, Offset.offset(0.01f));
+            assertThat(box.max(c)).as("box max axis %d", c).isCloseTo(2f, Offset.offset(0.01f));
         }
         // Every decoded vertex is one of the six authored octahedron poles.
         float[] p = m.getMeshes().get(0).getPositions();
@@ -160,15 +160,17 @@ public class ObjImportTest
     {
         // Three quads at different heights, each with a distinct solid texture.
         java.util.List<ModelBuilder.Part> parts = new java.util.ArrayList<>();
-        int[] colors = {0xF80000, 0x00F800, 0x0000F8};
+        int[] colors = { 0xF80000, 0x00F800, 0x0000F8 };
         for (int i = 0; i < 3; i++)
         {
             float y0 = -3 + i * 2, y1 = y0 + 2;
-            float[] pos = {-2, y0, 0,  2, y0, 0,  2, y1, 0,  -2, y1, 0};
-            int[] tris = {0, 1, 2, 0, 2, 3};
+            float[] pos = { -2, y0, 0, 2, y0, 0, 2, y1, 0, -2, y1, 0 };
+            int[] tris = { 0, 1, 2, 0, 2, 3 };
             BufferedImage tex = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
-            for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) tex.setRGB(x, y, 0xFF000000 | colors[i]);
-            float[] uv = {0, 8,  8, 8,  8, 0,  0, 0};
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                    tex.setRGB(x, y, 0xFF000000 | colors[i]);
+            float[] uv = { 0, 8, 8, 8, 8, 0, 0, 0 };
             parts.add(new ModelBuilder.Part("p" + i, pos, uv, tris, tex));
         }
 
@@ -204,8 +206,8 @@ public class ObjImportTest
     {
         // A big triangle (coords up to 100) must not overflow VTX_16: the builder scales it down and the
         // decoder scales it back, so the decoded geometry still matches within fixed-point precision.
-        float[] pos = {0, 0, 0,  100, 0, 0,  0, 80, 0};
-        int[] tris = {0, 1, 2};
+        float[] pos = { 0, 0, 0, 100, 0, 0, 0, 80, 0 };
+        int[] tris = { 0, 1, 2 };
         byte[] nsbmd = ModelBuilder.buildUntextured("big", pos, tris);
         Model m = new ModelSet(nsbmd).getModels().get(0);
 

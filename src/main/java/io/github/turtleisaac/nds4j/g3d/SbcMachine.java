@@ -25,16 +25,16 @@ package io.github.turtleisaac.nds4j.g3d;
  */
 final class SbcMachine
 {
-    /** One NODEMIX term list, or a single joint when {@code weights} is null. */
+    /** One NODEMIX term list, or a single joint when {@code mixed} is false. */
     static final class Bind
     {
-        final int[] joints;
-        final double[] weights;
+        final EnvelopeWeight[] terms;
+        final boolean mixed;
 
-        private Bind(int[] joints, double[] weights)
+        private Bind(EnvelopeWeight[] terms, boolean mixed)
         {
-            this.joints = joints;
-            this.weights = weights;
+            this.terms = terms;
+            this.mixed = mixed;
         }
 
         /**
@@ -44,25 +44,26 @@ final class SbcMachine
          */
         static Bind joint(int joint)
         {
-            return new Bind(new int[] { joint }, null);
+            // A rigid joint is not a blend, even though its weight is one.
+            return new Bind(new EnvelopeWeight[] { EnvelopeWeight.of(joint, 1) }, false);
         }
 
         /**
-         * @param joints joint indices, parallel to {@code weights}
-         * @param weights blend weights, summing to about 1
+         * @param terms blend terms, summing to about 1
          * @return a NODEMIX binding
          * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
          */
-        static Bind mix(int[] joints, double[] weights)
+        static Bind mix(EnvelopeWeight[] terms)
         {
-            return new Bind(joints, weights);
+            // The terms are copied so a later SBC read cannot change them.
+            return new Bind(terms.clone(), true);
         }
     }
 
     private final double[][] stack = new double[32][];
     private final Bind[] stackBind = new Bind[32];
     private final boolean[] scaleOne;
-    private final double[][] scaleInv;
+    private final Vec3[] scaleInv;
     private final double[][] jointWorld;
     private double[] current = NitroMtx.identity();
     private Bind bind = Bind.joint(0);
@@ -82,12 +83,12 @@ final class SbcMachine
             jointWorld[i] = id;
 
         scaleOne = new boolean[Math.max(nodes, 1)];
-        scaleInv = new double[scaleOne.length][];
+        scaleInv = new Vec3[scaleOne.length];
         if (scaleOne.length > 0)
             scaleOne[0] = true;
 
         for (int i = 0; i < scaleInv.length; i++)
-            scaleInv[i] = new double[] { 0, 0, 0 };
+            scaleInv[i] = Vec3.zero();
     }
 
     /**
@@ -103,12 +104,12 @@ final class SbcMachine
      * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEDESC"
      */
     void nodeDesc(int node, int parent, int opt, int srcSlot, int dstSlot,
-            double[] t, double[] r, double[] s, boolean maya)
+            Vec3 t, Mat3 r, Vec3 s, boolean maya)
     {
         if (srcSlot >= 0)
             restore(srcSlot);
 
-        double[] inv = parentInverse(parent, opt, maya);
+        Vec3 inv = parentInverse(parent, opt, maya);
         current = NitroMtx.mul(NitroMtx.mayaJoint(t, r, s, inv), current);
         bind = Bind.joint(node);
 
@@ -128,13 +129,13 @@ final class SbcMachine
      * @return inverse parent scale, or {@code (1,1,1)}
      * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dGetJointScaleMaya"
      */
-    private double[] parentInverse(int parent, int opt, boolean maya)
+    private Vec3 parentInverse(int parent, int opt, boolean maya)
     {
         if (!maya || (opt & NodeDescFlag.NNS_G3D_SBC_NODEDESC_FLAG_MAYASSC_APPLY.mask) == 0)
-            return new double[] { 1, 1, 1 };
+            return Vec3.one();
 
         if (parent < 0 || parent >= scaleOne.length || scaleOne[parent])
-            return new double[] { 1, 1, 1 };
+            return Vec3.one();
 
         return scaleInv[parent];
     }
@@ -146,13 +147,13 @@ final class SbcMachine
      * @param maya Maya scaling rule
      * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dGetJointScaleMaya"
      */
-    private void rememberScale(int node, int opt, double[] s, boolean maya)
+    private void rememberScale(int node, int opt, Vec3 s, boolean maya)
     {
         if (!maya || (opt & NodeDescFlag.NNS_G3D_SBC_NODEDESC_FLAG_MAYASSC_PARENT.mask) == 0
                 || node < 0 || node >= scaleOne.length)
             return;
 
-        boolean one = Math.abs(s[0] - 1) < 1e-8 && Math.abs(s[1] - 1) < 1e-8 && Math.abs(s[2] - 1) < 1e-8;
+        boolean one = Math.abs(s.x - 1) < 1e-8 && Math.abs(s.y - 1) < 1e-8 && Math.abs(s.z - 1) < 1e-8;
         scaleOne[node] = one;
 
         if (!one)
@@ -167,18 +168,19 @@ final class SbcMachine
      * @param invBind per-node inverse bind, Nitro 4×3
      * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
      */
-    void nodeMix(int dest, int[] slots, int[] joints, double[] weights, double[][] invBind)
+    void nodeMix(int dest, int[] slots, EnvelopeWeight[] terms, double[][] invBind)
     {
+        // Each term is inverse-bind times the stored joint, weighted into the sum.
         double[] sum = new double[12];
-        for (int i = 0; i < slots.length; i++)
+        for (int i = 0; i < terms.length; i++)
         {
             double[] joint = stack[slots[i] & 31];
-            double[] inv = invBind[joints[i]];
-            NitroMtx.mad(sum, NitroMtx.mul(inv, joint), weights[i]);
+            double[] inv = invBind[terms[i].joint];
+            NitroMtx.mad(sum, NitroMtx.mul(inv, joint), terms[i].weight);
         }
 
         stack[dest & 31] = sum;
-        stackBind[dest & 31] = Bind.mix(joints.clone(), weights.clone());
+        stackBind[dest & 31] = Bind.mix(terms);
         current = sum;
         bind = stackBind[dest & 31];
     }

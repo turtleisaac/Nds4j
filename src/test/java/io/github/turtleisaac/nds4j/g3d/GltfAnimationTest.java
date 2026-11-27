@@ -56,8 +56,14 @@ public class GltfAnimationTest
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         Narc narc;
-        try { narc = new Narc(rom.getFile(142)); }
-        catch (RuntimeException e) { return false; }
+        try
+        {
+            narc = new Narc(rom.getFile(142));
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
         if (!magic(narc.getFile(51)).equals("BMD0") || !magic(narc.getFile(53)).equals("BCA0"))
             return false;
         maneneModel = new ModelSet(narc.getFile(51)).getModels().get(0);
@@ -119,7 +125,7 @@ public class GltfAnimationTest
             double[] m = world[mesh.getNodeIndex()];
             for (int i = 0; i < raw.length; i += 3)
             {
-                double[] p = {raw[i] * posScale, raw[i + 1] * posScale, raw[i + 2] * posScale};
+                double[] p = { raw[i] * posScale, raw[i + 1] * posScale, raw[i + 2] * posScale };
                 double x = m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3];
                 double y = m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7];
                 double z = m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11];
@@ -145,22 +151,22 @@ public class GltfAnimationTest
     {
         float[] q = GltfExporter.matrixToQuat(t.getRotation());
         double[] r = quatToMatrix(q);
-        double[] s = t.getScale();
-        double[] tr = t.getTranslation();
+        Vec3 s = t.getScale();
+        Vec3 tr = t.getTranslation();
         // M = T * R * S  (column vector), 3x4 row-major
-        return new double[]{
-                r[0] * s[0], r[1] * s[1], r[2] * s[2], tr[0],
-                r[3] * s[0], r[4] * s[1], r[5] * s[2], tr[1],
-                r[6] * s[0], r[7] * s[1], r[8] * s[2], tr[2]};
+        return new double[] {
+                r[0] * s.x, r[1] * s.y, r[2] * s.z, tr.x,
+                r[3] * s.x, r[4] * s.y, r[5] * s.z, tr.y,
+                r[6] * s.x, r[7] * s.y, r[8] * s.z, tr.z };
     }
 
     private static double[] quatToMatrix(float[] q)
     {
         double x = q[0], y = q[1], z = q[2], w = q[3];
-        return new double[]{
+        return new double[] {
                 1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
                 2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
-                2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)};
+                2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y) };
     }
 
     // 3x4 * 3x4 (each an affine with implicit [0 0 0 1] row)

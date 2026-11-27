@@ -50,7 +50,8 @@ public class BillboardTest
         int n = 0;
         for (int y = 0; y < a.getHeight(); y++)
             for (int x = 0; x < a.getWidth(); x++)
-                if (a.getRGB(x, y) != b.getRGB(x, y)) n++;
+                if (a.getRGB(x, y) != b.getRGB(x, y))
+                    n++;
         return n;
     }
 
@@ -62,7 +63,8 @@ public class BillboardTest
             {
                 int rgb = img.getRGB(x, y);
                 int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                if (Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) > 40) n++;
+                if (Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) > 40)
+                    n++;
             }
         return n;
     }
@@ -73,15 +75,23 @@ public class BillboardTest
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         Narc narc;
-        try { narc = new Narc(rom.getFile(139)); }
-        catch (RuntimeException e) { Assumptions.assumeTrue(false, "narc 139 not readable"); return; }
+        try
+        {
+            narc = new Narc(rom.getFile(139));
+        }
+        catch (RuntimeException e)
+        {
+            Assumptions.assumeTrue(false, "narc 139 not readable");
+            return;
+        }
         Assumptions.assumeTrue(magic(narc.getFile(61)).equals("BMD0"), "expected hero NSBMD at narc 139 f61");
 
         ModelSet ms = new ModelSet(narc.getFile(61));
         Model hero = ms.getModels().get(0);
         int bb = 0;
         for (int n = 0; n < hero.getNodeCount(); n++)
-            if (hero.isBillboardNode(n)) bb++;
+            if (hero.isBillboardNode(n))
+                bb++;
         Assumptions.assumeTrue(bb > 0, "hero should have a billboard node");
 
         BufferedImage y20 = SoftwareRenderer.render(hero, ms.getEmbeddedTextures(), 160, 160, 20, 12);
@@ -99,8 +109,15 @@ public class BillboardTest
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         Narc narc;
-        try { narc = new Narc(rom.getFile(139)); }
-        catch (RuntimeException e) { Assumptions.assumeTrue(false, "narc 139 not readable"); return; }
+        try
+        {
+            narc = new Narc(rom.getFile(139));
+        }
+        catch (RuntimeException e)
+        {
+            Assumptions.assumeTrue(false, "narc 139 not readable");
+            return;
+        }
 
         // Find a billboard model and a skeletal animation that moves its billboard node (narc 139 pairs
         // demo_tama_a with g_demo_gira_a). Both live in the same NARC as most model+animation pairs do.
@@ -108,31 +125,50 @@ public class BillboardTest
         int billMesh = -1;
         for (int j = 0; j < narc.getNumFiles() && billboard == null; j++)
         {
-            if (!magic(narc.getFile(j)).equals("BMD0")) continue;
+            if (!magic(narc.getFile(j)).equals("BMD0"))
+                continue;
             ModelSet ms;
-            try { ms = new ModelSet(narc.getFile(j)); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                ms = new ModelSet(narc.getFile(j));
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             for (Model m : ms.getModels())
                 for (int mi = 0; mi < m.getMeshes().size(); mi++)
-                    if (m.isBillboardNode(m.getMeshes().get(mi).getNodeIndex())) { billboard = m; billMesh = mi; break; }
+                    if (m.isBillboardNode(m.getMeshes().get(mi).getNodeIndex()))
+                    {
+                        billboard = m;
+                        billMesh = mi;
+                        break;
+                    }
         }
         Assumptions.assumeTrue(billboard != null, "no billboard model in narc 139");
 
         SkeletalAnimationSet.Animation mover = null;
         int node = billboard.getMeshes().get(billMesh).getNodeIndex();
-        double[] bind = billboard.getNodeWorldTranslation(node);
+        Vec3 bind = billboard.getNodeWorldTranslation(node);
         double bestMove = 0;
         int bestFrame = 0;
         for (int j = 0; j < narc.getNumFiles(); j++)
         {
-            if (!magic(narc.getFile(j)).equals("BCA0")) continue;
+            if (!magic(narc.getFile(j)).equals("BCA0"))
+                continue;
             for (SkeletalAnimationSet.Animation an : new SkeletalAnimationSet(narc.getFile(j)).getAnimations())
                 for (int f = 0; f < an.getFrameCount(); f++)
                 {
-                    double[][] pw = billboard.poseNodeWorldTranslations(an, f);
-                    if (node >= pw.length) continue;
-                    double d = Math.hypot(Math.hypot(pw[node][0] - bind[0], pw[node][1] - bind[1]), pw[node][2] - bind[2]);
-                    if (d > bestMove) { bestMove = d; mover = an; bestFrame = f; }
+                    Vec3[] pw = billboard.poseNodeWorldTranslations(an, f);
+                    if (node >= pw.length)
+                        continue;
+                    double d = Math.hypot(Math.hypot(pw[node].x - bind.x, pw[node].y - bind.y), pw[node].z - bind.z);
+                    if (d > bestMove)
+                    {
+                        bestMove = d;
+                        mover = an;
+                        bestFrame = f;
+                    }
                 }
         }
         Assumptions.assumeTrue(mover != null && bestMove > 0.05, "no animation moves the billboard node");
@@ -141,9 +177,9 @@ public class BillboardTest
         // differs from the bind-pose pivot the static renderer would use.
         NitroAnimation na = new NitroAnimation(mover, null, null, null);
         NitroAnimation.Frame frame = na.sample(billboard, bestFrame);
-        double[] posed = frame.billboardPivotFor(billMesh);
+        Vec3 posed = frame.billboardPivotFor(billMesh);
         assertThat(posed).as("a skeletal frame carries a posed billboard pivot").isNotNull();
-        double moved = Math.hypot(Math.hypot(posed[0] - bind[0], posed[1] - bind[1]), posed[2] - bind[2]);
+        double moved = Math.hypot(Math.hypot(posed.x - bind.x, posed.y - bind.y), posed.z - bind.z);
         assertThat(moved).as("the posed pivot follows the animation, away from the bind pose").isGreaterThan(0.05);
 
         // A frame with no skeletal track carries no posed pivot (the renderer falls back to the bind pose).
@@ -162,8 +198,15 @@ public class BillboardTest
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         Narc narc;
-        try { narc = new Narc(rom.getFile(142)); }
-        catch (RuntimeException e) { Assumptions.assumeTrue(false, "narc 142 not readable"); return; }
+        try
+        {
+            narc = new Narc(rom.getFile(142));
+        }
+        catch (RuntimeException e)
+        {
+            Assumptions.assumeTrue(false, "narc 142 not readable");
+            return;
+        }
         Assumptions.assumeTrue(magic(narc.getFile(51)).equals("BMD0"), "expected manene NSBMD");
 
         ModelSet ms = new ModelSet(narc.getFile(51));

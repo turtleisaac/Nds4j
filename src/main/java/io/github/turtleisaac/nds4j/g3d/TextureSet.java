@@ -57,6 +57,7 @@ public class TextureSet extends G3dFile
     // Views into the TEX0 block. Offsets are relative to the block's first byte.
     private byte[] tex0;
     private int texDataOfs, tex4x4DataOfs, tex4x4PlttIdxOfs, plttDataOfs;
+    private MemBuf.MemBufReader pixels;
 
     /**
      * Generates an object representation of an NSBTX file.
@@ -150,8 +151,8 @@ public class TextureSet extends G3dFile
         for (int i = 0; i < texDict.size(); i++)
         {
             byte[] rec = texDict.getRecord(i);
-            long texImageParam = readU32(rec, 0);
-            long extraParam = readU32(rec, 4);
+            long texImageParam = Fx.uint32(rec, 0);
+            long extraParam = Fx.uint32(rec, 4);
             textures.add(new Texture(texDict.getName(i), texImageParam, extraParam));
         }
 
@@ -161,7 +162,7 @@ public class TextureSet extends G3dFile
         for (int i = 0; i < plttDict.size(); i++)
         {
             byte[] rec = plttDict.getRecord(i);
-            int offsetUnits = (rec[0] & 0xFF) | ((rec[1] & 0xFF) << 8);
+            int offsetUnits = Fx.uint16(rec, 0);
             palettes.add(new Palette(plttDict.getName(i), offsetUnits << 3));
         }
     }
@@ -283,14 +284,29 @@ public class TextureSet extends G3dFile
 
         switch (texture.getFormat())
         {
-            case FORMAT_PLTT4:   decodePalette(img, texture, palette, 2); break;
-            case FORMAT_PLTT16:  decodePalette(img, texture, palette, 4); break;
-            case FORMAT_PLTT256: decodePalette(img, texture, palette, 8); break;
-            case FORMAT_A3I5:    decodeAlpha(img, texture, palette, 5, 3); break;
-            case FORMAT_A5I3:    decodeAlpha(img, texture, palette, 3, 5); break;
-            case FORMAT_DIRECT:  decodeDirect(img, texture); break;
-            case FORMAT_COMP4x4: decodeComp4x4(img, texture, palette); break;
-            default: throw new UnsupportedOperationException("Unsupported texture format " + texture.getFormat());
+            case FORMAT_PLTT4:
+                decodePalette(img, texture, palette, 2);
+                break;
+            case FORMAT_PLTT16:
+                decodePalette(img, texture, palette, 4);
+                break;
+            case FORMAT_PLTT256:
+                decodePalette(img, texture, palette, 8);
+                break;
+            case FORMAT_A3I5:
+                decodeAlpha(img, texture, palette, 5, 3);
+                break;
+            case FORMAT_A5I3:
+                decodeAlpha(img, texture, palette, 3, 5);
+                break;
+            case FORMAT_DIRECT:
+                decodeDirect(img, texture);
+                break;
+            case FORMAT_COMP4x4:
+                decodeComp4x4(img, texture, palette);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported texture format " + texture.getFormat());
         }
         return img;
     }
@@ -306,12 +322,24 @@ public class TextureSet extends G3dFile
         int bytes;
         switch (texture.getFormat())
         {
-            case FORMAT_PLTT4:   bytes = w * h / 4; break;
-            case FORMAT_PLTT16:  bytes = w * h / 2; break;
-            case FORMAT_PLTT256: bytes = w * h; break;
-            case FORMAT_A3I5: case FORMAT_A5I3: bytes = w * h; break;
-            case FORMAT_DIRECT:  bytes = w * h * 2; break;
-            default: return null;
+            case FORMAT_PLTT4:
+                bytes = w * h / 4;
+                break;
+            case FORMAT_PLTT16:
+                bytes = w * h / 2;
+                break;
+            case FORMAT_PLTT256:
+                bytes = w * h;
+                break;
+            case FORMAT_A3I5:
+            case FORMAT_A5I3:
+                bytes = w * h;
+                break;
+            case FORMAT_DIRECT:
+                bytes = w * h * 2;
+                break;
+            default:
+                return null;
         }
         int base = texDataOfs + texture.getDataOffset();
         if (base < 0 || base + bytes > tex0.length)
@@ -364,11 +392,16 @@ public class TextureSet extends G3dFile
     {
         switch (texture.getFormat())
         {
-            case FORMAT_PLTT4:   return encodePaletted(img, texture, palette, 2);
-            case FORMAT_PLTT16:  return encodePaletted(img, texture, palette, 4);
-            case FORMAT_PLTT256: return encodePaletted(img, texture, palette, 8);
-            case FORMAT_DIRECT:  return encodeDirect(img);
-            default: return null;
+            case FORMAT_PLTT4:
+                return encodePaletted(img, texture, palette, 2);
+            case FORMAT_PLTT16:
+                return encodePaletted(img, texture, palette, 4);
+            case FORMAT_PLTT256:
+                return encodePaletted(img, texture, palette, 8);
+            case FORMAT_DIRECT:
+                return encodeDirect(img);
+            default:
+                return null;
         }
     }
 
@@ -419,45 +452,124 @@ public class TextureSet extends G3dFile
 
     private void decodePalette(BufferedImage img, Texture texture, Palette palette, int bitsPerPixel)
     {
-        int w = img.getWidth(), h = img.getHeight();
+        // One reader for every texel and palette fetch in this image.
+        pixels = MemBuf.create(tex0).reader();
+        decodePaletteRows(img, texture, palette, bitsPerPixel);
+    }
+
+    /**
+     * @param img the image
+     * @param texture the texture
+     * @param palette the palette
+     * @param bitsPerPixel 2, 4 or 8
+     * @see "GBATEK DS 3D Video, palette textures"
+     */
+    private void decodePaletteRows(BufferedImage img, Texture texture, Palette palette, int bitsPerPixel)
+    {
+        int h = img.getHeight();
+        for (int y = 0; y < h; y++)
+            decodePaletteRow(img, texture, palette, bitsPerPixel, y);
+    }
+
+    /**
+     * @param img the image
+     * @param texture the texture
+     * @param palette the palette
+     * @param bitsPerPixel 2, 4 or 8
+     * @param y row
+     * @see "GBATEK DS 3D Video, palette textures"
+     */
+    private void decodePaletteRow(BufferedImage img, Texture texture, Palette palette, int bitsPerPixel, int y)
+    {
+        int w = img.getWidth();
         int base = texDataOfs + texture.getDataOffset();
         int perByte = 8 / bitsPerPixel;
         int mask = (1 << bitsPerPixel) - 1;
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                int pixelIndex = y * w + x;
-                int b = tex0[base + pixelIndex / perByte] & 0xFF;
-                int shift = (pixelIndex % perByte) * bitsPerPixel;
-                int index = (b >> shift) & mask;
-                img.setRGB(x, y, paletteColor(palette, index, texture.isColor0Transparent() && index == 0));
-            }
-        }
+        for (int x = 0; x < w; x++)
+            paintPalette(img, texture, palette, y, x, base, perByte, mask);
+    }
+
+    /**
+     * @param img the image
+     * @param texture the texture
+     * @param palette the palette
+     * @param y row
+     * @param x column
+     * @param base first texel byte
+     * @param perByte texels packed in one byte
+     * @param mask index mask
+     * @see "GBATEK DS 3D Video, palette textures"
+     */
+    private void paintPalette(BufferedImage img, Texture texture, Palette palette, int y, int x, int base, int perByte,
+            int mask)
+    {
+        int pixelIndex = y * img.getWidth() + x;
+        int b = texByte(base + pixelIndex / perByte);
+        int index = (b >> ((pixelIndex % perByte) * (8 / perByte))) & mask;
+        img.setRGB(x, y, paletteColor(palette, index, transparentIndex(texture, index)));
+    }
+
+    /**
+     * @param texture the texture
+     * @param index palette index
+     * @return true when color 0 is transparent
+     * @see "GBATEK DS 3D Video, TEXIMAGE_PARAM"
+     */
+    private static boolean transparentIndex(Texture texture, int index)
+    {
+        if (index != 0)
+            return false;
+
+        return texture.isColor0Transparent();
     }
 
     private void decodeAlpha(BufferedImage img, Texture texture, Palette palette, int indexBits, int alphaBits)
     {
-        int w = img.getWidth(), h = img.getHeight();
+        pixels = MemBuf.create(tex0).reader();
+        for (int y = 0; y < img.getHeight(); y++)
+            decodeAlphaRow(img, texture, palette, indexBits, alphaBits, y);
+    }
+
+    /**
+     * @param img the image
+     * @param texture the texture
+     * @param palette the palette
+     * @param indexBits bits of the palette index
+     * @param alphaBits bits of the alpha
+     * @param y row
+     * @see "GBATEK DS 3D Video, A3I5 and A5I3"
+     */
+    private void decodeAlphaRow(BufferedImage img, Texture texture, Palette palette, int indexBits, int alphaBits, int y)
+    {
         int base = texDataOfs + texture.getDataOffset();
         int indexMask = (1 << indexBits) - 1;
         int alphaMax = (1 << alphaBits) - 1;
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                int b = tex0[base + y * w + x] & 0xFF;
-                int index = b & indexMask;
-                int alpha = (b >> indexBits) & alphaMax;
-                int rgb = paletteColor(palette, index, false) & 0xFFFFFF;
-                int a = (alpha * 255) / alphaMax;
-                img.setRGB(x, y, (a << 24) | rgb);
-            }
-        }
+        for (int x = 0; x < img.getWidth(); x++)
+            paintAlpha(img, palette, y, x, texByte(base + y * img.getWidth() + x), indexMask, indexBits, alphaMax);
+    }
+
+    /**
+     * @param img the image
+     * @param palette the palette
+     * @param y row
+     * @param x column
+     * @param b the texel byte
+     * @param indexMask palette-index mask
+     * @param indexBits bits of the palette index
+     * @param alphaMax maximum alpha field
+     * @see "GBATEK DS 3D Video, A3I5 and A5I3"
+     */
+    private void paintAlpha(BufferedImage img, Palette palette, int y, int x, int b, int indexMask, int indexBits,
+            int alphaMax)
+    {
+        int rgb = paletteColor(palette, b & indexMask, false) & 0xFFFFFF;
+        int a = (((b >> indexBits) & alphaMax) * 255) / alphaMax;
+        img.setRGB(x, y, (a << 24) | rgb);
     }
 
     private void decodeDirect(BufferedImage img, Texture texture)
     {
+        pixels = MemBuf.create(tex0).reader();
         int w = img.getWidth(), h = img.getHeight();
         int base = texDataOfs + texture.getDataOffset();
         for (int y = 0; y < h; y++)
@@ -465,7 +577,7 @@ public class TextureSet extends G3dFile
             for (int x = 0; x < w; x++)
             {
                 int off = base + (y * w + x) * 2;
-                int value = (tex0[off] & 0xFF) | ((tex0[off + 1] & 0xFF) << 8);
+                int value = texShort(off);
                 int a = (value & 0x8000) != 0 ? 255 : 0;
                 img.setRGB(x, y, (a << 24) | (bgr555(value) & 0xFFFFFF));
             }
@@ -478,32 +590,67 @@ public class TextureSet extends G3dFile
     private void decodeComp4x4(BufferedImage img, Texture texture, Palette palette)
     {
         int w = img.getWidth(), h = img.getHeight();
+        pixels = MemBuf.create(tex0).reader();
         int texelBase = tex4x4DataOfs + texture.getDataOffset();
         int idxBase = tex4x4PlttIdxOfs + texture.getDataOffset() / 2;
         int blocksWide = w / 4;
 
         for (int by = 0; by < h / 4; by++)
-        {
-            for (int bx = 0; bx < blocksWide; bx++)
-            {
-                int blockNum = by * blocksWide + bx;
-                int texelOff = texelBase + blockNum * 4;
-                int control = (tex0[idxBase + blockNum * 2] & 0xFF) | ((tex0[idxBase + blockNum * 2 + 1] & 0xFF) << 8);
-                int paletteBase = (control & 0x3FFF) << 1; // in colors, within the palette region
-                int mode = (control >> 14) & 3;
+            decodeCompRow(img, palette, by, blocksWide, texelBase, idxBase);
+    }
 
-                for (int ty = 0; ty < 4; ty++)
-                {
-                    int row = tex0[texelOff + ty] & 0xFF;
-                    for (int tx = 0; tx < 4; tx++)
-                    {
-                        int index = (row >> (tx * 2)) & 3;
-                        int argb = comp4x4Color(palette, paletteBase, index, mode);
-                        img.setRGB(bx * 4 + tx, by * 4 + ty, argb);
-                    }
-                }
-            }
-        }
+    /**
+     * @param img the image
+     * @param palette the palette
+     * @param by block row
+     * @param blocksWide blocks across
+     * @param texelBase first texel byte
+     * @param idxBase first palette-index byte
+     * @see "GBATEK DS 3D Video, 4x4 compressed textures"
+     */
+    private void decodeCompRow(BufferedImage img, Palette palette, int by, int blocksWide, int texelBase, int idxBase)
+    {
+        for (int bx = 0; bx < blocksWide; bx++)
+            decodeCompBlock(img, palette, by, bx, blocksWide, texelBase, idxBase);
+    }
+
+    /**
+     * @param img the image
+     * @param palette the palette
+     * @param by block row
+     * @param bx block column
+     * @param blocksWide blocks across
+     * @param texelBase first texel byte
+     * @param idxBase first palette-index byte
+     * @see "GBATEK DS 3D Video, 4x4 compressed textures"
+     */
+    private void decodeCompBlock(BufferedImage img, Palette palette, int by, int bx, int blocksWide, int texelBase,
+            int idxBase)
+    {
+        int blockNum = by * blocksWide + bx;
+        int control = texShort(idxBase + blockNum * 2);
+        int paletteBase = (control & 0x3FFF) << 1;
+        int mode = (control >> 14) & 3;
+        for (int ty = 0; ty < 4; ty++)
+            decodeCompTexels(img, palette, bx, by, ty, texByte(texelBase + blockNum * 4 + ty), paletteBase, mode);
+    }
+
+    /**
+     * @param img the image
+     * @param palette the palette
+     * @param bx block column
+     * @param by block row
+     * @param ty row inside the block
+     * @param row the four 2-bit indices
+     * @param paletteBase palette index of color 0
+     * @param mode interpolation mode
+     * @see "GBATEK DS 3D Video, 4x4 compressed textures"
+     */
+    private void decodeCompTexels(BufferedImage img, Palette palette, int bx, int by, int ty, int row, int paletteBase,
+            int mode)
+    {
+        for (int tx = 0; tx < 4; tx++)
+            img.setRGB(bx * 4 + tx, by * 4 + ty, comp4x4Color(palette, paletteBase, (row >> (tx * 2)) & 3, mode));
     }
 
     private int comp4x4Color(Palette palette, int paletteBase, int index, int mode)
@@ -516,14 +663,18 @@ public class TextureSet extends G3dFile
             case 0:
                 return index == 3 ? 0 : opaque(colorValue(palette, paletteBase + index));
             case 1:
-                if (index == 0 || index == 1) return opaque(colorValue(palette, paletteBase + index));
-                if (index == 2) return opaque(blend(c0, c1, 1, 1, 2));
+                if (index == 0 || index == 1)
+                    return opaque(colorValue(palette, paletteBase + index));
+                if (index == 2)
+                    return opaque(blend(c0, c1, 1, 1, 2));
                 return 0;
             case 2:
                 return opaque(colorValue(palette, paletteBase + index));
             default: // mode 3
-                if (index == 0 || index == 1) return opaque(colorValue(palette, paletteBase + index));
-                if (index == 2) return opaque(blend(c0, c1, 5, 3, 8));
+                if (index == 0 || index == 1)
+                    return opaque(colorValue(palette, paletteBase + index));
+                if (index == 2)
+                    return opaque(blend(c0, c1, 5, 3, 8));
                 return opaque(blend(c0, c1, 3, 5, 8));
         }
     }
@@ -547,11 +698,67 @@ public class TextureSet extends G3dFile
     {
         if (palette == null)
             return 0;
+
+        return storedColor(palette, index);
+    }
+
+    /**
+     * @param palette a palette
+     * @param index color index
+     * @return the color, or zero when the entry is outside the block
+     * @see "GBATEK DS 3D Video, BGR555"
+     */
+    private int storedColor(Palette palette, int index)
+    {
         int abs = plttDataOfs + palette.dataOffset + index * 2;
-        if (abs < 0 || abs + 1 >= tex0.length)
+        if (paletteOutOfRange(abs))
             return 0;
-        int value = (tex0[abs] & 0xFF) | ((tex0[abs + 1] & 0xFF) << 8);
-        return bgr555(value);
+
+        return bgr555(paletteWord(abs));
+    }
+
+    /**
+     * @param abs byte index of a palette color
+     * @return the little-endian halfword
+     * @see "GBATEK DS 3D Video, BGR555"
+     */
+    private int paletteWord(int abs)
+    {
+        if (pixels != null)
+            return texShort(abs);
+
+        return Fx.uint16(tex0, abs);
+    }
+
+    /**
+     * @param offset index in the TEX0 block
+     * @return that byte
+     * @see "GBATEK DS 3D Video, texture formats"
+     */
+    private int texByte(int offset)
+    {
+        // The image reader was positioned by the decode that owns this fetch.
+        if (offset < 0)
+            return 0;
+
+        pixels.setPosition(offset);
+
+        return pixels.readByte();
+    }
+
+    /**
+     * @param offset index in the TEX0 block
+     * @return the little-endian halfword there
+     * @see "GBATEK DS 3D Video, texture formats"
+     */
+    private int texShort(int offset)
+    {
+        // Palette entries and direct-color texels are 16 bits.
+        int at = offset;
+        pixels.setPosition(at);
+        int value = pixels.readUInt16();
+
+        return value;
     }
 
     /**
@@ -577,14 +784,30 @@ public class TextureSet extends G3dFile
     public void setPaletteColor(Palette palette, int index, int rgb)
     {
         int abs = plttDataOfs + palette.dataOffset + index * 2;
-        if (abs < 0 || abs + 1 >= tex0.length)
+        if (paletteOutOfRange(abs))
             return;
         int r = ((rgb >> 16) & 0xFF) >> 3;
         int g = ((rgb >> 8) & 0xFF) >> 3;
         int b = (rgb & 0xFF) >> 3;
         int v = r | (g << 5) | (b << 10);
-        tex0[abs] = (byte) v;
-        tex0[abs + 1] = (byte) (v >> 8);
+
+        // Two bytes through MemBuf, then back into the live block.
+        MemBuf buf = MemBuf.create();
+        buf.writer().writeShort((short) v);
+        System.arraycopy(buf.reader().getBuffer(), 0, tex0, abs, 2);
+    }
+
+    /**
+     * @param abs byte index of a palette color
+     * @return true when that color is outside the TEX0 block
+     * @see "GBATEK DS 3D Video, BGR555"
+     */
+    private boolean paletteOutOfRange(int abs)
+    {
+        if (abs < 0)
+            return true;
+
+        return abs + 1 >= tex0.length;
     }
 
     private int paletteColor(Palette palette, int index, boolean transparent)
@@ -602,10 +825,6 @@ public class TextureSet extends G3dFile
         return (r << 16) | (g << 8) | b;
     }
 
-    private static long readU32(byte[] b, int o)
-    {
-        return (b[o] & 0xFFL) | ((b[o + 1] & 0xFFL) << 8) | ((b[o + 2] & 0xFFL) << 16) | ((b[o + 3] & 0xFFL) << 24);
-    }
 
     /** A named texture: its pixel format, dimensions and data location come from its texImageParam. */
     public class Texture
@@ -622,17 +841,35 @@ public class TextureSet extends G3dFile
         }
 
         /** @return this texture's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return this texture's width in texels */
-        public int getWidth() { return 8 << ((int) (texImageParam >> 20) & 7); }
+        public int getWidth()
+        {
+            return 8 << ((int) (texImageParam >> 20) & 7);
+        }
         /** @return this texture's height in texels */
-        public int getHeight() { return 8 << ((int) (texImageParam >> 23) & 7); }
+        public int getHeight()
+        {
+            return 8 << ((int) (texImageParam >> 23) & 7);
+        }
         /** @return this texture's NNS format id (1-7) */
-        public int getFormat() { return (int) (texImageParam >> 26) & 7; }
+        public int getFormat()
+        {
+            return (int) (texImageParam >> 26) & 7;
+        }
         /** @return whether palette color 0 is treated as transparent */
-        public boolean isColor0Transparent() { return ((texImageParam >> 29) & 1) != 0; }
+        public boolean isColor0Transparent()
+        {
+            return ((texImageParam >> 29) & 1) != 0;
+        }
         /** @return the byte offset of this texture's data within its texel region */
-        public int getDataOffset() { return (int) (texImageParam & 0xFFFF) << 3; }
+        public int getDataOffset()
+        {
+            return (int) (texImageParam & 0xFFFF) << 3;
+        }
 
         @Override
         public String toString()
@@ -654,7 +891,10 @@ public class TextureSet extends G3dFile
         }
 
         /** @return this palette's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
 
         @Override
         public String toString()

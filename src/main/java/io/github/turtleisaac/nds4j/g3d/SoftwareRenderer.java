@@ -39,7 +39,9 @@ import java.util.Map;
  */
 public final class SoftwareRenderer
 {
-    private SoftwareRenderer() {}
+    private SoftwareRenderer()
+    {
+    }
 
     /**
      * Renders a model at its bind pose.
@@ -53,7 +55,7 @@ public final class SoftwareRenderer
      * @return a rendered {@link BufferedImage}
      */
     public static BufferedImage render(Model model, TextureSet textures, int width, int height,
-                                       double yawDegrees, double pitchDegrees)
+            double yawDegrees, double pitchDegrees)
     {
         List<float[]> positions = new ArrayList<>();
         for (Model.Mesh mesh : model.getMeshes())
@@ -75,7 +77,7 @@ public final class SoftwareRenderer
      * @return a rendered {@link BufferedImage}
      */
     public static BufferedImage render(Model model, List<float[]> positions, TextureSet textures,
-                                       int width, int height, double yawDegrees, double pitchDegrees)
+            int width, int height, double yawDegrees, double pitchDegrees)
     {
         return render(model, positions, textures, null, width, height, yawDegrees, pitchDegrees);
     }
@@ -93,7 +95,7 @@ public final class SoftwareRenderer
      * @return a rendered {@link BufferedImage}
      */
     public static BufferedImage render(Model model, NitroAnimation.Frame frame, TextureSet textures,
-                                       int width, int height, double yawDegrees, double pitchDegrees)
+            int width, int height, double yawDegrees, double pitchDegrees)
     {
         return render(model, frame.getPositions(), textures, frame, width, height, yawDegrees, pitchDegrees);
     }
@@ -111,7 +113,7 @@ public final class SoftwareRenderer
      * @return one {@link BufferedImage} per frame
      */
     public static List<BufferedImage> renderFrames(Model model, NitroAnimation animation, TextureSet textures,
-                                                   int width, int height, double yawDegrees, double pitchDegrees)
+            int width, int height, double yawDegrees, double pitchDegrees)
     {
         int frames = animation.getFrameCount();
         List<NitroAnimation.Frame> sampled = new ArrayList<>(frames);
@@ -119,8 +121,8 @@ public final class SoftwareRenderer
             sampled.add(animation.sample(model, f));
 
         // A single camera for the whole clip: fit to the union of every frame's bounding box.
-        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+        float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
         for (NitroAnimation.Frame fr : sampled)
             accumulateBounds(fr.getPositions(), min, max);
         Camera cam = frameCamera(min, max, width, height);
@@ -132,113 +134,490 @@ public final class SoftwareRenderer
     }
 
     private static BufferedImage render(Model model, List<float[]> positions, TextureSet textures,
-                                        NitroAnimation.Frame frame, int width, int height,
-                                        double yawDegrees, double pitchDegrees)
+            NitroAnimation.Frame frame, int width, int height,
+            double yawDegrees, double pitchDegrees)
     {
-        float[] min = {Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY};
-        float[] max = {Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY};
+        float[] min = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY };
+        float[] max = { Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
         accumulateBounds(positions, min, max);
         Camera cam = frameCamera(min, max, width, height);
         return rasterizeFrame(model, positions, textures, frame, width, height, yawDegrees, pitchDegrees, cam);
     }
 
     private static BufferedImage rasterizeFrame(Model model, List<float[]> positions, TextureSet textures,
-                                                NitroAnimation.Frame frame, int width, int height,
-                                                double yawDegrees, double pitchDegrees, Camera cam)
+            NitroAnimation.Frame frame, int width, int height,
+            double yawDegrees, double pitchDegrees, Camera cam)
     {
-        List<Model.Mesh> meshes = model.getMeshes();
+        BufferedImage img = backdrop(width, height);
+        if (cam == null)
+            return img;
+
+        paintMeshes(model, positions, textures, frame, width, height, yawDegrees, pitchDegrees, cam, img);
+
+        return img;
+    }
+
+    /**
+     * @param width image width
+     * @param height image height
+     * @return the gradient backdrop
+     * @see "NitroSystem g3d"
+     */
+    private static BufferedImage backdrop(int width, int height)
+    {
         BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < height; y++)
-        {
-            int g = 248 - (int) (26.0 * y / height);
-            int rgb = 0xFF000000 | (g << 16) | (g << 8) | Math.min(255, g + 6);
-            for (int x = 0; x < width; x++)
-                img.setRGB(x, y, rgb);
-        }
-        if (cam == null)
-            return img; // nothing to draw
+            fillRow(img, y, width, height);
 
-        double yaw = Math.toRadians(yawDegrees), pitch = Math.toRadians(pitchDegrees);
-        double cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-        double[] light = normalise(0.35, 0.5, 0.78);
+        return img;
+    }
 
+    /**
+     * @param img the image
+     * @param y row
+     * @param width image width
+     * @param height image height
+     * @see "NitroSystem g3d"
+     */
+    private static void fillRow(BufferedImage img, int y, int width, int height)
+    {
+        int g = 248 - (int) (26.0 * y / height);
+        int rgb = 0xFF000000 | (g << 16) | (g << 8) | Math.min(255, g + 6);
+        for (int x = 0; x < width; x++)
+            img.setRGB(x, y, rgb);
+    }
+
+    /**
+     * @param model the model
+     * @param positions posed positions
+     * @param textures textures, or null
+     * @param frame animation frame, or null
+     * @param width image width
+     * @param height image height
+     * @param yawDegrees camera yaw
+     * @param pitchDegrees camera pitch
+     * @param cam fitted camera
+     * @param img destination
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void paintMeshes(Model model, List<float[]> positions, TextureSet textures, NitroAnimation.Frame frame,
+            int width, int height, double yawDegrees, double pitchDegrees, Camera cam, BufferedImage img)
+    {
+        double yaw = Math.toRadians(yawDegrees);
+        double pitch = Math.toRadians(pitchDegrees);
         double[] zbuf = new double[width * height];
         java.util.Arrays.fill(zbuf, Double.POSITIVE_INFINITY);
         Map<String, BufferedImage> texCache = new HashMap<>();
+        for (int m = 0; m < model.getMeshes().size(); m++)
+            paintMesh(model, positions, textures, frame, width, height, cam, img, zbuf, texCache,
+                    Math.cos(yaw), Math.sin(yaw), Math.cos(pitch), Math.sin(pitch), normalise(0.35, 0.5, 0.78), m);
+    }
 
+    /**
+     * @param model the model
+     * @param positions posed positions
+     * @param textures textures, or null
+     * @param frame animation frame, or null
+     * @param width image width
+     * @param height image height
+     * @param cam fitted camera
+     * @param img destination
+     * @param zbuf depth buffer
+     * @param texCache decoded textures
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param light light direction
+     * @param m mesh index
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void paintMesh(Model model, List<float[]> positions, TextureSet textures, NitroAnimation.Frame frame,
+            int width, int height, Camera cam, BufferedImage img, double[] zbuf, Map<String, BufferedImage> texCache,
+            double cy, double sy, double cp, double sp, double[] light, int m)
+    {
+        if (hidden(frame, m))
+            return;
+
+        Model.Mesh mesh = model.getMeshes().get(m);
+        BufferedImage tex = textureFor(mesh, textures, frame, m, texCache);
+        int tw = widthOf(tex);
+        int th = heightOf(tex);
+        boolean billboard = model.isBillboardNode(mesh.getNodeIndex());
+        double[] bill = billboardPoint(model, frame, mesh, m, cam, cy, sy, cp, sp, width, height, billboard);
+        float[] rawLocal = rawOf(mesh, billboard);
+        Vec3 wscale = scaleOf(model, mesh, billboard);
+        double posScale = scaleFactor(model, billboard);
+        TexAffine uvMat = uvOf(frame, m);
+        paintTris(mesh.getTriangleIndices(), positions.get(m), mesh.getTexcoords(), billboard, rawLocal, wscale, posScale,
+                bill, cam, cy, sy, cp, sp, width, height, tw, th, uvMat, img, zbuf, tex, light);
+    }
+
+    /**
+     * @param idx triangle indices
+     * @param pos posed positions
+     * @param uv mesh texcoords
+     * @param billboard true for a camera-facing node
+     * @param rawLocal raw positions, or null
+     * @param wscale node scale, or null
+     * @param posScale model position scale
+     * @param bill projected pivot, or null
+     * @param cam fitted camera
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param width image width
+     * @param height image height
+     * @param tw texture width
+     * @param th texture height
+     * @param uvMat texture matrix, or null
+     * @param img destination
+     * @param zbuf depth buffer
+     * @param tex texture, or null
+     * @param light light direction
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void paintTris(int[] idx, float[] pos, float[] uv, boolean billboard, float[] rawLocal, Vec3 wscale,
+            double posScale, double[] bill, Camera cam, double cy, double sy, double cp, double sp, int width,
+            int height, int tw, int th, TexAffine uvMat, BufferedImage img, double[] zbuf, BufferedImage tex,
+            double[] light)
+    {
         double[][] c = new double[3][3];
         double[][] uvw = new double[3][2];
-        for (int m = 0; m < meshes.size(); m++)
-        {
-            if (frame != null && !frame.isVisible(m))
-                continue;
-            Model.Mesh mesh = meshes.get(m);
-            float[] pos = positions.get(m);
-            float[] uv = mesh.getTexcoords();
-            int[] idx = mesh.getTriangleIndices();
-            BufferedImage tex = textureFor(mesh, textures, frame, m, texCache);
-            int tw = tex != null ? tex.getWidth() : 0, th = tex != null ? tex.getHeight() : 0;
-            float[] uvMat = frame != null ? frame.uvMatrixFor(m) : null;
+        for (int t = 0; t + 2 < idx.length; t += 3)
+            paintTri(c, uvw, idx, t, pos, uv, billboard, rawLocal, wscale, posScale, bill, cam, cy, sy, cp, sp, width,
+                    height, tw, th, uvMat, img, zbuf, tex, light);
+    }
 
-            // Billboard (BB/BBY): draw the shape's local geometry facing the screen at its node's pivot,
-            // discarding the authored orientation (that is what the NNS renderer does at runtime; a static
-            // decode can't). We place the raw node-local vertices in screen space around the camera-
-            // projected pivot, so the sprite always faces the viewer as the model is orbited.
-            boolean billboard = model.isBillboardNode(mesh.getNodeIndex());
-            // Prefer the frame's posed pivot (a skeletally-animated billboard tracks its posed node), else
-            // the model's bind-pose pivot.
-            double[] pivotWorld = null;
-            if (billboard)
-            {
-                pivotWorld = (frame != null) ? frame.billboardPivotFor(m) : null;
-                if (pivotWorld == null) pivotWorld = model.getNodeWorldTranslation(mesh.getNodeIndex());
-            }
-            double[] bill = billboard ? projectPivot(pivotWorld, cam, cy, sy, cp, sp, width, height) : null;
-            float[] rawLocal = billboard ? mesh.getRawPositions() : null;
-            double[] wscale = billboard ? model.getNodeWorldScale(mesh.getNodeIndex()) : null;
-            double posScale = billboard ? model.getPositionScale() : 1;
+    /**
+     * @param frame animation frame, or null
+     * @param m mesh index
+     * @return true when the frame hides the mesh
+     * @see "NitroSystem g3d/src/anm/nsbva.c"
+     */
+    private static boolean hidden(NitroAnimation.Frame frame, int m)
+    {
+        if (frame == null)
+            return false;
 
-            for (int t = 0; t + 2 < idx.length; t += 3)
-            {
-                for (int k = 0; k < 3; k++)
-                {
-                    int v = idx[t + k];
-                    if (billboard)
-                    {
-                        double lx = rawLocal[v * 3] * wscale[0] * posScale;
-                        double ly = rawLocal[v * 3 + 1] * wscale[1] * posScale;
-                        double lz = rawLocal[v * 3 + 2] * wscale[2] * posScale;
-                        c[k][0] = bill[0] + lx * cam.scale;
-                        c[k][1] = bill[1] - ly * cam.scale;
-                        c[k][2] = bill[2] - lz * cam.scale;
-                    }
-                    else
-                    {
-                        double x = pos[v * 3] - cam.centre[0], y = pos[v * 3 + 1] - cam.centre[1], z = pos[v * 3 + 2] - cam.centre[2];
-                        double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
-                        double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
-                        c[k][0] = width / 2.0 + x1 * cam.scale;
-                        c[k][1] = height / 2.0 - y2 * cam.scale;
-                        c[k][2] = z2;
-                    }
-                    // UVs are carried in normalised [0,1] space so the texture matrix (a scroll/scale/rot
-                    // from NSBTA) can be applied uniformly; the sampler scales back up by the texture size.
-                    double s = tw > 0 ? uv[v * 2] / tw : uv[v * 2];
-                    double tt = th > 0 ? uv[v * 2 + 1] / th : uv[v * 2 + 1];
-                    if (uvMat != null)
-                    {
-                        double ns = uvMat[0] * s + uvMat[2] * tt + uvMat[4];
-                        double nt = uvMat[1] * s + uvMat[3] * tt + uvMat[5];
-                        s = ns; tt = nt;
-                    }
-                    uvw[k][0] = s;
-                    uvw[k][1] = tt;
-                }
-                double shade = billboard ? 1.0 : shadeFor(c, light); // billboards are unlit sprites
-                rasterize(img, zbuf, width, height, c, uvw, tex, tw, th, shade);
-            }
-        }
-        return img;
+        return !frame.isVisible(m);
+    }
+
+    /**
+     * @param tex a texture, or null
+     * @return its width, or zero
+     * @see "GBATEK DS 3D Video, TEXIMAGE_PARAM"
+     */
+    private static int widthOf(BufferedImage tex)
+    {
+        if (tex == null)
+            return 0;
+
+        return tex.getWidth();
+    }
+
+    /**
+     * @param tex a texture, or null
+     * @return its height, or zero
+     * @see "GBATEK DS 3D Video, TEXIMAGE_PARAM"
+     */
+    private static int heightOf(BufferedImage tex)
+    {
+        if (tex == null)
+            return 0;
+
+        return tex.getHeight();
+    }
+
+    /**
+     * @param mesh a mesh
+     * @param billboard true for a camera-facing node
+     * @return the raw positions, or null
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static float[] rawOf(Model.Mesh mesh, boolean billboard)
+    {
+        if (!billboard)
+            return null;
+
+        return mesh.getRawPositions();
+    }
+
+    /**
+     * @param model the model
+     * @param mesh a mesh
+     * @param billboard true for a camera-facing node
+     * @return the node scale, or null
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static Vec3 scaleOf(Model model, Model.Mesh mesh, boolean billboard)
+    {
+        if (!billboard)
+            return null;
+
+        return model.getNodeWorldScale(mesh.getNodeIndex());
+    }
+
+    /**
+     * @param model the model
+     * @param billboard true for a camera-facing node
+     * @return the position scale, or one
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdlInfo"
+     */
+    private static double scaleFactor(Model model, boolean billboard)
+    {
+        if (!billboard)
+            return 1;
+
+        return model.getPositionScale();
+    }
+
+    /**
+     * @param frame animation frame, or null
+     * @param m mesh index
+     * @return the texture matrix, or null
+     * @see "NitroSystem g3d/src/anm/nsbta.c NNS_G3dAnmObjCalcTexSRT"
+     */
+    private static TexAffine uvOf(NitroAnimation.Frame frame, int m)
+    {
+        if (frame == null)
+            return null;
+
+        return frame.uvMatrixFor(m);
+    }
+
+    /**
+     * @param model the model
+     * @param frame animation frame, or null
+     * @param mesh a mesh
+     * @param cam fitted camera
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param width image width
+     * @param height image height
+     * @param billboard true for a camera-facing node
+     * @return the projected pivot, or null
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static double[] billboardPoint(Model model, NitroAnimation.Frame frame, Model.Mesh mesh, int m, Camera cam,
+            double cy, double sy, double cp, double sp, int width, int height, boolean billboard)
+    {
+        if (!billboard)
+            return null;
+
+        return projectPivot(pivotOf(model, frame, mesh, m), cam, cy, sy, cp, sp, width, height);
+    }
+
+    /**
+     * @param c three screen corners
+     * @param uvw three texture coordinates
+     * @param idx triangle indices
+     * @param t index of the triangle's first index
+     * @param pos posed positions
+     * @param uv mesh texcoords
+     * @param billboard true for a camera-facing node
+     * @param rawLocal raw positions, or null
+     * @param wscale node scale, or null
+     * @param posScale model position scale
+     * @param bill projected pivot, or null
+     * @param cam fitted camera
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param width image width
+     * @param height image height
+     * @param tw texture width
+     * @param th texture height
+     * @param uvMat texture matrix, or null
+     * @param img destination
+     * @param zbuf depth buffer
+     * @param tex texture, or null
+     * @param light light direction
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void paintTri(double[][] c, double[][] uvw, int[] idx, int t, float[] pos, float[] uv,
+            boolean billboard, float[] rawLocal, Vec3 wscale, double posScale, double[] bill, Camera cam,
+            double cy, double sy, double cp, double sp, int width, int height, int tw, int th, TexAffine uvMat,
+            BufferedImage img, double[] zbuf, BufferedImage tex, double[] light)
+    {
+        for (int k = 0; k < 3; k++)
+            placeCorner(c, uvw, k, idx[t + k], pos, uv, billboard, rawLocal, wscale, posScale, bill, cam, cy, sy, cp, sp,
+                    width, height, tw, th, uvMat);
+
+        rasterize(img, zbuf, width, height, c, uvw, tex, tw, th, shade(billboard, c, light));
+    }
+
+    /**
+     * @param billboard true for a camera-facing node
+     * @param c three screen corners
+     * @param light light direction
+     * @return the triangle shade
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static double shade(boolean billboard, double[][] c, double[] light)
+    {
+        if (billboard)
+            return 1;
+
+        return shadeFor(c, light);
+    }
+
+    /**
+     * Places one corner of a triangle in screen space and its texture coordinate.
+     * @param c screen corners
+     * @param uvw texture coordinates
+     * @param k corner index
+     * @param v vertex index
+     * @param pos posed positions
+     * @param uv mesh texcoords
+     * @param billboard true for a camera-facing node
+     * @param rawLocal raw positions, or null
+     * @param wscale node scale, or null
+     * @param posScale model position scale
+     * @param bill projected pivot, or null
+     * @param cam fitted camera
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param width image width
+     * @param height image height
+     * @param tw texture width
+     * @param th texture height
+     * @param uvMat texture matrix, or null
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void placeCorner(double[][] c, double[][] uvw, int k, int v, float[] pos, float[] uv,
+            boolean billboard, float[] rawLocal, Vec3 wscale, double posScale, double[] bill, Camera cam,
+            double cy, double sy, double cp, double sp, int width, int height, int tw, int th, TexAffine uvMat)
+    {
+        if (billboard)
+            billboardCorner(c, k, v, rawLocal, wscale, posScale, bill, cam);
+        else
+            cameraCorner(c, k, v, pos, cam, cy, sy, cp, sp, width, height);
+
+        double[] st = texCorner(uv, v, tw, th, uvMat);
+        uvw[k][0] = st[0];
+        uvw[k][1] = st[1];
+    }
+
+    /**
+     * @param c screen corners
+     * @param k corner index
+     * @param v vertex index
+     * @param rawLocal raw positions
+     * @param wscale node scale
+     * @param posScale model position scale
+     * @param bill projected pivot
+     * @param cam fitted camera
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static void billboardCorner(double[][] c, int k, int v, float[] rawLocal, Vec3 wscale, double posScale,
+            double[] bill, Camera cam)
+    {
+        double lx = rawLocal[v * 3] * wscale.x * posScale;
+        double ly = rawLocal[v * 3 + 1] * wscale.y * posScale;
+        double lz = rawLocal[v * 3 + 2] * wscale.z * posScale;
+        c[k][0] = bill[0] + lx * cam.scale;
+        c[k][1] = bill[1] - ly * cam.scale;
+        c[k][2] = bill[2] - lz * cam.scale;
+    }
+
+    /**
+     * @param c screen corners
+     * @param k corner index
+     * @param v vertex index
+     * @param pos posed positions
+     * @param cam fitted camera
+     * @param cy cosine of yaw
+     * @param sy sine of yaw
+     * @param cp cosine of pitch
+     * @param sp sine of pitch
+     * @param width image width
+     * @param height image height
+     * @see "NitroSystem g3d/src/sbc.c NNS_G3dDraw"
+     */
+    private static void cameraCorner(double[][] c, int k, int v, float[] pos, Camera cam, double cy, double sy,
+            double cp, double sp, int width, int height)
+    {
+        double x = pos[v * 3] - cam.centre[0];
+        double y = pos[v * 3 + 1] - cam.centre[1];
+        double z = pos[v * 3 + 2] - cam.centre[2];
+        double x1 = cy * x + sy * z;
+        double z1 = -sy * x + cy * z;
+        double y2 = cp * y - sp * z1;
+        double z2 = sp * y + cp * z1;
+        c[k][0] = width / 2.0 + x1 * cam.scale;
+        c[k][1] = height / 2.0 - y2 * cam.scale;
+        c[k][2] = z2;
+    }
+
+    /**
+     * @param uv mesh texcoords
+     * @param v vertex index
+     * @param tw texture width
+     * @param th texture height
+     * @param uvMat texture matrix, or null
+     * @return normalised S and T
+     * @see "NitroSystem g3d/src/anm/nsbta.c NNS_G3dAnmObjCalcTexSRT"
+     */
+    private static double[] texCorner(float[] uv, int v, int tw, int th, TexAffine uvMat)
+    {
+        double s = normalised(uv[v * 2], tw);
+        double t = normalised(uv[v * 2 + 1], th);
+        if (uvMat == null)
+            return new double[] { s, t };
+
+        return new double[] { uvMat.a * s + uvMat.c * t + uvMat.e, uvMat.b * s + uvMat.d * t + uvMat.f };
+    }
+
+    /**
+     * @param texel a texel coordinate
+     * @param size texture size on that axis
+     * @return the coordinate in 0..1 when the texture has a size
+     * @see "GBATEK DS 3D Video, TEXCOORD"
+     */
+    private static double normalised(float texel, int size)
+    {
+        if (size <= 0)
+            return texel;
+
+        return texel / size;
+    }
+
+    /**
+     * @param model the model
+     * @param frame animation frame, or null
+     * @param mesh a mesh
+     * @param m mesh index
+     * @return the billboard pivot
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static Vec3 pivotOf(Model model, NitroAnimation.Frame frame, Model.Mesh mesh, int m)
+    {
+        Vec3 posed = posedPivot(frame, m);
+        if (posed != null)
+            return posed;
+
+        return model.getNodeWorldTranslation(mesh.getNodeIndex());
+    }
+
+    /**
+     * @param frame animation frame, or null
+     * @param m mesh index
+     * @return the posed pivot, or null
+     * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_BB"
+     */
+    private static Vec3 posedPivot(NitroAnimation.Frame frame, int m)
+    {
+        if (frame == null)
+            return null;
+
+        return frame.billboardPivotFor(m);
     }
 
     // A fitted orthographic camera: the model centre and a scale that fills ~80% of the image.
@@ -246,7 +625,12 @@ public final class SoftwareRenderer
     {
         final float[] centre;
         final double scale;
-        Camera(float[] centre, double scale) { this.centre = centre; this.scale = scale; }
+
+        Camera(float[] centre, double scale)
+        {
+            this.centre = centre;
+            this.scale = scale;
+        }
     }
 
     private static void accumulateBounds(List<float[]> positions, float[] min, float[] max)
@@ -264,7 +648,7 @@ public final class SoftwareRenderer
     {
         if (min[0] > max[0])
             return null;
-        float[] centre = {(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2};
+        float[] centre = { (min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2 };
         float extent = Math.max(max[0] - min[0], Math.max(max[1] - min[1], max[2] - min[2]));
         if (extent <= 0)
             extent = 1;
@@ -273,17 +657,17 @@ public final class SoftwareRenderer
 
     // Projects a billboard node's bind-pose world pivot to screen space {screenX, screenY, depth}; the
     // sprite's local geometry is then laid out around this point without the camera's orientation.
-    private static double[] projectPivot(double[] p, Camera cam,
-                                         double cy, double sy, double cp, double sp, int width, int height)
+    private static double[] projectPivot(Vec3 p, Camera cam,
+            double cy, double sy, double cp, double sp, int width, int height)
     {
-        double x = p[0] - cam.centre[0], y = p[1] - cam.centre[1], z = p[2] - cam.centre[2];
+        double x = p.x - cam.centre[0], y = p.y - cam.centre[1], z = p.z - cam.centre[2];
         double x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y1 = y;
         double y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1;
-        return new double[]{width / 2.0 + x1 * cam.scale, height / 2.0 - y2 * cam.scale, z2};
+        return new double[] { width / 2.0 + x1 * cam.scale, height / 2.0 - y2 * cam.scale, z2 };
     }
 
     private static BufferedImage textureFor(Model.Mesh mesh, TextureSet textures, NitroAnimation.Frame frame,
-                                            int meshIndex, Map<String, BufferedImage> cache)
+            int meshIndex, Map<String, BufferedImage> cache)
     {
         if (textures == null)
             return null;
@@ -310,7 +694,10 @@ public final class SoftwareRenderer
                 TextureSet.Palette p = pName != null ? textures.getPalette(pName) : null;
                 return p != null ? textures.getImage(t, p) : textures.getImage(t);
             }
-            catch (RuntimeException e) { return null; }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
         });
     }
 
@@ -328,7 +715,7 @@ public final class SoftwareRenderer
     }
 
     private static void rasterize(BufferedImage img, double[] z, int w, int h, double[][] c, double[][] uv,
-                                  BufferedImage tex, int tw, int th, double shade)
+            BufferedImage tex, int tw, int th, double shade)
     {
         int minx = Math.max(0, (int) Math.floor(Math.min(c[0][0], Math.min(c[1][0], c[2][0]))));
         int maxx = Math.min(w - 1, (int) Math.ceil(Math.max(c[0][0], Math.max(c[1][0], c[2][0]))));
@@ -359,10 +746,19 @@ public final class SoftwareRenderer
                     int argb = tex.getRGB(floorMod((int) Math.floor(s), tw), floorMod((int) Math.floor(tt), th));
                     if ((argb >>> 24) < 128)
                         continue; // alpha test
-                    r = (argb >> 16) & 0xFF; gg = (argb >> 8) & 0xFF; b = argb & 0xFF;
+                    r = (argb >> 16) & 0xFF;
+                    gg = (argb >> 8) & 0xFF;
+                    b = argb & 0xFF;
                 }
-                else { r = 200; gg = 205; b = 215; }
-                r = (int) Math.min(255, r * shade); gg = (int) Math.min(255, gg * shade); b = (int) Math.min(255, b * shade);
+                else
+                {
+                    r = 200;
+                    gg = 205;
+                    b = 215;
+                }
+                r = (int) Math.min(255, r * shade);
+                gg = (int) Math.min(255, gg * shade);
+                b = (int) Math.min(255, b * shade);
                 z[i] = zz;
                 img.setRGB(x, y, 0xFF000000 | (r << 16) | (gg << 8) | b);
             }
@@ -379,6 +775,6 @@ public final class SoftwareRenderer
     private static double[] normalise(double x, double y, double z)
     {
         double l = Math.sqrt(x * x + y * y + z * z);
-        return new double[]{x / l, y / l, z / l};
+        return new double[] { x / l, y / l, z / l };
     }
 }

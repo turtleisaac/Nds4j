@@ -79,14 +79,23 @@ public class TexturePatternAnimationSet extends G3dFile
         return encode(animations, version);
     }
 
+    /**
+     * Reads the PAT0 animation dictionary.
+     * @param d the PAT0 block
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+     */
     private void parsePat0(byte[] d)
     {
+        // Magic and block size, then one animation per dictionary record.
         MemBuf buf = MemBuf.create(d);
         MemBuf.MemBufReader reader = buf.reader();
-        reader.setPosition(8); // PAT0 magic + block size, then the animation dictionary
+        reader.setPosition(8);
         G3dDictionary dict = new G3dDictionary(reader);
+
         for (int i = 0; i < dict.size(); i++)
-            animations.add(new Animation(d, (int) readU32(dict.getRecord(i), 0), dict.getName(i)));
+        {
+            animations.add(new Animation(d, (int) Fx.uint32(dict.getRecord(i), 0), dict.getName(i)));
+        }
     }
 
     // Builds the whole NSBTP: a PAT0 block = magic + size + animation dictionary + each animation's data,
@@ -97,33 +106,56 @@ public class TexturePatternAnimationSet extends G3dFile
     private static byte[] encode(List<Animation> animations, int version)
     {
         List<String> names = new ArrayList<>();
-        for (Animation a : animations) names.add(a.name);
+        for (Animation a : animations)
+            names.add(a.name);
 
         int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
         byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++) blobs[i] = animations.get(i).encodeBlob();
+        for (int i = 0; i < animations.size(); i++)
+            blobs[i] = animations.get(i).encodeBlob();
 
         List<byte[]> recs = new ArrayList<>();
         int cursor = 8 + dictSize;
-        for (byte[] blob : blobs) { recs.add(rec4(cursor)); cursor += blob.length; }
+        for (byte[] blob : blobs)
+        {
+            recs.add(rec4(cursor));
+            cursor += blob.length;
+        }
 
         ByteArrayOutputStream pat0 = new ByteArrayOutputStream();
         pat0.writeBytes("PAT0".getBytes(StandardCharsets.US_ASCII));
         pat0.writeBytes(rec4(cursor));
         pat0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs) pat0.writeBytes(blob);
+        for (byte[] blob : blobs)
+            pat0.writeBytes(blob);
         return G3dFile.assembleContainer("BTP0", version, pat0.toByteArray());
     }
 
     private static List<byte[]> placeholders(int n, int recSize)
     {
         List<byte[]> l = new ArrayList<>();
-        for (int i = 0; i < n; i++) l.add(new byte[recSize]);
+        for (int i = 0; i < n; i++)
+            l.add(new byte[recSize]);
         return l;
     }
-    private static byte[] serialize(G3dDictionary d) { MemBuf b = MemBuf.create(); d.write(b.writer()); return b.reader().getBuffer(); }
-    private static byte[] rec4(long v) { byte[] r = new byte[4]; for (int i = 0; i < 4; i++) r[i] = (byte) (v >> (8 * i)); return r; }
-    private static void u16w(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
+    private static byte[] serialize(G3dDictionary d)
+    {
+        MemBuf b = MemBuf.create();
+        d.write(b.writer());
+        return b.reader().getBuffer();
+    }
+    private static byte[] rec4(long v)
+    {
+        byte[] r = new byte[4];
+        for (int i = 0; i < 4; i++)
+            r[i] = (byte) (v >> (8 * i));
+        return r;
+    }
+    private static void u16w(byte[] d, int o, int v)
+    {
+        d[o] = (byte) v;
+        d[o + 1] = (byte) (v >> 8);
+    }
 
     /**
      * Gets the animations in this file.
@@ -159,11 +191,11 @@ public class TexturePatternAnimationSet extends G3dFile
             this.name = name;
             // header: char[4] tag, u16 numFrames, u8 numTextures, u8 numPalettes, u16 ofsTexNames,
             //         u16 ofsPltNames; then a material dictionary (8-byte records)
-            frameCount = readU16(d, animStart + 4);
-            int numTex = d[animStart + 6] & 0xFF;
-            int numPlt = d[animStart + 7] & 0xFF;
-            int ofsTexNames = readU16(d, animStart + 8);
-            int ofsPltNames = readU16(d, animStart + 10);
+            frameCount = Fx.uint16(d, animStart + 4);
+            int numTex = Fx.uint8(d, animStart + 6);
+            int numPlt = Fx.uint8(d, animStart + 7);
+            int ofsTexNames = Fx.uint16(d, animStart + 8);
+            int ofsPltNames = Fx.uint16(d, animStart + 10);
 
             String[] texNames = names(d, animStart + ofsTexNames, numTex);
             String[] pltNames = names(d, animStart + ofsPltNames, numPlt);
@@ -177,16 +209,16 @@ public class TexturePatternAnimationSet extends G3dFile
             for (int i = 0; i < dict.size(); i++)
             {
                 byte[] rec = dict.getRecord(i);
-                long param1 = readU32(rec, 0), param2 = readU32(rec, 4);
+                long param1 = Fx.uint32(rec, 0), param2 = Fx.uint32(rec, 4);
                 int numKeyframes = (int) (param1 & 0xFFFF);
                 int offset = (int) (param2 >>> 16); // relative to animStart
                 TreeMap<Integer, TexturePalette> keyframes = new TreeMap<>();
                 int p = animStart + offset;
                 for (int k = 0; k < numKeyframes; k++)
                 {
-                    int frame = readU16(d, p);
-                    int texIdx = d[p + 2] & 0xFF;
-                    int pltIdx = d[p + 3] & 0xFF;
+                    int frame = Fx.uint16(d, p);
+                    int texIdx = Fx.uint8(d, p + 2);
+                    int pltIdx = Fx.uint8(d, p + 3);
                     keyframes.put(frame, new TexturePalette(texNames[texIdx], pltNames[pltIdx]));
                     p += 4;
                 }
@@ -208,7 +240,11 @@ public class TexturePatternAnimationSet extends G3dFile
             this.materials.addAll(materials);
             LinkedHashSet<String> tex = new LinkedHashSet<>(), plt = new LinkedHashSet<>();
             for (MaterialPattern m : materials)
-                for (TexturePalette tp : m.keyframes.values()) { tex.add(tp.getTexture()); plt.add(tp.getPalette()); }
+                for (TexturePalette tp : m.keyframes.values())
+                {
+                    tex.add(tp.getTexture());
+                    plt.add(tp.getPalette());
+                }
             this.texNames = tex.toArray(new String[0]);
             this.pltNames = plt.toArray(new String[0]);
         }
@@ -218,7 +254,8 @@ public class TexturePatternAnimationSet extends G3dFile
         {
             int nf = frameCount, nt = texNames.length, np = pltNames.length;
             List<String> matNames = new ArrayList<>();
-            for (MaterialPattern m : materials) matNames.add(m.name);
+            for (MaterialPattern m : materials)
+                matNames.add(m.name);
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 8), 8)).length;
 
             int kfStart = 12 + dictSize, cursor = kfStart;
@@ -236,7 +273,9 @@ public class TexturePatternAnimationSet extends G3dFile
                     kb[q * 4 + 3] = (byte) indexOf(pltNames, e.getValue().getPalette());
                     q++;
                 }
-                matOff[m] = cursor; kfBlobs[m] = kb; cursor += kb.length;
+                matOff[m] = cursor;
+                kfBlobs[m] = kb;
+                cursor += kb.length;
             }
             int ofsTex = cursor, ofsPlt = ofsTex + nt * 16, animSize = ofsPlt + np * 16;
 
@@ -246,23 +285,38 @@ public class TexturePatternAnimationSet extends G3dFile
                 int numKf = materials.get(m).keyframes.size();
                 int ratio = nf == 0 ? 0 : (numKf * 4096) / nf;
                 byte[] rec = new byte[8];
-                u16w(rec, 0, numKf); u16w(rec, 2, 0); u16w(rec, 4, ratio); u16w(rec, 6, matOff[m]);
+                u16w(rec, 0, numKf);
+                u16w(rec, 2, 0);
+                u16w(rec, 4, ratio);
+                u16w(rec, 6, matOff[m]);
                 recs.add(rec);
             }
 
             byte[] anim = new byte[animSize];
-            anim[0] = 0x4d; anim[1] = 0; anim[2] = 0x50; anim[3] = 0x54; // NNS pattern-anim tag ("M\0PT")
-            u16w(anim, 4, nf); anim[6] = (byte) nt; anim[7] = (byte) np; u16w(anim, 8, ofsTex); u16w(anim, 10, ofsPlt);
+            anim[0] = 0x4d;
+            anim[1] = 0;
+            anim[2] = 0x50;
+            anim[3] = 0x54; // NNS pattern-anim tag ("M\0PT")
+            u16w(anim, 4, nf);
+            anim[6] = (byte) nt;
+            anim[7] = (byte) np;
+            u16w(anim, 8, ofsTex);
+            u16w(anim, 10, ofsPlt);
             System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 8)), 0, anim, 12, dictSize);
-            for (int m = 0; m < materials.size(); m++) System.arraycopy(kfBlobs[m], 0, anim, matOff[m], kfBlobs[m].length);
-            for (int t = 0; t < nt; t++) writeName(anim, ofsTex + t * 16, texNames[t]);
-            for (int t = 0; t < np; t++) writeName(anim, ofsPlt + t * 16, pltNames[t]);
+            for (int m = 0; m < materials.size(); m++)
+                System.arraycopy(kfBlobs[m], 0, anim, matOff[m], kfBlobs[m].length);
+            for (int t = 0; t < nt; t++)
+                writeName(anim, ofsTex + t * 16, texNames[t]);
+            for (int t = 0; t < np; t++)
+                writeName(anim, ofsPlt + t * 16, pltNames[t]);
             return anim;
         }
 
         private static int indexOf(String[] arr, String s)
         {
-            for (int i = 0; i < arr.length; i++) if (arr[i].equals(s)) return i;
+            for (int i = 0; i < arr.length; i++)
+                if (arr[i].equals(s))
+                    return i;
             return 0;
         }
         private static void writeName(byte[] d, int at, String s)
@@ -271,25 +325,86 @@ public class TexturePatternAnimationSet extends G3dFile
             System.arraycopy(b, 0, d, at, Math.min(16, b.length));
         }
 
+        /**
+         * @param d the animation bytes
+         * @param at start of the 16-byte name table
+         * @param count how many names
+         * @return the names, in table order
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResName"
+         */
         private static String[] names(byte[] d, int at, int count)
         {
             String[] out = new String[count];
+
             for (int i = 0; i < count; i++)
             {
-                int start = at + i * 16, len = 0;
-                while (len < 16 && d[start + len] != 0)
-                    len++;
-                out[i] = new String(d, start, len, java.nio.charset.StandardCharsets.US_ASCII);
+                out[i] = oneName(d, at + i * 16);
             }
+
             return out;
         }
 
+        /**
+         * @param d the animation bytes
+         * @param start start of one 16-byte name
+         * @return the name, without the trailing NUL padding
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResName"
+         */
+        private static String oneName(byte[] d, int start)
+        {
+            int len = nameLen(d, start);
+
+            return new String(d, start, len, java.nio.charset.StandardCharsets.US_ASCII);
+        }
+
+        /**
+         * @param d the animation bytes
+         * @param start start of one 16-byte name
+         * @return the number of bytes before the NUL, at most 16
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResName"
+         */
+        private static int nameLen(byte[] d, int start)
+        {
+            int len = 0;
+
+            while (nameContinues(d, start, len))
+            {
+                len++;
+            }
+
+            return len;
+        }
+
+        /**
+         * @param d the animation bytes
+         * @param start start of one 16-byte name
+         * @param len bytes already accepted
+         * @return whether another byte belongs to the name
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResName"
+         */
+        private static boolean nameContinues(byte[] d, int start, int len)
+        {
+            if (len >= 16)
+                return false;
+
+            return Fx.uint8(d, start + len) != 0;
+        }
+
         /** @return this animation's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the number of frames */
-        public int getFrameCount() { return frameCount; }
+        public int getFrameCount()
+        {
+            return frameCount;
+        }
         /** @return the per-material pattern tracks */
-        public List<MaterialPattern> getMaterials() { return materials; }
+        public List<MaterialPattern> getMaterials()
+        {
+            return materials;
+        }
 
         @Override
         public String toString()
@@ -316,9 +431,15 @@ public class TexturePatternAnimationSet extends G3dFile
         }
 
         /** @return the material's name */
-        public String getName() { return name; }
+        public String getName()
+        {
+            return name;
+        }
         /** @return the keyframes, sorted by frame (each maps to the texture/palette shown from then on) */
-        public TreeMap<Integer, TexturePalette> getKeyframes() { return keyframes; }
+        public TreeMap<Integer, TexturePalette> getKeyframes()
+        {
+            return keyframes;
+        }
 
         /**
          * @param frame a frame index
@@ -349,21 +470,23 @@ public class TexturePatternAnimationSet extends G3dFile
         }
 
         /** @return the texture name */
-        public String getTexture() { return texture; }
+        public String getTexture()
+        {
+            return texture;
+        }
         /** @return the palette name */
-        public String getPalette() { return palette; }
+        public String getPalette()
+        {
+            return palette;
+        }
 
         @Override
-        public String toString() { return texture + "/" + palette; }
+        public String toString()
+        {
+            return texture + "/" + palette;
+        }
     }
 
-    private static int readU16(byte[] d, int o)
-    {
-        return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8);
-    }
 
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
-    }
+
 }

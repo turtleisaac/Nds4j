@@ -19,6 +19,8 @@
 
 package io.github.turtleisaac.nds4j.g3d;
 
+import io.github.turtleisaac.nds4j.framework.MemBuf;
+
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,9 +48,15 @@ import java.util.List;
  */
 public final class DisplayList
 {
-    private DisplayList() {}
+    private DisplayList()
+    {
+    }
 
-    private static final int NOP = 0x00, TEXCOORD = 0x22, VTX_16 = 0x23, BEGIN_VTXS = 0x40, END_VTXS = 0x41;
+    private static final int NOP = GeometryCommand.NOP.code;
+    private static final int TEXCOORD = GeometryCommand.TEXCOORD.code;
+    private static final int VTX_16 = GeometryCommand.VTX_16.code;
+    private static final int BEGIN_VTXS = GeometryCommand.BEGIN_VTXS.code;
+    private static final int END_VTXS = GeometryCommand.END_VTXS.code;
 
     /**
      * One GPU command: its opcode ({@code byte & 0xFF}) and its operand words (each a raw little-endian
@@ -77,25 +85,12 @@ public final class DisplayList
      */
     public static int operandWords(int opcode)
     {
-        switch (opcode)
-        {
-            case 0x00: case 0x11: case 0x15: case 0x41: return 0; // NOP, MTX_PUSH, MTX_IDENTITY, END_VTXS
-            case 0x10: case 0x12: case 0x13: case 0x14: return 1; // MTX_MODE/POP/STORE/RESTORE
-            case 0x16: case 0x18: return 16;                      // MTX_LOAD/MULT_4x4
-            case 0x17: case 0x19: return 12;                      // MTX_LOAD/MULT_4x3
-            case 0x1A: return 9;                                  // MTX_MULT_3x3
-            case 0x1B: case 0x1C: return 3;                       // MTX_SCALE, MTX_TRANS
-            case 0x20: case 0x21: case 0x22: return 1;            // COLOR, NORMAL, TEXCOORD
-            case 0x23: return 2;                                  // VTX_16
-            case 0x24: case 0x25: case 0x26: case 0x27: case 0x28: return 1; // VTX_10/XY/XZ/YZ/DIFF
-            case 0x29: case 0x2A: case 0x2B: return 1;            // POLYGON_ATTR, TEXIMAGE_PARAM, PLTT_BASE
-            case 0x30: case 0x31: case 0x32: case 0x33: return 1; // DIF_AMB, SPE_EMI, LIGHT_VECTOR, LIGHT_COLOR
-            case 0x34: return 32;                                 // SHININESS
-            case 0x40: return 1;                                  // BEGIN_VTXS
-            case 0x50: case 0x60: return 1;                       // SWAP_BUFFERS, VIEWPORT
-            case 0x70: return 3; case 0x71: return 2; case 0x72: return 1; // BOX/POS/VEC_TEST
-            default: return -1;
-        }
+        // Every geometry opcode's parameter width lives on the command.
+        GeometryCommand cmd = GeometryCommand.from(opcode);
+        if (cmd == null)
+            return -1;
+
+        return cmd.words;
     }
 
     /**
@@ -107,31 +102,85 @@ public final class DisplayList
     public static List<Command> decodeCommands(byte[] data)
     {
         List<Command> commands = new ArrayList<>();
-        int pos = 0;
-        while (pos + 4 <= data.length)
-        {
-            int[] ops = {data[pos] & 0xFF, data[pos + 1] & 0xFF, data[pos + 2] & 0xFF, data[pos + 3] & 0xFF};
-            pos += 4;
-            int[] counts = new int[4];
-            for (int i = 0; i < 4; i++)
-            {
-                counts[i] = operandWords(ops[i]);
-                if (counts[i] < 0)
-                    throw new RuntimeException(String.format("Unknown display-list opcode 0x%02X", ops[i]));
-            }
-            // the four commands' operands follow the opcode word, in order
-            for (int i = 0; i < 4; i++)
-            {
-                int[] operands = new int[counts[i]];
-                for (int k = 0; k < counts[i]; k++)
-                {
-                    operands[k] = pos + 4 <= data.length ? (int) readU32(data, pos) : 0;
-                    pos += 4;
-                }
-                commands.add(new Command(ops[i], operands));
-            }
-        }
+        MemBuf.MemBufReader reader = MemBuf.create(data).reader();
+        while (reader.getPosition() + 4 <= data.length)
+            readPacked(reader, data.length, commands);
+
         return commands;
+    }
+
+    /**
+     * @param reader a reader on an opcode word
+     * @param length display-list length
+     * @param commands commands decoded so far
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static void readPacked(MemBuf.MemBufReader reader, int length, List<Command> commands)
+    {
+        // The four opcodes are consumed before any of their parameters.
+        DlWord word = DlWord.read(reader);
+        int[] counts = counts(word);
+        for (int i = 0; i < 4; i++)
+            commands.add(new Command(word.at(i), operands(reader, length, counts[i])));
+    }
+
+    /**
+     * @param word four opcodes
+     * @return the parameter-word count of each
+     * @see "GBATEK DS 3D Video"
+     */
+    private static int[] counts(DlWord word)
+    {
+        int[] counts = new int[4];
+        for (int i = 0; i < 4; i++)
+            counts[i] = countAt(word, i);
+
+        return counts;
+    }
+
+    /**
+     * @param word four opcodes
+     * @param i which opcode
+     * @return that opcode's parameter-word count
+     * @see "GBATEK DS 3D Video"
+     */
+    private static int countAt(DlWord word, int i)
+    {
+        int count = operandWords(word.at(i));
+        if (count < 0)
+            throw new RuntimeException(String.format("Unknown display-list opcode 0x%02X", word.at(i)));
+
+        return count;
+    }
+
+    /**
+     * @param reader a reader on the first parameter word
+     * @param length display-list length
+     * @param count how many words this opcode takes
+     * @return those words, zero when the list ends early
+     * @see "GBATEK DS 3D Video"
+     */
+    private static int[] operands(MemBuf.MemBufReader reader, int length, int count)
+    {
+        int[] operands = new int[count];
+        for (int k = 0; k < count; k++)
+            operands[k] = readWord(reader, length);
+
+        return operands;
+    }
+
+    /**
+     * @param reader a reader on a parameter word
+     * @param length display-list length
+     * @return the word, or zero when the list has ended
+     * @see "GBATEK DS 3D Video"
+     */
+    private static int readWord(MemBuf.MemBufReader reader, int length)
+    {
+        if (reader.getPosition() + 4 > length)
+            return 0;
+
+        return reader.readInt();
     }
 
     /**
@@ -159,13 +208,18 @@ public final class DisplayList
     /** Decoded geometry: raw positions (x,y,z), texcoords (s,t in texel units), and triangle indices. */
     public static final class Geometry
     {
-        /** raw positions, 3 per vertex */ public final float[] positions;
-        /** texcoords, 2 per vertex */ public final float[] texcoords;
-        /** triangle indices, 3 per triangle */ public final int[] triangles;
+        /** raw positions, 3 per vertex */
+        public final float[] positions;
+        /** texcoords, 2 per vertex */
+        public final float[] texcoords;
+        /** triangle indices, 3 per triangle */
+        public final int[] triangles;
 
         Geometry(float[] positions, float[] texcoords, int[] triangles)
         {
-            this.positions = positions; this.texcoords = texcoords; this.triangles = triangles;
+            this.positions = positions;
+            this.texcoords = texcoords;
+            this.triangles = triangles;
         }
     }
 
@@ -180,7 +234,7 @@ public final class DisplayList
     public static byte[] encode(float[] positions, float[] texcoords, int[] triangles)
     {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        command(out, BEGIN_VTXS, param(0));           // primitive 0 = separate triangles
+        command(out, BEGIN_VTXS, param(0)); // primitive 0 = separate triangles
         for (int t = 0; t + 2 < triangles.length; t += 3)
         {
             for (int k = 0; k < 3; k++)
@@ -207,53 +261,15 @@ public final class DisplayList
         List<float[]> positions = new ArrayList<>();
         List<float[]> texcoords = new ArrayList<>();
         List<Integer> triangles = new ArrayList<>();
-        double[] vtx = new double[3];
-        double[] uv = new double[2];
         int primitive = -1;
         List<Integer> primVerts = new ArrayList<>();
 
-        int pos = 0;
-        while (pos + 4 <= data.length)
-        {
-            int[] ops = {data[pos] & 0xFF, data[pos + 1] & 0xFF, data[pos + 2] & 0xFF, data[pos + 3] & 0xFF};
-            pos += 4;
-            for (int op : ops)
-            {
-                switch (op)
-                {
-                    case NOP: break;
-                    case TEXCOORD:
-                    {
-                        long p = readU32(data, pos); pos += 4;
-                        uv[0] = (short) (p & 0xFFFF) / 16.0;
-                        uv[1] = (short) ((p >> 16) & 0xFFFF) / 16.0;
-                        break;
-                    }
-                    case VTX_16:
-                    {
-                        long p1 = readU32(data, pos), p2 = readU32(data, pos + 4); pos += 8;
-                        vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
-                        vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
-                        vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
-                        primVerts.add(positions.size());
-                        positions.add(new float[]{(float) vtx[0], (float) vtx[1], (float) vtx[2]});
-                        texcoords.add(new float[]{(float) uv[0], (float) uv[1]});
-                        break;
-                    }
-                    case BEGIN_VTXS:
-                    {
-                        int p = (int) readU32(data, pos); pos += 4;
-                        if (primitive >= 0)
-                            triangulate(primitive, primVerts, triangles);
-                        primitive = p & 3;
-                        primVerts = new ArrayList<>();
-                        break;
-                    }
-                    case END_VTXS: break;
-                    default: throw new RuntimeException(String.format("Unexpected display-list opcode 0x%02X", op));
-                }
-            }
-        }
+        MemBuf.MemBufReader reader = MemBuf.create(data).reader();
+        Walk walk = new Walk();
+        while (reader.getPosition() + 4 <= data.length)
+            readWord(reader, walk, positions, texcoords, primVerts, triangles);
+
+        primitive = walk.primitive;
         if (primitive >= 0)
             triangulate(primitive, primVerts, triangles);
 
@@ -261,23 +277,179 @@ public final class DisplayList
         float[] uv2 = new float[texcoords.size() * 2];
         for (int i = 0; i < positions.size(); i++)
         {
-            p3[i * 3] = positions.get(i)[0]; p3[i * 3 + 1] = positions.get(i)[1]; p3[i * 3 + 2] = positions.get(i)[2];
-            uv2[i * 2] = texcoords.get(i)[0]; uv2[i * 2 + 1] = texcoords.get(i)[1];
+            p3[i * 3] = positions.get(i)[0];
+            p3[i * 3 + 1] = positions.get(i)[1];
+            p3[i * 3 + 2] = positions.get(i)[2];
+            uv2[i * 2] = texcoords.get(i)[0];
+            uv2[i * 2 + 1] = texcoords.get(i)[1];
         }
         int[] idx = new int[triangles.size()];
-        for (int i = 0; i < idx.length; i++) idx[i] = triangles.get(i);
+        for (int i = 0; i < idx.length; i++)
+            idx[i] = triangles.get(i);
         return new Geometry(p3, uv2, idx);
+    }
+
+    /** Vertex, texcoord and primitive while {@link #decode} walks a list. */
+    private static final class Walk
+    {
+        private Vec3 vtx = Vec3.zero();
+        private Uv uv = Uv.zero();
+        private int primitive = -1;
+    }
+
+    /**
+     * @param reader a reader on an opcode word
+     * @param walk the running vertex and primitive
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @see "GBATEK DS 3D Video, geometry command packing"
+     */
+    private static void readWord(MemBuf.MemBufReader reader, Walk walk, List<float[]> positions, List<float[]> texcoords,
+            List<Integer> primVerts, List<Integer> triangles)
+    {
+        // Apply the four opcodes before their parameters are mixed with the next word.
+        DlWord word = DlWord.read(reader);
+        for (int i = 0; i < 4; i++)
+            dispatch(reader, walk, word.at(i), positions, texcoords, primVerts, triangles);
+    }
+
+    /**
+     * @param reader a reader on this opcode's parameters
+     * @param walk the running vertex and primitive
+     * @param op geometry opcode
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @see "GBATEK DS 3D Video, TEXCOORD"
+     */
+    private static void dispatch(MemBuf.MemBufReader reader, Walk walk, int op, List<float[]> positions,
+            List<float[]> texcoords, List<Integer> primVerts, List<Integer> triangles)
+    {
+        if (op == TEXCOORD)
+            walk.uv = Fx.texcoord(reader.readInt());
+        else
+            dispatchVertex(reader, walk, op, positions, texcoords, primVerts, triangles);
+    }
+
+    /**
+     * @param reader a reader on this opcode's parameters
+     * @param walk the running vertex and primitive
+     * @param op geometry opcode other than texcoord
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @see "GBATEK DS 3D Video, VTX_16"
+     */
+    private static void dispatchVertex(MemBuf.MemBufReader reader, Walk walk, int op, List<float[]> positions,
+            List<float[]> texcoords, List<Integer> primVerts, List<Integer> triangles)
+    {
+        if (op == VTX_16)
+            walk.vtx = emitVtx(reader, walk.vtx, walk.uv, positions, texcoords, primVerts);
+        else
+            dispatchBegin(reader, walk, op, primVerts, triangles);
+    }
+
+    /**
+     * @param reader a reader on this opcode's parameters
+     * @param walk the running primitive
+     * @param op geometry opcode other than a vertex or texcoord
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @see "GBATEK DS 3D Video, BEGIN_VTXS"
+     */
+    private static void dispatchBegin(MemBuf.MemBufReader reader, Walk walk, int op, List<Integer> primVerts,
+            List<Integer> triangles)
+    {
+        if (op == BEGIN_VTXS)
+            walk.primitive = begin(reader, walk.primitive, primVerts, triangles);
+        else
+            reject(op);
+    }
+
+    /**
+     * @param op an opcode this decoder does not emit
+     * @see "GBATEK DS 3D Video"
+     */
+    private static void reject(int op)
+    {
+        if (op == NOP)
+            return;
+
+        rejectEnd(op);
+    }
+
+    /**
+     * @param op an opcode other than NOP
+     * @see "GBATEK DS 3D Video, END_VTXS"
+     */
+    private static void rejectEnd(int op)
+    {
+        if (op != END_VTXS)
+            throw new RuntimeException(String.format("Unexpected display-list opcode 0x%02X", op));
+    }
+
+    /**
+     * @param reader a reader on the two vertex words
+     * @param vtx the running vertex, replaced
+     * @param uv the current texcoord
+     * @param positions emitted positions
+     * @param texcoords emitted texcoords
+     * @param primVerts vertices of the open primitive
+     * @return the vertex just read
+     * @see "GBATEK DS 3D Video, VTX_16"
+     */
+    private static Vec3 emitVtx(MemBuf.MemBufReader reader, Vec3 vtx, Uv uv, List<float[]> positions,
+            List<float[]> texcoords, List<Integer> primVerts)
+    {
+        // VTX_16 replaces the whole vertex, then the current texcoord is copied with it.
+        vtx = Fx.vtx16(reader.readInt(), reader.readInt());
+        primVerts.add(positions.size());
+        positions.add(new float[] { (float) vtx.x, (float) vtx.y, (float) vtx.z });
+        texcoords.add(new float[] { (float) uv.s, (float) uv.t });
+
+        return vtx;
+    }
+
+    /**
+     * @param reader a reader on the primitive word
+     * @param primitive the open primitive, or -1
+     * @param primVerts vertices of the open primitive
+     * @param triangles triangle indices
+     * @return the new primitive type
+     * @see "GBATEK DS 3D Video, BEGIN_VTXS"
+     */
+    private static int begin(MemBuf.MemBufReader reader, int primitive, List<Integer> primVerts, List<Integer> triangles)
+    {
+        // Close the previous primitive before starting the next.
+        int p = reader.readInt();
+        if (primitive >= 0)
+            triangulate(primitive, primVerts, triangles);
+
+        primVerts.clear();
+
+        return p & 3;
     }
 
     // --- encoding helpers ---
 
     private static void command(ByteArrayOutputStream out, int opcode, int... params)
     {
-        out.write(opcode); out.write(NOP); out.write(NOP); out.write(NOP); // one command per word, NOP-padded
-        for (int p : params) putU32(out, p);
+        out.write(opcode);
+        out.write(NOP);
+        out.write(NOP);
+        out.write(NOP); // one command per word, NOP-padded
+        for (int p : params)
+            putU32(out, p);
     }
 
-    private static int param(int v) { return v; }
+    private static int param(int v)
+    {
+        return v;
+    }
 
     private static int texcoord(float s, float t)
     {
@@ -304,25 +476,47 @@ public final class DisplayList
         switch (primitive)
         {
             case 0:
-                for (int i = 0; i + 2 < n; i += 3) { out.add(v.get(i)); out.add(v.get(i + 1)); out.add(v.get(i + 2)); }
+                for (int i = 0; i + 2 < n; i += 3)
+                {
+                    out.add(v.get(i));
+                    out.add(v.get(i + 1));
+                    out.add(v.get(i + 2));
+                }
                 break;
             case 2:
                 for (int i = 2; i < n; i++)
-                    if ((i & 1) == 0) { out.add(v.get(i - 2)); out.add(v.get(i - 1)); out.add(v.get(i)); }
-                    else { out.add(v.get(i - 1)); out.add(v.get(i - 2)); out.add(v.get(i)); }
+                    if ((i & 1) == 0)
+                    {
+                        out.add(v.get(i - 2));
+                        out.add(v.get(i - 1));
+                        out.add(v.get(i));
+                    }
+                    else
+                    {
+                        out.add(v.get(i - 1));
+                        out.add(v.get(i - 2));
+                        out.add(v.get(i));
+                    }
                 break;
             default: // quads (1) / quad-strip (3) not emitted by this encoder
                 break;
         }
     }
 
+    /**
+     * @param out the display list being written
+     * @param v a parameter word
+     * @see "GBATEK DS 3D Video"
+     */
     private static void putU32(ByteArrayOutputStream out, int v)
     {
-        out.write(v); out.write(v >> 8); out.write(v >> 16); out.write(v >> 24);
-    }
-
-    private static long readU32(byte[] d, int o)
-    {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
+        // The geometry engine reads parameter words little-endian.
+        MemBuf buf = MemBuf.create();
+        buf.writer().writeInt(v);
+        byte[] word = buf.reader().getBuffer();
+        out.write(word[0]);
+        out.write(word[1]);
+        out.write(word[2]);
+        out.write(word[3]);
     }
 }

@@ -31,14 +31,12 @@ final class DlVerts
     static final class Out
     {
         final float[] positions;
-        final int[][] joints;
-        final double[][] weights;
+        final SbcMachine.Bind[] binds;
 
-        private Out(float[] positions, int[][] joints, double[][] weights)
+        private Out(float[] positions, SbcMachine.Bind[] binds)
         {
             this.positions = positions;
-            this.joints = joints;
-            this.weights = weights;
+            this.binds = binds;
         }
     }
 
@@ -59,30 +57,26 @@ final class DlVerts
     {
         int count = raw.length / 3;
         float[] dest = new float[raw.length];
-        int[][] joints = new int[count][];
-        double[][] weights = new double[count][];
+        SbcMachine.Bind[] binds = new SbcMachine.Bind[count];
 
         Cursor c = new Cursor(draw, bind);
-        double[] vtx = new double[3];
+        Vec3 vtx = Vec3.zero();
         int n = 0;
 
         MemBuf.MemBufReader commands = MemBuf.create(dl).reader();
         while (commands.getPosition() + 4 <= dl.length && n < count)
         {
-            int[] ops = { commands.readByte(), commands.readByte(), commands.readByte(), commands.readByte() };
-            for (int op : ops)
+            DlWord word = DlWord.read(commands);
+            for (int i = 0; i < 4 && n < count; i++)
             {
-                if (n >= count)
-                    break;
-
-                GeometryCommand cmd = GeometryCommand.from(op);
-                step(commands, op, cmd, c, machine, vtx, dest, joints, weights, n);
+                GeometryCommand cmd = GeometryCommand.from(word.at(i));
+                vtx = step(commands, word.at(i), cmd, c, machine, vtx, dest, binds, n);
                 if (cmd != null && cmd.emitsVertex)
                     n++;
             }
         }
 
-        return new Out(dest, joints, weights);
+        return new Out(dest, binds);
     }
 
     /**
@@ -98,8 +92,8 @@ final class DlVerts
      * @param n vertices already emitted
      * @see "GBATEK DS 3D Video"
      */
-    private static void step(MemBuf.MemBufReader commands, int op, GeometryCommand cmd, Cursor c, SbcMachine machine,
-            double[] vtx, float[] dest, int[][] joints, double[][] weights, int n)
+    private static Vec3 step(MemBuf.MemBufReader commands, int op, GeometryCommand cmd, Cursor c, SbcMachine machine,
+            Vec3 vtx, float[] dest, SbcMachine.Bind[] binds, int n)
     {
         if (cmd == null)
             throw unknown(op);
@@ -123,11 +117,13 @@ final class DlVerts
                 break;
             default:
                 if (cmd.emitsVertex)
-                    vertex(commands, cmd, c, vtx, dest, joints, weights, n);
+                    vtx = vertex(commands, cmd, c, vtx, dest, binds, n);
                 else
                     skip(commands, cmd, op);
                 break;
         }
+
+        return vtx;
     }
 
     /**
@@ -184,13 +180,15 @@ final class DlVerts
      * @param n vertex index
      * @see "GBATEK DS 3D Video, VTX_16, VTX_10, VTX_XY, VTX_XZ, VTX_YZ and VTX_DIFF"
      */
-    private static void vertex(MemBuf.MemBufReader commands, GeometryCommand cmd, Cursor c, double[] vtx, float[] dest,
-            int[][] joints, double[][] weights, int n)
+    private static Vec3 vertex(MemBuf.MemBufReader commands, GeometryCommand cmd, Cursor c, Vec3 vtx, float[] dest,
+            SbcMachine.Bind[] binds, int n)
     {
-        readVertex(commands, cmd, vtx);
-        NitroMtx.apply(c.draw, vtx[0], vtx[1], vtx[2], dest, n * 3);
-        joints[n] = c.bind.joints;
-        weights[n] = c.bind.weights;
+        // The posed vertex and the binding that produced it are stored together.
+        vtx = readVertex(commands, cmd, vtx);
+        NitroMtx.apply(c.draw, vtx.x, vtx.y, vtx.z, dest, n * 3);
+        binds[n] = c.bind;
+
+        return vtx;
     }
 
     /**
@@ -199,21 +197,18 @@ final class DlVerts
      * @param vtx running vertex, updated in place
      * @see "GBATEK DS 3D Video, vertex command parameter widths"
      */
-    private static void readVertex(MemBuf.MemBufReader commands, GeometryCommand cmd, double[] vtx)
+    private static Vec3 readVertex(MemBuf.MemBufReader commands, GeometryCommand cmd, Vec3 vtx)
     {
-        switch (cmd)
-        {
-            case VTX_16:
-                vtx16(commands, vtx);
-                break;
-            case VTX_10:
-            case VTX_DIFF:
-                vtx10(commands, cmd, vtx);
-                break;
-            default:
-                vtxPair(commands, cmd, vtx);
-                break;
-        }
+        if (cmd == GeometryCommand.VTX_16)
+            return Fx.vtx16(commands.readInt(), commands.readInt());
+
+        if (cmd == GeometryCommand.VTX_10)
+            return Fx.vtx10(commands.readInt(), 64.0);
+
+        if (cmd == GeometryCommand.VTX_DIFF)
+            return vtx.add(Fx.vtx10(commands.readInt(), 4096.0));
+
+        return Fx.vertexPair(commands.readInt(), cmd, vtx);
     }
 
     /**
@@ -221,73 +216,6 @@ final class DlVerts
      * @param vtx running vertex
      * @see "GBATEK DS 3D Video, VTX_16"
      */
-    private static void vtx16(MemBuf.MemBufReader commands, double[] vtx)
-    {
-        int p1 = commands.readInt();
-        int p2 = commands.readInt();
-
-        vtx[0] = (short) (p1 & 0xFFFF) / 4096.0;
-        vtx[1] = (short) ((p1 >> 16) & 0xFFFF) / 4096.0;
-        vtx[2] = (short) (p2 & 0xFFFF) / 4096.0;
-    }
-
-    /**
-     * @param commands display-list reader, on the parameter word
-     * @param cmd {@link GeometryCommand#VTX_10} replaces the vertex, {@link GeometryCommand#VTX_DIFF} adds a delta
-     * @param vtx running vertex
-     * @see "GBATEK DS 3D Video, VTX_10 and VTX_DIFF"
-     */
-    private static void vtx10(MemBuf.MemBufReader commands, GeometryCommand cmd, double[] vtx)
-    {
-        int w = commands.readInt();
-        double k = cmd == GeometryCommand.VTX_10 ? 64.0 : 4096.0;
-        double x = s10(w) / k;
-        double y = s10(w >> 10) / k;
-        double z = s10(w >> 20) / k;
-
-        if (cmd == GeometryCommand.VTX_10)
-        {
-            vtx[0] = x;
-            vtx[1] = y;
-            vtx[2] = z;
-        }
-        else
-        {
-            vtx[0] += x;
-            vtx[1] += y;
-            vtx[2] += z;
-        }
-    }
-
-    /**
-     * @param commands display-list reader, on the parameter word
-     * @param cmd {@link GeometryCommand#VTX_XY}, {@link GeometryCommand#VTX_XZ} or {@link GeometryCommand#VTX_YZ}
-     * @param vtx running vertex
-     * @see "GBATEK DS 3D Video, VTX_XY, VTX_XZ and VTX_YZ"
-     */
-    private static void vtxPair(MemBuf.MemBufReader commands, GeometryCommand cmd, double[] vtx)
-    {
-        int w = commands.readInt();
-        double a = (short) (w & 0xFFFF) / 4096.0;
-        double b = (short) ((w >> 16) & 0xFFFF) / 4096.0;
-
-        switch (cmd)
-        {
-            case VTX_XY:
-                vtx[0] = a;
-                vtx[1] = b;
-                break;
-            case VTX_XZ:
-                vtx[0] = a;
-                vtx[2] = b;
-                break;
-            default:
-                vtx[1] = a;
-                vtx[2] = b;
-                break;
-        }
-    }
-
     /**
      * @param c draw cursor
      * @see "GBATEK DS 3D Video, MTX_IDENTITY"
@@ -351,21 +279,8 @@ final class DlVerts
      */
     private static double fx(MemBuf.MemBufReader commands)
     {
-        return commands.readInt() / 4096.0;
-    }
-
-    /**
-     * @param v low 10 bits
-     * @return the signed 10-bit value
-     * @see "GBATEK DS 3D Video, VTX_10 component packing"
-     */
-    private static int s10(int v)
-    {
-        int bits = v & 0x3FF;
-        if ((bits & 0x200) == 0)
-            return bits;
-
-        return bits - 0x400;
+        // MTX_SCALE and MTX_TRANS store fx32 components.
+        return Fx.readFx32(commands);
     }
 
     /** Draw matrix, the binding it came from, and the geometry-engine matrix mode. */

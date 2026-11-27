@@ -91,14 +91,16 @@ public class G3dDictionary
         putU16(rawTree, 0, sizeDict);
         putU16(rawTree, 2, 0x0008);
         putU16(rawTree, 4, 12 + 4 * count);
+        MemBuf tree = MemBuf.create(rawTree);
         for (int i = 0; i < count + 1; i++)
         {
-            int b = 6 + i * 4;
-            rawTree[b] = (byte) nodes[i].refBit;
-            rawTree[b + 1] = (byte) nodes[i].left;
-            rawTree[b + 2] = (byte) nodes[i].right;
-            rawTree[b + 3] = (byte) nodes[i].idxEntry;
+            tree.writer().setPosition(6 + i * 4);
+            tree.writer().writeByte((byte) nodes[i].refBit);
+            tree.writer().writeByte((byte) nodes[i].left);
+            tree.writer().writeByte((byte) nodes[i].right);
+            tree.writer().writeByte((byte) nodes[i].idxEntry);
         }
+        rawTree = tree.reader().getBuffer();
         int ofsData = 4 + count * elementSize;
         return new G3dDictionary(elementSize, ofsData, rawTree, records, names);
     }
@@ -127,7 +129,12 @@ public class G3dDictionary
     private static final class Node
     {
         int refBit, left, right, idxEntry;
-        Node(int refBit, int idxEntry) { this.refBit = refBit; this.idxEntry = idxEntry; }
+
+        Node(int refBit, int idxEntry)
+        {
+            this.refBit = refBit;
+            this.idxEntry = idxEntry;
+        }
     }
 
     // Reads the (count+1) tree nodes out of rawTree (skipping the 6-byte header) for lookup.
@@ -135,12 +142,14 @@ public class G3dDictionary
     {
         int count = records.size();
         Node[] nodes = new Node[count + 1];
+        MemBuf.MemBufReader reader = MemBuf.create(rawTree).reader();
         for (int i = 0; i < count + 1; i++)
         {
-            int b = 6 + i * 4;
-            Node n = new Node(rawTree[b] & 0xFF, rawTree[b + 3] & 0xFF);
-            n.left = rawTree[b + 1] & 0xFF;
-            n.right = rawTree[b + 2] & 0xFF;
+            reader.setPosition(6 + i * 4);
+            Node n = new Node(reader.readByte(), 0);
+            n.left = reader.readByte();
+            n.right = reader.readByte();
+            n.idxEntry = reader.readByte();
             nodes[i] = n;
         }
         return nodes;
@@ -152,7 +161,8 @@ public class G3dDictionary
     {
         List<Node> nodes = new java.util.ArrayList<>();
         Node root = new Node(0x7F, 0);
-        root.left = 0; root.right = 0;
+        root.left = 0;
+        root.right = 0;
         nodes.add(root);
         for (int e = 0; e < names.size(); e++)
         {
@@ -168,7 +178,8 @@ public class G3dDictionary
                     : names.get(nodes.get(next).idxEntry).getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             int r = highestDifferingBit(name, leaf);
             // 2. descend to the splice point (parent whose child crosses refBit r)
-            cur = 0; next = nodes.get(0).left;
+            cur = 0;
+            next = nodes.get(0).left;
             while (nodes.get(cur).refBit > nodes.get(next).refBit && nodes.get(next).refBit > r)
             {
                 cur = next;
@@ -177,9 +188,20 @@ public class G3dDictionary
             // 3. new node points to itself on the side matching bit r, and to the old child on the other
             int idx = nodes.size();
             Node nn = new Node(r, e);
-            if (getBit(name, r) != 0) { nn.right = idx; nn.left = next; }
-            else { nn.left = idx; nn.right = next; }
-            if (nodes.get(cur).left == next) nodes.get(cur).left = idx; else nodes.get(cur).right = idx;
+            if (getBit(name, r) != 0)
+            {
+                nn.right = idx;
+                nn.left = next;
+            }
+            else
+            {
+                nn.left = idx;
+                nn.right = next;
+            }
+            if (nodes.get(cur).left == next)
+                nodes.get(cur).left = idx;
+            else
+                nodes.get(cur).right = idx;
             nodes.add(nn);
         }
         return nodes.toArray(new Node[0]);
@@ -195,7 +217,7 @@ public class G3dDictionary
         int[] newIndex = new int[n];
         java.util.Arrays.fill(newIndex, -1);
         newIndex[0] = 0;
-        preorder(nodes, 0, newIndex, new int[]{1});
+        preorder(nodes, 0, newIndex, new int[] { 1 });
 
         Node[] out = new Node[n];
         for (int old = 0; old < n; old++)
@@ -229,27 +251,57 @@ public class G3dDictionary
     private static int getBit(byte[] name, int refBit)
     {
         int b = refBit >> 3;
-        return b >= name.length ? 0 : ((name[b] >> (refBit & 7)) & 1);
+        if (b >= name.length)
+            return 0;
+
+        MemBuf.MemBufReader reader = MemBuf.create(name).reader();
+        reader.setPosition(b);
+
+        return (reader.readByte() >> (refBit & 7)) & 1;
     }
 
-    // Highest bit index where a and b differ (missing bytes read as 0); 0 if identical.
+    /**
+     * @param a one name
+     * @param b the other name
+     * @return the highest bit index where they differ, or 0 when they match
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResDict"
+     */
     private static int highestDifferingBit(byte[] a, byte[] b)
     {
+        // Compare from the last byte. A missing byte reads as zero.
         int maxLen = Math.max(a.length, b.length);
+
         for (int i = maxLen - 1; i >= 0; i--)
         {
-            int av = i < a.length ? (a[i] & 0xFF) : 0;
-            int bv = i < b.length ? (b[i] & 0xFF) : 0;
-            if (av != bv)
-                return i * 8 + (31 - Integer.numberOfLeadingZeros((av ^ bv) & 0xFF));
+            int diff = nameByte(a, i) ^ nameByte(b, i);
+
+            if (diff != 0)
+                return i * 8 + (31 - Integer.numberOfLeadingZeros(diff & 0xFF));
         }
+
         return 0;
+    }
+
+    /**
+     * @param name a dictionary name
+     * @param i byte index
+     * @return that byte, or 0 past the end
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResDict"
+     */
+    private static int nameByte(byte[] name, int i)
+    {
+        if (i >= name.length)
+            return 0;
+
+        return Fx.uint8(name, i);
     }
 
     private static void putU16(byte[] d, int o, int v)
     {
-        d[o] = (byte) v;
-        d[o + 1] = (byte) (v >> 8);
+        MemBuf buf = MemBuf.create(d);
+        buf.writer().setPosition(o);
+        buf.writer().writeShort((short) v);
+        System.arraycopy(buf.reader().getBuffer(), o, d, o, 2);
     }
 
     /**

@@ -66,8 +66,14 @@ public class ModelSetTest
             if (!magic(f).equals("NARC"))
                 continue;
             Narc narc;
-            try { narc = new Narc(f); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(f);
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             for (int j = 0; j < narc.getNumFiles(); j++)
                 if (magic(narc.getFile(j)).equals(want))
                     found.add(narc.getFile(j));
@@ -150,7 +156,8 @@ public class ModelSetTest
         {
             for (Model model : new ModelSet(file).getModels())
             {
-                if (!model.usesMtxScale()) continue;
+                if (!model.usesMtxScale())
+                    continue;
                 withScale++;
                 assertThat(model.getVertexCount())
                         .as("MTX_SCALE model %s stays vertex-count exact", model.getName())
@@ -181,17 +188,27 @@ public class ModelSetTest
                 // static bind-pose decode cannot reproduce that, so they are outside this self-check.
                 if (model.hasDynamicPose())
                     continue;
-                float[][] decoded = model.getDecodedBoundingBox();
-                float[][] header = model.getHeaderBoundingBox();
+                Box decoded = model.getDecodedBoundingBox();
+                Box header = model.getHeaderBoundingBox();
                 float extent = 0;
                 for (int c = 0; c < 3; c++)
-                    extent = Math.max(extent, header[1][c] - header[0][c]);
+                    extent = Math.max(extent, header.max(c) - header.min(c));
                 float tol = Math.max(1e-3f, 0.02f * extent);
                 boolean match = true;
                 for (int c = 0; c < 3 && match; c++)
-                    match = Math.abs(decoded[0][c] - header[0][c]) < tol && Math.abs(decoded[1][c] - header[1][c]) < tol;
-                if (model.isSingleNode()) { singleTotal++; if (match) singleOk++; }
-                else                      { multiTotal++;  if (match) multiOk++; }
+                    match = Math.abs(decoded.min(c) - header.min(c)) < tol && Math.abs(decoded.max(c) - header.max(c)) < tol;
+                if (model.isSingleNode())
+                {
+                    singleTotal++;
+                    if (match)
+                        singleOk++;
+                }
+                else
+                {
+                    multiTotal++;
+                    if (match)
+                        multiOk++;
+                }
             }
         }
         // Single-node models are the identity case and must be essentially perfect (retail Platinum ~98%).
@@ -286,7 +303,10 @@ public class ModelSetTest
     void rejectsNonModelSet()
     {
         byte[] junk = new byte[0x20];
-        junk[0] = 'J'; junk[1] = 'U'; junk[2] = 'N'; junk[3] = 'K';
+        junk[0] = 'J';
+        junk[1] = 'U';
+        junk[2] = 'N';
+        junk[3] = 'K';
         assertThatThrownBy(() -> new ModelSet(junk)).isInstanceOf(RuntimeException.class);
     }
 }

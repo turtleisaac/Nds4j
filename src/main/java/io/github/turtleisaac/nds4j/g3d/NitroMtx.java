@@ -79,15 +79,23 @@ final class NitroMtx
      * @return the joint matrix
      * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dSendJointSRTMaya"
      */
-    static double[] mayaJoint(double[] t, double[] r, double[] s, double[] invParent)
+    static double[] mayaJoint(Vec3 t, Mat3 r, Vec3 s, Vec3 invParent)
     {
+        // Each rotation row is scaled, then multiplied by the inverse parent scale.
         double[] m = new double[12];
-        for (int i = 0; i < 3; i++)
-            for (int c = 0; c < 3; c++)
-                m[i * 3 + c] = s[i] * r[i * 3 + c] * invParent[c];
-        m[9] = t[0];
-        m[10] = t[1];
-        m[11] = t[2];
+        m[0] = s.x * r.m00 * invParent.x;
+        m[1] = s.x * r.m01 * invParent.y;
+        m[2] = s.x * r.m02 * invParent.z;
+        m[3] = s.y * r.m10 * invParent.x;
+        m[4] = s.y * r.m11 * invParent.y;
+        m[5] = s.y * r.m12 * invParent.z;
+        m[6] = s.z * r.m20 * invParent.x;
+        m[7] = s.z * r.m21 * invParent.y;
+        m[8] = s.z * r.m22 * invParent.z;
+        m[9] = t.x;
+        m[10] = t.y;
+        m[11] = t.z;
+
         return m;
     }
 
@@ -124,27 +132,53 @@ final class NitroMtx
      * @return its component-wise inverse, with zero staying zero
      * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dGetJointScaleMaya"
      */
-    static double[] safeInv(double[] s)
+    static Vec3 safeInv(Vec3 s)
     {
-        return new double[] { s[0] == 0 ? 0 : 1 / s[0], s[1] == 0 ? 0 : 1 / s[1], s[2] == 0 ? 0 : 1 / s[2] };
+        // A zero axis stays zero so a later multiply does not explode.
+        return Vec3.of(invert(s.x), invert(s.y), invert(s.z));
+    }
+
+    /**
+     * @param v one scale component
+     * @return its inverse, or zero when it is zero
+     * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dGetJointScaleMaya"
+     */
+    private static double invert(double v)
+    {
+        if (v == 0)
+            return 0;
+
+        return 1 / v;
     }
 
     /**
      * Splits a joint into translation, rotation and positive scale.
      * A zero-length row becomes the corresponding identity axis so the rotation stays usable.
      * @param m a 4×3 joint matrix
-     * @return {@code {translation[3], rotation[9], scale[3]}}
+     * @return that joint's translation, rotation and scale
      * @see "NitroSystem g3d/src/cgtool/maya.c NNSi_G3dSendJointSRTMaya"
      */
-    static double[][] decompose(double[] m)
+    static Model.NodeTransform decompose(double[] m)
     {
-        double[] translation = { m[9], m[10], m[11] };
+        // Translation is the last row. Each of the first three rows is a scaled axis.
+        Vec3 translation = Vec3.of(m[9], m[10], m[11]);
         double[] rotation = new double[9];
-        double[] scale = new double[3];
+        double sx = fillRow(m, rotation, 0);
+        double sy = fillRow(m, rotation, 1);
+        double sz = fillRow(m, rotation, 2);
 
-        for (int i = 0; i < 3; i++)
-            scale[i] = fillRow(m, rotation, i);
-        return new double[][] { translation, rotation, scale };
+        return new Model.NodeTransform(translation, Vec3.of(sx, sy, sz), mat3(rotation));
+    }
+
+    /**
+     * @param rotation nine row-major cells
+     * @return that rotation
+     * @see "NitroSDK include/nitro/fx/fx_mtx33.h MtxFx33"
+     */
+    private static Mat3 mat3(double[] rotation)
+    {
+        // fillRow writes the unit axes into a scratch row-major buffer.
+        return Mat3.of(rotation[0], rotation[1], rotation[2], rotation[3], rotation[4], rotation[5], rotation[6], rotation[7], rotation[8]);
     }
 
     /**
