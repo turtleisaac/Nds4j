@@ -36,14 +36,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("ImdImporter (.imd -> NSBMD, byte-identical to g3dcvtr)")
 public class ImdImporterTest
 {
+    private static String node(int index, String name, int parent, String billboard, int displays)
+    {
+        String scale = index == 2 ? "2 3 4" : "1 1 1";
+        StringBuilder xml = new StringBuilder();
+        xml.append("<node index=\"").append(index).append("\" name=\"").append(name).append("\" kind=\"mesh\" parent=\"")
+                .append(parent).append("\" child=\"-1\" brother_next=\"-1\" brother_prev=\"-1\" draw_mtx=\"on\" billboard=\"")
+                .append(billboard).append("\" scale=\"").append(scale).append("\" rotate=\"0 0 0\" translate=\"0 0 0\" visibility=\"on\" display_size=\"")
+                .append(displays).append("\" vertex_size=\"4\" polygon_size=\"1\" triangle_size=\"0\" quad_size=\"1\" ")
+                .append("volume_min=\"0 0 0\" volume_max=\"1 1 0\" volume_r=\"1\">");
+        for (int i = 0; i < displays; i++)
+            xml.append("<display index=\"").append(i).append("\" material=\"0\" polygon=\"0\" priority=\"0\"/>");
+        xml.append("</node>");
+
+        return xml.toString();
+    }
+
     private static byte[] resource(String name)
     {
         try (InputStream in = ImdImporterTest.class.getResourceAsStream("/imd/" + name))
         {
-            if (in == null) throw new IllegalStateException("missing test resource /imd/" + name);
+            if (in == null)
+                throw new IllegalStateException("missing test resource /imd/" + name);
             return in.readAllBytes();
         }
-        catch (Exception e) { throw new RuntimeException(e); }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     private void assertByteExact(String base)
@@ -87,15 +107,25 @@ public class ImdImporterTest
 
     @Test
     @DisplayName("a billboard, hardware-lit textured model matches g3dcvtr byte-for-byte")
-    void rockMatchesG3dcvtr() { assertByteExact("rock"); }
+    void rockMatchesG3dcvtr()
+    {
+        assertByteExact("rock");
+    }
 
     @Test
     @DisplayName("a non-billboard, vertex-colored textured model matches g3dcvtr byte-for-byte")
-    void bookMatchesG3dcvtr() { assertByteExact("book"); }
+    void bookMatchesG3dcvtr()
+    {
+        assertByteExact("book");
+    }
 
     @Test
     @DisplayName("with the texture embedded (-eboth), the whole MDL0+TEX0 matches g3dcvtr byte-for-byte")
-    void embeddedTexturesMatchG3dcvtr() { assertByteExactWithTextures("rock"); assertByteExactWithTextures("book"); }
+    void embeddedTexturesMatchG3dcvtr()
+    {
+        assertByteExactWithTextures("rock");
+        assertByteExactWithTextures("book");
+    }
 
     @Test
     @DisplayName("a two-material, two-shape model (shared texture) matches g3dcvtr byte-for-byte")
@@ -109,11 +139,18 @@ public class ImdImporterTest
 
     @Test
     @DisplayName("a two-material, two-shape model with two distinct textures matches g3dcvtr byte-for-byte")
-    void multiShapeDistinctTextures() { assertByteExact("twotex"); }
+    void multiShapeDistinctTextures()
+    {
+        assertByteExact("twotex");
+    }
 
     @Test
     @DisplayName("material state (flip tiling, decal mode) is derived correctly — byte-for-byte vs g3dcvtr")
-    void materialStateDerivation() { assertByteExact("v_flip"); assertByteExact("v_decal"); }
+    void materialStateDerivation()
+    {
+        assertByteExact("v_flip");
+        assertByteExact("v_decal");
+    }
 
     // little-endian u32
     private static long u32(byte[] d, int o)
@@ -134,7 +171,7 @@ public class ImdImporterTest
 
         // locate the MDL0 model header and read the node counts and SBC bytes back out
         int mdl0 = (int) u32(nsbmd, 16);
-        int modelStart = mdl0 + 8 + 8 + (0x10);         // BMD0(16)+MDL0(8)+model dict(header 8 + 1 rec of 0x10)
+        int modelStart = mdl0 + 8 + 8 + (0x10); // BMD0(16)+MDL0(8)+model dict(header 8 + 1 rec of 0x10)
         // the model dict's single record points at the model; read it rather than assume the layout
         int modelOfs = (int) u32(nsbmd, mdl0 + 8 + 8 + 0xC);
         int ms = mdl0 + modelOfs;
@@ -146,14 +183,14 @@ public class ImdImporterTest
         byte[] sbc = java.util.Arrays.copyOfRange(nsbmd, ms + ofsSbc, ms + ofsMat);
         // 26 00 00 00 00 | 06 01 00 00 | 02 01 01 | 0b 04 00 05 00 2b | 46 02 00 00 00 | 02 02 01 | 0b 04 01 05 01 2b | 01  (pad /4)
         byte[] expectedSbc = {
-                0x26, 0, 0, 0, 0,          // NODEDESC(root) + store slot 0
-                0x06, 1, 0, 0,             // NODEDESC(mesh0, parent root)
-                0x02, 1, 1,                // NODE(mesh0, visible)
-                0x0b, 0x04, 0, 0x05, 0, 0x2b,   // POSSCALE MAT0 SHP0 POSSCALE|end
-                0x46, 2, 0, 0, 0,          // NODEDESC(mesh1, parent root) + restore slot 0
-                0x02, 2, 1,                // NODE(mesh1, visible)
-                0x0b, 0x04, 1, 0x05, 1, 0x2b,   // POSSCALE MAT1 SHP1 POSSCALE|end
-                0x01, 0, 0, 0              // RET + pad to /4
+                0x26, 0, 0, 0, 0, // NODEDESC(root) + store slot 0
+                0x06, 1, 0, 0, // NODEDESC(mesh0, parent root)
+                0x02, 1, 1, // NODE(mesh0, visible)
+                0x0b, 0x04, 0, 0x05, 0, 0x2b, // POSSCALE MAT0 SHP0 POSSCALE|end
+                0x46, 2, 0, 0, 0, // NODEDESC(mesh1, parent root) + restore slot 0
+                0x02, 2, 1, // NODE(mesh1, visible)
+                0x0b, 0x04, 1, 0x05, 1, 0x2b, // POSSCALE MAT1 SHP1 POSSCALE|end
+                0x01, 0, 0, 0 // RET + pad to /4
         };
         assertThat(sbc).as("star-tree SBC matches g3dcvtr's matrix-stack pattern").isEqualTo(expectedSbc);
 
@@ -192,7 +229,7 @@ public class ImdImporterTest
 
     @Test
     @DisplayName("the enriched class-based API exposes parse + every g3dcvtr output mode via the flagship classes")
-    void enrichedClassBasedApi()
+    void enrichedClassBasedApi() throws Exception
     {
         String imd = new String(resource("two.imd"), StandardCharsets.ISO_8859_1);
         ImdImporter imp = ImdImporter.fromXml(imd).named("two");
@@ -209,12 +246,55 @@ public class ImdImporterTest
         assertThat(imp.toNsbmdWithTextures()).isEqualTo(ImdImporter.toNsbmdWithTextures(imd, "two"));
 
         // and produce usable flagship objects directly
-        ModelSet ms = imp.toModelSet();               // textures embedded (the .imd has them)
+        ModelSet ms = imp.toModelSet(); // textures embedded (the .imd has them)
         assertThat(ms.getModels().get(0).getName()).isEqualTo("two");
         assertThat(ms.getModels().get(0).getMeshes()).hasSize(2);
         assertThat(ms.hasEmbeddedTextures()).isTrue();
 
         // the ModelSet.fromImd factory is equivalent
         assertThat(ModelSet.fromImd(imd, "two").getModels().get(0).getMeshes()).hasSize(2);
+        assertThat(imp.getNodeNames()).containsExactly("pPlane1");
+
+        java.nio.file.Path tmp = java.nio.file.Files.createTempFile("two", ".imd");
+        java.nio.file.Files.write(tmp, imd.getBytes(StandardCharsets.ISO_8859_1));
+        assertThat(ImdImporter.fromFile(tmp.toFile()).getNodeCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a parent with a child stores a matrix slot and a y-billboard")
+    void parentChildStoresASlot()
+    {
+        String imd = new String(resource("two.imd"), StandardCharsets.ISO_8859_1);
+        int start = imd.indexOf("<node_array");
+        int end = imd.indexOf("<output_info");
+        String nodes = "<node_array size=\"4\">"
+                + node(0, "root", -1, "y_on", 2)
+                + node(1, "mid", 0, "off", 2)
+                + node(2, "last", 0, "off", 1)
+                + node(3, "again", -1, "off", 2)
+                + "</node_array>\n";
+        imd = imd.substring(0, start) + nodes + imd.substring(end);
+
+        byte[] nsbmd = ImdImporter.toNsbmd(imd, "tree");
+        Model model = new ModelSet(nsbmd).getModels().get(0);
+        assertThat(model.getNodeCount()).isEqualTo(4);
+        assertThat(ImdImporter.fromXml(imd).getNodeNames()).containsExactly("root", "mid", "last", "again");
+
+        // Slot 0 is the parent. Slot 1 is the first child, which also stores. The last child frees
+        // slot 0, so the following root reuses it instead of allocating slot 2.
+        assertThat(nsbmd).containsSequence((byte) 0x26, (byte) 0, (byte) 0, (byte) 0, (byte) 0);
+        assertThat(nsbmd).containsSequence((byte) 0x26, (byte) 1, (byte) 0, (byte) 0, (byte) 1);
+        assertThat(nsbmd).containsSequence((byte) 0x26, (byte) 3, (byte) 3, (byte) 0, (byte) 0);
+        assertThat(nsbmd).containsSequence((byte) 0x08, (byte) 0);
+        // Second use of material 0 is restored (0x44), not stored again.
+        assertThat(nsbmd).containsSequence((byte) 0x44, (byte) 0, (byte) 0x05, (byte) 0);
+        // Scale 2,3,4 and the stored reciprocals, as fx32.
+        assertThat(nsbmd).containsSequence(
+                (byte) 0x00, (byte) 0x20, (byte) 0x00, (byte) 0x00,
+                (byte) 0x00, (byte) 0x30, (byte) 0x00, (byte) 0x00,
+                (byte) 0x00, (byte) 0x40, (byte) 0x00, (byte) 0x00,
+                (byte) 0x00, (byte) 0x08, (byte) 0x00, (byte) 0x00,
+                (byte) 0x55, (byte) 0x05, (byte) 0x00, (byte) 0x00,
+                (byte) 0x00, (byte) 0x04, (byte) 0x00, (byte) 0x00);
     }
 }

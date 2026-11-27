@@ -103,9 +103,9 @@ public class Model
         int matCount = model.readByte();
         int shapeCountHeader = model.readByte();
         model.setPosition(info + 8);
-        posScale = model.readUInt32() / 4096.0;
+        posScale = model.readFx32();
         model.setPosition(info + 12);
-        invPosScale = model.readInt() / 4096.0;
+        invPosScale = model.readFx32();
         model.setPosition(info + 1);
         maya = model.readByte() == 1;
 
@@ -257,7 +257,7 @@ public class Model
     {
         // The box scale is fx32. The corners are fx16 in that scale.
         reader.setPosition(info + 0x24);
-        double boxScale = reader.readUInt32() / 4096.0;
+        double boxScale = reader.readFx32();
 
         // Minimum corner.
         reader.setPosition(info + 0x18);
@@ -1250,7 +1250,7 @@ public class Model
 
         double[] m = new double[12];
         for (int i = 0; i < 12; i++)
-            m[i] = model.readInt() / 4096.0;
+            m[i] = model.readFx32();
 
         return m;
     }
@@ -1371,6 +1371,14 @@ public class Model
     public int getExpectedVertexCount()
     {
         return expectedVertexCount;
+    }
+
+    /**
+     * @return the number of triangles the model header declares
+     */
+    public int getExpectedTriangleCount()
+    {
+        return expectedTriangleCount;
     }
 
     /** @return the total number of vertices decoded across all meshes */

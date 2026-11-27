@@ -22,7 +22,6 @@ package io.github.turtleisaac.nds4j.g3d;
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
@@ -209,11 +208,12 @@ public final class ModelBuilder
         List<String> texNames = new java.util.ArrayList<>();
         List<BufferedImage> textures = new java.util.ArrayList<>();
         int totalV = 0, totalT = 0;
-        ByteArrayOutputStream sbc = new ByteArrayOutputStream();
-        sbc.write(0x06);
-        sbc.write(0);
-        sbc.write(0);
-        sbc.write(0); // NODEDESC(0,0,0)
+        MemBuf sbcBuf = MemBuf.create();
+        MemBuf.MemBufWriter sbc = sbcBuf.writer();
+        sbc.writeByte((byte) 0x06);
+        sbc.writeByte((byte) 0);
+        sbc.writeByte((byte) 0);
+        sbc.writeByte((byte) 0); // NODEDESC(0,0,0)
         for (int i = 0; i < parts.size(); i++)
         {
             Part p = parts.get(i);
@@ -227,17 +227,17 @@ public final class ModelBuilder
             textures.add(p.texture);
             totalT += p.triangles.length / 3;
             totalV += p.triangles.length; // 3 emitted vertices per triangle
-            sbc.write(0x04);
-            sbc.write(i); // MAT(i)
-            sbc.write(0x05);
-            sbc.write(i); // SHP(i)
+            sbc.writeByte((byte) 0x04);
+            sbc.writeByte((byte) i); // MAT(i)
+            sbc.writeByte((byte) 0x05);
+            sbc.writeByte((byte) i); // SHP(i)
         }
-        sbc.write(0x01); // RET
+        sbc.writeByte((byte) 0x01); // RET
 
         byte[] tex0 = buildMultiDirectTex0(texNames, textures);
         byte[] matSet = buildMultiMaterialSet(matNames, texNames, textures);
         byte[] mdl0 = assembleMdl0(modelName, dls, shapeNames, parts.size(), totalV, totalT,
-                posScale, min, max, boxPosScale, matSet, sbc.toByteArray());
+                posScale, min, max, boxPosScale, matSet, sbcBuf.reader().getBuffer());
         return G3dFile.assembleContainer("BMD0", 1, mdl0, tex0);
     }
 
@@ -422,20 +422,20 @@ public final class ModelBuilder
     // section; each texture's texImageParam data-offset points at its texels (in 8-byte units).
     private static byte[] buildMultiDirectTex0(List<String> names, List<BufferedImage> imgs)
     {
-        ByteArrayOutputStream texData = new ByteArrayOutputStream();
+        MemBuf texBuf = MemBuf.create();
+        MemBuf.MemBufWriter texData = texBuf.writer();
         List<byte[]> records = new java.util.ArrayList<>();
         for (int i = 0; i < imgs.size(); i++)
         {
             BufferedImage img = imgs.get(i);
             int w = img.getWidth(), h = img.getHeight();
-            int dataOfsUnits = texData.size() >> 3; // 8-byte units within the data section
+            int dataOfsUnits = texData.getPosition() >> 3; // 8-byte units within the data section
             for (int p = 0; p < w * h; p++)
             {
                 int argb = img.getRGB(p % w, p / w);
                 int r = ((argb >> 16) & 0xFF) >> 3, g = ((argb >> 8) & 0xFF) >> 3, b = (argb & 0xFF) >> 3;
                 int v = r | (g << 5) | (b << 10) | 0x8000;
-                texData.write(v & 0xFF);
-                texData.write((v >> 8) & 0xFF);
+                texData.writeShort((short) v);
             }
             int widthSel = Integer.numberOfTrailingZeros(w / 8);
             int heightSel = Integer.numberOfTrailingZeros(h / 8);
@@ -445,7 +445,7 @@ public final class ModelBuilder
             MemBuf.putUInt32(rec, 0, texImageParam);
             records.add(rec);
         }
-        byte[] data = texData.toByteArray();
+        byte[] data = texBuf.reader().getBuffer();
         byte[] texDict = serialize(G3dDictionary.build(names, records, 8));
         byte[] plttDict = serialize(G3dDictionary.build(Collections.emptyList(), Collections.emptyList(), 4));
 
@@ -566,6 +566,6 @@ public final class ModelBuilder
 
     private static int fx12(double v)
     {
-        return (int) Math.round(v * 4096) & 0xFFFF;
+        return MemBuf.fx16Bits(v);
     }
 }

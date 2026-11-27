@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -119,13 +118,10 @@ public class TextureSrtAnimationSet extends G3dFile
     private byte[] srtFile(List<String> names, byte[][] blobs)
     {
         int origin = 8 + serialize(G3dDictionary.build(names, placeholders(names.size(), 4), 4)).length;
-        ByteArrayOutputStream srt0 = new ByteArrayOutputStream();
-        srt0.writeBytes("SRT0".getBytes(StandardCharsets.US_ASCII));
-        srt0.writeBytes(MemBuf.le32(srtEnd(blobs, origin)));
-        srt0.writeBytes(serialize(G3dDictionary.build(names, srtRecords(blobs, origin), 4)));
-        writeSrtPayloads(srt0, blobs);
+        byte[] dictionary = serialize(G3dDictionary.build(names, srtRecords(blobs, origin), 4));
+        byte[] srt0 = NsbBlock.block("SRT0", srtEnd(blobs, origin), dictionary, blobs);
 
-        return G3dFile.assembleContainer("BTA0", version, srt0.toByteArray());
+        return G3dFile.assembleContainer("BTA0", version, srt0);
     }
 
     /**
@@ -168,22 +164,6 @@ public class TextureSrtAnimationSet extends G3dFile
         }
 
         return cursor;
-    }
-
-    /**
-     * @param out the SRT0 block
-     * @param blobs animation payloads
-     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
-     */
-    private static void writeSrtPayloads(ByteArrayOutputStream out, byte[][] blobs)
-    {
-        int index = 0;
-
-        while (index < blobs.length)
-        {
-            out.writeBytes(blobs[index]);
-            index++;
-        }
     }
 
     /**
@@ -334,7 +314,8 @@ public class TextureSrtAnimationSet extends G3dFile
          */
         private SrtPool poolChannels(int base)
         {
-            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            MemBuf pooled = MemBuf.create();
+            MemBuf.MemBufWriter data = pooled.writer();
             long[][] params = new long[materials.size()][];
             int index = 0;
 
@@ -344,7 +325,7 @@ public class TextureSrtAnimationSet extends G3dFile
                 index++;
             }
 
-            return new SrtPool(data.toByteArray(), params);
+            return new SrtPool(pooled.reader().getBuffer(), params);
         }
 
         /**
@@ -354,7 +335,7 @@ public class TextureSrtAnimationSet extends G3dFile
          * @return that material's parameter words, with variable offsets rewritten
          * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
          */
-        private long[] appendMaterial(ByteArrayOutputStream data, int base, int index)
+        private long[] appendMaterial(MemBuf.MemBufWriter data, int base, int index)
         {
             long[] param = materials.get(index).rawParam;
             long[] next = param.clone();
@@ -399,13 +380,13 @@ public class TextureSrtAnimationSet extends G3dFile
          * @param firstVar the first variable channel
          * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
          */
-        private static void writeLeading(ByteArrayOutputStream data, long[] param, int firstVar)
+        private static void writeLeading(MemBuf.MemBufWriter data, long[] param, int firstVar)
         {
             int channel = 0;
 
             while (channel < firstVar)
             {
-                data.writeBytes(constWord(param, channel));
+                data.write(constWord(param, channel));
                 channel++;
             }
         }
@@ -419,7 +400,7 @@ public class TextureSrtAnimationSet extends G3dFile
          * @param firstVar the first variable channel
          * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
          */
-        private void writeTail(ByteArrayOutputStream data, int base, int index, long[] param, long[] next, int firstVar)
+        private void writeTail(MemBuf.MemBufWriter data, int base, int index, long[] param, long[] next, int firstVar)
         {
             int channel = firstVar;
 
@@ -439,17 +420,17 @@ public class TextureSrtAnimationSet extends G3dFile
          * @param channel which channel
          * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
          */
-        private void writeChannel(ByteArrayOutputStream data, int base, int index, long[] param, long[] next, int channel)
+        private void writeChannel(MemBuf.MemBufWriter data, int base, int index, long[] param, long[] next, int channel)
         {
             if (isConst(param[channel * 2]))
             {
-                data.writeBytes(constWord(param, channel));
+                data.write(constWord(param, channel));
 
                 return;
             }
 
-            next[channel * 2 + 1] = base + data.size();
-            data.writeBytes(materials.get(index).rawArray[channel]);
+            next[channel * 2 + 1] = base + data.getPosition();
+            data.write(materials.get(index).rawArray[channel]);
             padWord(data);
         }
 
@@ -474,10 +455,10 @@ public class TextureSrtAnimationSet extends G3dFile
          * @param data the channel pool
          * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
          */
-        private static void padWord(ByteArrayOutputStream data)
+        private static void padWord(MemBuf.MemBufWriter data)
         {
-            while (data.size() % 4 != 0)
-                data.write(0);
+            int extra = (4 - (data.getPosition() & 3)) & 3;
+            data.writeByteNumTimes((byte) 0, extra);
         }
 
         /**

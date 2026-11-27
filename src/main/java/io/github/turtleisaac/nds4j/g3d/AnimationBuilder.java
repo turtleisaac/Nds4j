@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -147,7 +146,8 @@ public final class AnimationBuilder
         int dictLen = serialize(G3dDictionary.build(names, dummy, 40)).length;
         int arrayBase = 8 + dictLen; // animation-member-relative offset where keyframe data begins
 
-        ByteArrayOutputStream arrays = new ByteArrayOutputStream();
+        MemBuf pooled = MemBuf.create();
+        MemBuf.MemBufWriter arrays = pooled.writer();
         List<byte[]> records = new ArrayList<>();
         for (MaterialAnim m : materials)
         {
@@ -161,7 +161,7 @@ public final class AnimationBuilder
         }
 
         byte[] dict = serialize(G3dDictionary.build(names, records, 40));
-        byte[] arrayBytes = arrays.toByteArray();
+        byte[] arrayBytes = pooled.reader().getBuffer();
 
         byte[] out = new byte[8 + dict.length + arrayBytes.length];
         out[0] = 'T';
@@ -175,7 +175,7 @@ public final class AnimationBuilder
     // Encodes a scale or translation channel into a record's (info, off) pair at recOfs, appending keyframe
     // bytes (fx16) to `arrays` for the variable case and returning the running array cursor via arrayBase.
     private static void encodeScaleTrans(byte[] rec, int recOfs, Channel ch, int frameCount,
-            int arrayBase, ByteArrayOutputStream arrays)
+            int arrayBase, MemBuf.MemBufWriter arrays)
     {
         if (ch.constant)
         {
@@ -183,17 +183,17 @@ public final class AnimationBuilder
             MemBuf.putUInt32(rec, recOfs + 4, fx16(ch.value) & 0xFFFF);
             return;
         }
-        int off = arrayBase + arrays.size();
+        int off = arrayBase + arrays.getPosition();
         int count = valueCount(frameCount, ch.step);
         for (int i = 0; i < count; i++)
-            MemBuf.writeUInt16(arrays, fx16(sampleKey(ch, i)));
+            arrays.writeShort((short) fx16(sampleKey(ch, i)));
         MemBuf.putUInt32(rec, recOfs, ELEM_FX16 | stepBits(ch.step));
         MemBuf.putUInt32(rec, recOfs + 4, off);
     }
 
     // Encodes the rotation channel as (sin, cos) fx16 pairs; degrees in, packed pair out.
     private static void encodeRotation(byte[] rec, int recOfs, Channel ch, int frameCount,
-            int arrayBase, ByteArrayOutputStream arrays)
+            int arrayBase, MemBuf.MemBufWriter arrays)
     {
         if (ch.constant)
         {
@@ -203,13 +203,13 @@ public final class AnimationBuilder
             MemBuf.putUInt32(rec, recOfs + 4, ((cos & 0xFFFF) << 16) | (sin & 0xFFFF));
             return;
         }
-        int off = arrayBase + arrays.size();
+        int off = arrayBase + arrays.getPosition();
         int count = valueCount(frameCount, ch.step);
         for (int i = 0; i < count; i++)
         {
             double rad = Math.toRadians(sampleKey(ch, i));
-            MemBuf.writeUInt16(arrays, fx16((float) Math.sin(rad)));
-            MemBuf.writeUInt16(arrays, fx16((float) Math.cos(rad)));
+            arrays.writeShort((short) fx16((float) Math.sin(rad)));
+            arrays.writeShort((short) fx16((float) Math.cos(rad)));
         }
         MemBuf.putUInt32(rec, recOfs, stepBits(ch.step));
         MemBuf.putUInt32(rec, recOfs + 4, off);

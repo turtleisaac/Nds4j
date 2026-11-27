@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * WAV round-trip (CI-safe) plus importing a WAV over a retail SWAR/SDAT (ROM-gated).
@@ -63,7 +64,8 @@ public class WavImportTest
     void pcm16EncodeDecode()
     {
         short[] pcm = new short[64];
-        for (int i = 0; i < pcm.length; i++) pcm[i] = (short) (i * 400 - 8000);
+        for (int i = 0; i < pcm.length; i++)
+            pcm[i] = (short) (i * 400 - 8000);
         Wave w = Wave.fromPcm(pcm, 16000, false, 0, Wave.PCM16);
         assertThat(w.getWaveType()).isEqualTo(Wave.PCM16);
         assertThat(w.getRawSampleRate()).isEqualTo(16000);
@@ -84,7 +86,8 @@ public class WavImportTest
         assertThat(got.length).isGreaterThanOrEqualTo(pcm.length - 1);
         long err = 0;
         int n = Math.min(pcm.length, got.length);
-        for (int i = 0; i < n; i++) err += Math.abs(pcm[i] - got[i]);
+        for (int i = 0; i < n; i++)
+            err += Math.abs(pcm[i] - got[i]);
         assertThat(err / n).as("mean absolute error").isLessThan(800);
     }
 
@@ -115,13 +118,18 @@ public class WavImportTest
             if (f != null && f.length >= 4 && magic(f).equals("SWAR"))
             {
                 WaveArchive swar = WaveArchive.fromBytes(f);
-                if (swar.getWaveCount() > 0) { arc = i; break; }
+                if (swar.getWaveCount() > 0)
+                {
+                    arc = i;
+                    break;
+                }
             }
         }
         assertThat(arc).isGreaterThanOrEqualTo(0);
 
         short[] pcm = new short[256];
-        for (int i = 0; i < pcm.length; i++) pcm[i] = (short) ((i % 32) * 800);
+        for (int i = 0; i < pcm.length; i++)
+            pcm[i] = (short) ((i % 32) * 800);
         byte[] wav = WavFile.mono16(pcm, 16000);
         sdat.importWav(arc, 0, wav);
 
@@ -131,12 +139,114 @@ public class WavImportTest
         assertThat(again.getFileFor(RecordType.WAVE_ARCHIVE, arc)).isEqualTo(sdat.getFileFor(RecordType.WAVE_ARCHIVE, arc));
     }
 
+    @Test
+    @DisplayName("unsigned 8-bit PCM is promoted to signed 16-bit")
+    void eightBitPromotes()
+    {
+        byte[] wav = wav8(new int[] { 128, 255, 0 });
+        WavFile.Pcm got = WavFile.read(wav);
+
+        assertThat(got.bitsPerSample).isEqualTo(8);
+        assertThat(got.samples).containsExactly((short) 0, (short) 32512, (short) -32768);
+    }
+
+    @Test
+    @DisplayName("a WAV that is not PCM, or is truncated, is rejected")
+    void rejectsBadWav()
+    {
+        assertThatThrownBy(() -> WavFile.read(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WavFile.read(new byte[4])).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WavFile.read(riff("JUNK", new byte[0]))).isInstanceOf(IllegalArgumentException.class);
+
+        byte[] noFmt = riff("WAVE", chunk("data", new byte[] { 0, 0 }));
+        assertThatThrownBy(() -> WavFile.read(noFmt)).hasMessageContaining("fmt");
+
+        byte[] noData = riff("WAVE", chunk("fmt ", fmt(1, 1, 8000, 16)));
+        assertThatThrownBy(() -> WavFile.read(noData)).hasMessageContaining("data");
+
+        byte[] floatFmt = riff("WAVE", chunk("fmt ", fmt(3, 1, 8000, 32)), chunk("data", new byte[8]));
+        assertThatThrownBy(() -> WavFile.read(floatFmt)).hasMessageContaining("not PCM");
+
+        byte[] wide = riff("WAVE", chunk("fmt ", fmt(1, 1, 8000, 24)), chunk("data", new byte[6]));
+        assertThatThrownBy(() -> WavFile.read(wide)).hasMessageContaining("bits");
+
+        byte[] silent = riff("WAVE", chunk("fmt ", fmt(1, 0, 8000, 16)), chunk("data", new byte[0]));
+        assertThatThrownBy(() -> WavFile.read(silent)).hasMessageContaining("channels");
+
+        byte[] untimed = riff("WAVE", chunk("fmt ", fmt(1, 1, 0, 16)), chunk("data", new byte[2]));
+        assertThatThrownBy(() -> WavFile.read(untimed)).hasMessageContaining("sample rate");
+
+        byte[] shortFmt = riff("WAVE", chunk("fmt ", new byte[8]), chunk("data", new byte[2]));
+        assertThatThrownBy(() -> WavFile.read(shortFmt)).hasMessageContaining("too short");
+
+        io.github.turtleisaac.nds4j.framework.MemBuf lying = io.github.turtleisaac.nds4j.framework.MemBuf.create();
+        lying.writer().write("RIFF".getBytes(StandardCharsets.US_ASCII));
+        lying.writer().writeInt(12);
+        lying.writer().write("WAVE".getBytes(StandardCharsets.US_ASCII));
+        lying.writer().write("fmt ".getBytes(StandardCharsets.US_ASCII));
+        lying.writer().writeInt(80);
+        assertThatThrownBy(() -> WavFile.read(lying.reader().getBuffer())).hasMessageContaining("overruns");
+    }
+
+    private static byte[] wav8(int[] samples)
+    {
+        byte[] data = new byte[samples.length];
+        for (int i = 0; i < samples.length; i++)
+            data[i] = (byte) samples[i];
+
+        return riff("WAVE", chunk("fmt ", fmt(1, 1, 8000, 8)), chunk("data", data));
+    }
+
+    private static byte[] fmt(int format, int channels, int rate, int bits)
+    {
+        io.github.turtleisaac.nds4j.framework.MemBuf buf = io.github.turtleisaac.nds4j.framework.MemBuf.create();
+        io.github.turtleisaac.nds4j.framework.MemBuf.MemBufWriter out = buf.writer();
+        out.writeShort((short) format);
+        out.writeShort((short) channels);
+        out.writeInt(rate);
+        out.writeInt(rate * channels * Math.max(bits, 8) / 8);
+        out.writeShort((short) (channels * Math.max(bits, 8) / 8));
+        out.writeShort((short) bits);
+
+        return buf.reader().getBuffer();
+    }
+
+    private static byte[] chunk(String id, byte[] body)
+    {
+        io.github.turtleisaac.nds4j.framework.MemBuf buf = io.github.turtleisaac.nds4j.framework.MemBuf.create();
+        io.github.turtleisaac.nds4j.framework.MemBuf.MemBufWriter out = buf.writer();
+        out.write(id.getBytes(StandardCharsets.US_ASCII));
+        out.writeInt(body.length);
+        out.write(body);
+        if ((body.length & 1) == 1)
+            out.writeByte((byte) 0);
+
+        return buf.reader().getBuffer();
+    }
+
+    private static byte[] riff(String kind, byte[]... chunks)
+    {
+        io.github.turtleisaac.nds4j.framework.MemBuf body = io.github.turtleisaac.nds4j.framework.MemBuf.create();
+        body.writer().write(kind.getBytes(StandardCharsets.US_ASCII));
+        for (byte[] chunk : chunks)
+            body.writer().write(chunk);
+        byte[] payload = body.reader().getBuffer();
+
+        io.github.turtleisaac.nds4j.framework.MemBuf file = io.github.turtleisaac.nds4j.framework.MemBuf.create();
+        file.writer().write("RIFF".getBytes(StandardCharsets.US_ASCII));
+        file.writer().writeInt(payload.length);
+        file.writer().write(payload);
+
+        return file.reader().getBuffer();
+    }
+
     private static SoundArchive firstSdat(NintendoDsRom rom)
     {
         for (int i = 0; i < rom.getNumFiles(); i++)
         {
             byte[] f = rom.getFile(i);
-            if (magic(f).equals("SDAT")) return SoundArchive.fromBytes(f);
+            if (magic(f).equals("SDAT"))
+                return SoundArchive.fromBytes(f);
         }
         throw new AssertionError("no SDAT in ROM");
     }

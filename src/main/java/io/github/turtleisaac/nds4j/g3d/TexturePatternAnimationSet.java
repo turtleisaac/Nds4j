@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -158,24 +157,9 @@ public class TexturePatternAnimationSet extends G3dFile
     {
         int dictSize = serialize(G3dDictionary.build(names, placeholders(names.size(), 4), 4)).length;
         int origin = 8 + dictSize;
-        ByteArrayOutputStream pat0 = new ByteArrayOutputStream();
-        pat0.writeBytes("PAT0".getBytes(StandardCharsets.US_ASCII));
-        pat0.writeBytes(MemBuf.le32(NsbBlock.end(blobs, origin)));
-        pat0.writeBytes(serialize(G3dDictionary.build(names, NsbBlock.offsets(blobs, origin), 4)));
-        appendPayloads(pat0, blobs);
+        byte[] dictionary = serialize(G3dDictionary.build(names, NsbBlock.offsets(blobs, origin), 4));
 
-        return pat0.toByteArray();
-    }
-
-    /**
-     * @param out the PAT0 block
-     * @param blobs animation payloads
-     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
-     */
-    private static void appendPayloads(ByteArrayOutputStream out, byte[][] blobs)
-    {
-        for (byte[] blob : blobs)
-            out.writeBytes(blob);
+        return NsbBlock.block("PAT0", NsbBlock.end(blobs, origin), dictionary, blobs);
     }
 
     private static List<byte[]> placeholders(int n, int recSize)

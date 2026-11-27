@@ -21,14 +21,15 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -428,11 +429,13 @@ public final class ImdImporter
             recs.add(MemBuf.le32(cursor));
             cursor += structs[i].length;
         }
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        MemBuf buf = MemBuf.create();
+        MemBuf.MemBufWriter out = buf.writer();
+        out.write(serialize(G3dDictionary.build(names, recs, 4)));
         for (byte[] s : structs)
-            out.writeBytes(s);
-        return out.toByteArray();
+            out.write(s);
+
+        return buf.reader().getBuffer();
     }
 
     // --- node local matrix (NNS_G3dResNodeData), the inverse of Model.parseNodeLocals, byte-identical to
@@ -587,14 +590,15 @@ public final class ImdImporter
      */
     private static byte[] nodeBytes(Node nd, int flags, NodeRotation rotation, boolean omitT, boolean omitR, boolean omitS)
     {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        MemBuf.writeUInt16(out, flags);
-        MemBuf.writeUInt16(out, fx(rotation.m00, 12) & 0xFFFF);
+        MemBuf buf = MemBuf.create();
+        MemBuf.MemBufWriter out = buf.writer();
+        out.writeShort((short) flags);
+        out.writeShort((short) (fx(rotation.m00, 12) & 0xFFFF));
         writeTranslation(out, nd, omitT);
         writeRotation(out, rotation, omitR);
         writeScale(out, nd, omitS);
 
-        return out.toByteArray();
+        return buf.reader().getBuffer();
     }
 
     /**
@@ -603,7 +607,7 @@ public final class ImdImporter
      * @param omit whether translation is omitted
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writeTranslation(ByteArrayOutputStream out, Node nd, boolean omit)
+    private static void writeTranslation(MemBuf.MemBufWriter out, Node nd, boolean omit)
     {
         if (omit)
             return;
@@ -617,7 +621,7 @@ public final class ImdImporter
      * @param omit whether rotation is omitted
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writeRotation(ByteArrayOutputStream out, NodeRotation rotation, boolean omit)
+    private static void writeRotation(MemBuf.MemBufWriter out, NodeRotation rotation, boolean omit)
     {
         if (omit)
             return;
@@ -630,7 +634,7 @@ public final class ImdImporter
      * @param rotation the stored rotation
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writeRotationBody(ByteArrayOutputStream out, NodeRotation rotation)
+    private static void writeRotationBody(MemBuf.MemBufWriter out, NodeRotation rotation)
     {
         if (rotation.pivot != null)
         {
@@ -647,14 +651,14 @@ public final class ImdImporter
      * @param rotation a pivot-compressed rotation
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writePivotPair(ByteArrayOutputStream out, NodeRotation rotation)
+    private static void writePivotPair(MemBuf.MemBufWriter out, NodeRotation rotation)
     {
         int row = rotation.pivot[0];
         int col = rotation.pivot[1];
         int[] rows = other(row);
         int[] cols = other(col);
-        MemBuf.writeUInt16(out, fx(rotation.mt[rows[0]][cols[0]], 12) & 0xFFFF);
-        MemBuf.writeUInt16(out, fx(rotation.mt[rows[0]][cols[1]], 12) & 0xFFFF);
+        out.writeShort((short) (fx(rotation.mt[rows[0]][cols[0]], 12) & 0xFFFF));
+        out.writeShort((short) (fx(rotation.mt[rows[0]][cols[1]], 12) & 0xFFFF));
     }
 
     /**
@@ -662,12 +666,12 @@ public final class ImdImporter
      * @param mt the transposed rotation
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writeFullRotation(ByteArrayOutputStream out, double[][] mt)
+    private static void writeFullRotation(MemBuf.MemBufWriter out, double[][] mt)
     {
         int[][] order = { { 0, 1 }, { 0, 2 }, { 1, 0 }, { 1, 1 }, { 1, 2 }, { 2, 0 }, { 2, 1 }, { 2, 2 } };
 
         for (int[] cell : order)
-            MemBuf.writeUInt16(out, fx(mt[cell[0]][cell[1]], 12) & 0xFFFF);
+            out.writeShort((short) (fx(mt[cell[0]][cell[1]], 12) & 0xFFFF));
     }
 
     /**
@@ -676,7 +680,7 @@ public final class ImdImporter
      * @param omit whether scale is omitted
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResNodeData"
      */
-    private static void writeScale(ByteArrayOutputStream out, Node nd, boolean omit)
+    private static void writeScale(MemBuf.MemBufWriter out, Node nd, boolean omit)
     {
         if (omit)
             return;
@@ -700,10 +704,10 @@ public final class ImdImporter
      * @param values three fx32 components
      * @see "NitroSDK include/nitro/fx/fx.h"
      */
-    private static void writeFx32(ByteArrayOutputStream out, double[] values)
+    private static void writeFx32(MemBuf.MemBufWriter out, double[] values)
     {
         for (double value : values)
-            MemBuf.writeUInt32(out, fx(value, 12) & 0xFFFFFFFFL);
+            out.writeUInt32(fx(value, 12) & 0xFFFFFFFFL);
     }
 
     /**
@@ -790,89 +794,331 @@ public final class ImdImporter
     //     outFirstUnused[0] receives the matrix-stack high-water mark (the model header's firstUnusedMtxStackId). ---
     private byte[] generateSbc(List<Node> nodes, boolean magnified, int[] outFirstUnused)
     {
-        int N = nodes.size();
-        List<List<Integer>> children = new ArrayList<>();
-        for (int i = 0; i < N; i++)
-            children.add(new ArrayList<>());
-        for (int i = 0; i < N; i++)
-        {
-            int p = nodes.get(i).parent;
-            if (p != i && p >= 0 && p < N)
-                children.get(p).add(i);
-        }
-        int[] slotOf = new int[N];
+        List<List<Integer>> children = childLists(nodes);
+        int[] slotOf = new int[nodes.size()];
         java.util.Arrays.fill(slotOf, -1);
         boolean[] slotUsed = new boolean[64];
-        int maxSlot = -1;
-        // material stack: a material used by more than one draw is stored on first use, restored on later uses
-        java.util.Map<Integer, Integer> matUse = new java.util.HashMap<>();
-        for (Node nd : nodes)
-            for (int[] dr : nd.draw)
-                matUse.merge(dr[0], 1, Integer::sum);
-        java.util.Set<Integer> matSeen = new java.util.HashSet<>();
-        ByteArrayOutputStream o = new ByteArrayOutputStream();
-        int cur = -1;
-        for (int n = 0; n < N; n++)
-        {
-            Node nd = nodes.get(n);
-            int p = nd.parent;
-            int restore = (p != n && cur != p) ? slotOf[p] : -1;
-            int store = -1;
-            if (!children.get(n).isEmpty() || nd.draw.size() > 1)
-            {
-                store = lowestFree(slotUsed);
-                slotUsed[store] = true;
-                slotOf[n] = store;
-                if (store > maxSlot)
-                    maxSlot = store;
-            }
-            o.write(0x06 | (store >= 0 ? 0x20 : 0) | (restore >= 0 ? 0x40 : 0));
-            o.write(n);
-            o.write(p);
-            o.write(0);
-            if (store >= 0)
-                o.write(store);
-            if (restore >= 0)
-                o.write(restore);
-            cur = n;
-            if (nd.draws)
-            {
-                o.write(0x02);
-                o.write(n);
-                o.write(nd.vis); // NODE(node, visibility)
-                if (nd.bb == 1)
-                {
-                    o.write(0x07);
-                    o.write(n);
-                } // BB (screen-facing)
-                else if (nd.bb == 2)
-                {
-                    o.write(0x08);
-                    o.write(n);
-                } // BBY (y-axis billboard)
-                if (magnified)
-                    o.write(0x0b); // POSSCALE (begin)
-                for (int[] dr : nd.draw)
-                {
-                    int matFlag = matUse.getOrDefault(dr[0], 1) > 1 ? (matSeen.add(dr[0]) ? 0x20 : 0x40) : 0;
-                    o.write(0x04 | matFlag);
-                    o.write(dr[0]); // MAT(materialIdx)[+store/restore]
-                    o.write(0x05);
-                    o.write(dr[1]); // SHP(polygonIdx)
-                }
-                if (magnified)
-                    o.write(0x2b); // POSSCALE | 0x20 (end)
-            }
-            // free every slot whose owner's last child is this node
-            for (int q = 0; q < N; q++)
-                if (!children.get(q).isEmpty() && children.get(q).get(children.get(q).size() - 1) == n && slotOf[q] >= 0)
-                    slotUsed[slotOf[q]] = false;
-        }
-        o.write(0x01); // RET
-        while (o.size() % 4 != 0)
-            o.write(0);
+        MemBuf buf = MemBuf.create();
+        int maxSlot = writeSbc(nodes, magnified, children, slotOf, slotUsed, materialUses(nodes), buf.writer());
+        padSbc(buf.writer());
         outFirstUnused[0] = maxSlot + 1;
-        return o.toByteArray();
+
+        return buf.reader().getBuffer();
+    }
+
+    /**
+     * @param nodes the node tree
+     * @return each node's children, in node order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static List<List<Integer>> childLists(List<Node> nodes)
+    {
+        List<List<Integer>> children = new ArrayList<>();
+        int index = 0;
+
+        while (index < nodes.size())
+        {
+            children.add(new ArrayList<>());
+            index++;
+        }
+
+        linkChildren(nodes, children);
+
+        return children;
+    }
+
+    /**
+     * @param nodes the node tree
+     * @param children the lists to fill
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static void linkChildren(List<Node> nodes, List<List<Integer>> children)
+    {
+        for (int index = 0; index < nodes.size(); index++)
+            linkOne(nodes, children, index);
+    }
+
+    /**
+     * @param nodes the node tree
+     * @param children the lists to fill
+     * @param index the child node
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static void linkOne(List<Node> nodes, List<List<Integer>> children, int index)
+    {
+        int parent = nodes.get(index).parent;
+
+        if (parent == index || parent < 0 || parent >= nodes.size())
+            return;
+
+        children.get(parent).add(index);
+    }
+
+    /**
+     * @param nodes the node tree
+     * @return how many draws use each material
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static Map<Integer, Integer> materialUses(List<Node> nodes)
+    {
+        Map<Integer, Integer> uses = new java.util.HashMap<>();
+
+        for (Node node : nodes)
+            countDraws(uses, node);
+
+        return uses;
+    }
+
+    /**
+     * @param uses the material counts
+     * @param node one node
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static void countDraws(Map<Integer, Integer> uses, Node node)
+    {
+        for (int[] draw : node.draw)
+            uses.merge(draw[0], 1, Integer::sum);
+    }
+
+    /**
+     * @return the highest matrix-stack slot stored, or -1 when none was
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int writeSbc(List<Node> nodes, boolean magnified, List<List<Integer>> children, int[] slotOf,
+            boolean[] slotUsed, Map<Integer, Integer> matUse, MemBuf.MemBufWriter out)
+    {
+        Set<Integer> matSeen = new HashSet<>();
+        int cur = -1;
+        int maxSlot = -1;
+
+        for (int n = 0; n < nodes.size(); n++)
+        {
+            maxSlot = emitNode(nodes, n, magnified, children, slotOf, slotUsed, matUse, matSeen, out, cur, maxSlot);
+            cur = n;
+        }
+
+        out.writeByte((byte) 0x01);
+
+        return maxSlot;
+    }
+
+    /**
+     * @return the highest slot stored so far
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int emitNode(List<Node> nodes, int n, boolean magnified, List<List<Integer>> children, int[] slotOf,
+            boolean[] slotUsed, Map<Integer, Integer> matUse, Set<Integer> matSeen, MemBuf.MemBufWriter out, int cur, int maxSlot)
+    {
+        Node node = nodes.get(n);
+        int restore = restoreSlot(node, n, cur, slotOf);
+        int store = storeSlot(children.get(n), node, n, slotOf, slotUsed);
+        writeDesc(out, n, node.parent, store, restore);
+        writeDrawBlock(out, node, n, magnified, matUse, matSeen);
+        releaseSlots(children, slotOf, slotUsed, n);
+
+        return raiseMax(maxSlot, store);
+    }
+
+    /**
+     * @return the parent's stored slot when this node must restore it, otherwise -1
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int restoreSlot(Node node, int n, int cur, int[] slotOf)
+    {
+        if (node.parent == n || cur == node.parent)
+            return -1;
+
+        return slotOf[node.parent];
+    }
+
+    /**
+     * @return the slot this node stores into, or -1 when its matrix is not reused
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int storeSlot(List<Integer> kids, Node node, int n, int[] slotOf, boolean[] slotUsed)
+    {
+        if (kids.isEmpty() && node.draw.size() <= 1)
+            return -1;
+
+        int store = lowestFree(slotUsed);
+        slotUsed[store] = true;
+        slotOf[n] = store;
+
+        return store;
+    }
+
+    /**
+     * @return the greater of the previous high-water mark and {@code store}
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int raiseMax(int maxSlot, int store)
+    {
+        if (store > maxSlot)
+            return store;
+
+        return maxSlot;
+    }
+
+    /**
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static void writeDesc(MemBuf.MemBufWriter out, int n, int parent, int store, int restore)
+    {
+        int flags = 0x06 | flagBit(store, 0x20) | flagBit(restore, 0x40);
+        out.writeByte((byte) flags);
+        out.writeByte((byte) n);
+        out.writeByte((byte) parent);
+        out.writeByte((byte) 0);
+        writeOptional(out, store);
+        writeOptional(out, restore);
+    }
+
+    /**
+     * @param value a stack slot, or -1 when the bit is clear
+     * @param bit the NODEDESC bit
+     * @return {@code bit} when a slot is present
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int flagBit(int value, int bit)
+    {
+        if (value < 0)
+            return 0;
+
+        return bit;
+    }
+
+    /** @param value a stack slot, or -1 when nothing is written */
+    private static void writeOptional(MemBuf.MemBufWriter out, int value)
+    {
+        if (value < 0)
+            return;
+
+        out.writeByte((byte) value);
+    }
+
+    /**
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static void writeDrawBlock(MemBuf.MemBufWriter out, Node node, int n, boolean magnified,
+            Map<Integer, Integer> matUse, Set<Integer> matSeen)
+    {
+        if (!node.draws)
+            return;
+
+        out.writeByte((byte) 0x02);
+        out.writeByte((byte) n);
+        out.writeByte((byte) node.vis);
+        writeBillboard(out, node, n);
+        writePosScale(out, magnified, 0x0b);
+        writeDraws(out, node, matUse, matSeen);
+        writePosScale(out, magnified, 0x2b);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writeBillboard(MemBuf.MemBufWriter out, Node node, int n)
+    {
+        if (node.bb == 1)
+        {
+            writePair(out, 0x07, n);
+
+            return;
+        }
+
+        writeYBillboard(out, node, n);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writeYBillboard(MemBuf.MemBufWriter out, Node node, int n)
+    {
+        if (node.bb != 2)
+            return;
+
+        writePair(out, 0x08, n);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writePair(MemBuf.MemBufWriter out, int opcode, int n)
+    {
+        out.writeByte((byte) opcode);
+        out.writeByte((byte) n);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writePosScale(MemBuf.MemBufWriter out, boolean magnified, int opcode)
+    {
+        if (!magnified)
+            return;
+
+        out.writeByte((byte) opcode);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writeDraws(MemBuf.MemBufWriter out, Node node, Map<Integer, Integer> matUse, Set<Integer> matSeen)
+    {
+        for (int[] draw : node.draw)
+            writeDraw(out, draw, matUse, matSeen);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void writeDraw(MemBuf.MemBufWriter out, int[] draw, Map<Integer, Integer> matUse, Set<Integer> matSeen)
+    {
+        out.writeByte((byte) (0x04 | materialFlag(matUse, matSeen, draw[0])));
+        out.writeByte((byte) draw[0]);
+        out.writeByte((byte) 0x05);
+        out.writeByte((byte) draw[1]);
+    }
+
+    /**
+     * @return 0x20 the first time a shared material is drawn, 0x40 after that, otherwise 0
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS"
+     */
+    private static int materialFlag(Map<Integer, Integer> matUse, Set<Integer> matSeen, int material)
+    {
+        if (matUse.getOrDefault(material, 1) <= 1)
+            return 0;
+
+        return seenFlag(matSeen, material);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static int seenFlag(Set<Integer> matSeen, int material)
+    {
+        if (matSeen.add(material))
+            return 0x20;
+
+        return 0x40;
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void releaseSlots(List<List<Integer>> children, int[] slotOf, boolean[] slotUsed, int n)
+    {
+        for (int q = 0; q < children.size(); q++)
+            releaseOne(children.get(q), slotOf, slotUsed, q, n);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void releaseOne(List<Integer> kids, int[] slotOf, boolean[] slotUsed, int q, int n)
+    {
+        if (kids.isEmpty() || kids.get(kids.size() - 1) != n)
+            return;
+
+        clearSlot(slotOf, slotUsed, q);
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void clearSlot(int[] slotOf, boolean[] slotUsed, int q)
+    {
+        if (slotOf[q] < 0)
+            return;
+
+        slotUsed[slotOf[q]] = false;
+    }
+
+    /** @see "NitroSDK include/nnsys/g3d/binres/res_struct_accessor.h NNS_G3dRS" */
+    private static void padSbc(MemBuf.MemBufWriter out)
+    {
+        while (out.getPosition() % 4 != 0)
+            out.writeByte((byte) 0);
     }
 
     private static int lowestFree(boolean[] used)
@@ -918,27 +1164,28 @@ public final class ImdImporter
         int ofsPltDict = ofsTexDict + texDictLen;
         int idxBase = ofsPltDict + pltDictLen;
         // index-list region: each tex group's material list, then each pltt group's, padded to /4
-        ByteArrayOutputStream idx = new ByteArrayOutputStream();
+        MemBuf idxBuf = MemBuf.create();
+        MemBuf.MemBufWriter idx = idxBuf.writer();
         List<byte[]> texRecs = new ArrayList<>();
 
         for (Map.Entry<String, List<Integer>> entry : byTex.entrySet())
         {
-            texRecs.add(MemBuf.le32(((idxBase + idx.size()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
+            texRecs.add(MemBuf.le32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
 
             for (int material : entry.getValue())
-                idx.write(material);
+                idx.writeByte((byte) material);
         }
 
         List<byte[]> pltRecs = new ArrayList<>();
 
         for (Map.Entry<String, List<Integer>> entry : byPlt.entrySet())
         {
-            pltRecs.add(MemBuf.le32(((idxBase + idx.size()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
+            pltRecs.add(MemBuf.le32(((idxBase + idx.getPosition()) & 0xFFFF) | ((long) entry.getValue().size() << 16)));
 
             for (int material : entry.getValue())
-                idx.write(material);
+                idx.writeByte((byte) material);
         }
-        int idxLen = (idx.size() + 3) & ~3;
+        int idxLen = (idx.getPosition() + 3) & ~3;
         int structsBase = idxBase + idxLen;
         int setLen = structsBase + 44 * n;
 
@@ -951,7 +1198,7 @@ public final class ImdImporter
         System.arraycopy(serialize(G3dDictionary.build(matNames, matRecs, 4)), 0, set, 4, matDictLen);
         System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byTex.keySet()), texRecs, 4)), 0, set, ofsTexDict, texDictLen);
         System.arraycopy(serialize(G3dDictionary.build(new ArrayList<>(byPlt.keySet()), pltRecs, 4)), 0, set, ofsPltDict, pltDictLen);
-        System.arraycopy(idx.toByteArray(), 0, set, idxBase, idx.size());
+        System.arraycopy(idxBuf.reader().getBuffer(), 0, set, idxBase, idx.getPosition());
         for (int i = 0; i < n; i++)
             System.arraycopy(matStructs.get(i), 0, set, structsBase + i * 44, 44);
         return set;

@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -288,59 +287,216 @@ public class MaterialColorAnimationSet extends G3dFile
         // sharing it; the arrays are emitted in ascending original-offset order.
         byte[] encodeBlob()
         {
-            List<String> matNames = new ArrayList<>();
-            for (MaterialColor m : materials)
-                matNames.add(m.name);
+            List<String> matNames = colorMaterialNames();
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 20), 20)).length;
             int base = 8 + dictSize;
-
-            // gather unique source offsets for color and alpha channels, mapping each to its raw bytes
-            TreeMap<Integer, byte[]> colorArrays = new TreeMap<>(), alphaArrays = new TreeMap<>();
-            for (MaterialColor m : materials)
-                for (int k = 0; k < 5; k++)
-                {
-                    if (m.rawArr[k] == null)
-                        continue;
-                    int off = (int) (m.rawCh[k] & 0xFFFF);
-                    (k < 4 ? colorArrays : alphaArrays).put(off, m.rawArr[k]);
-                }
-
-            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            TreeMap<Integer, byte[]> colorArrays = new TreeMap<>();
+            TreeMap<Integer, byte[]> alphaArrays = new TreeMap<>();
+            collectArrays(colorArrays, alphaArrays);
             java.util.Map<Integer, Integer> newOff = new java.util.HashMap<>();
-            for (java.util.Map.Entry<Integer, byte[]> e : colorArrays.entrySet())
-            {
-                newOff.put(e.getKey(), base + data.size());
-                data.writeBytes(e.getValue());
-            }
-            while (data.size() % 4 != 0)
-                data.write(0);
-            for (java.util.Map.Entry<Integer, byte[]> e : alphaArrays.entrySet())
-            {
-                newOff.put(e.getKey(), base + data.size());
-                data.writeBytes(e.getValue());
-            }
-            while (data.size() % 4 != 0)
-                data.write(0);
+            byte[] pooled = poolArrays(colorArrays, alphaArrays, base, newOff);
 
-            byte[] anim = new byte[base + data.size()];
-            System.arraycopy(header, 0, anim, 0, 8);
-            List<byte[]> recs = new ArrayList<>();
-            for (MaterialColor m : materials)
+            return packColor(matNames, dictSize, base, pooled, newOff);
+        }
+
+        /**
+         * @return the material names in file order
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private List<String> colorMaterialNames()
+        {
+            String[] names = new String[materials.size()];
+
+            for (int index = 0; index < names.length; index++)
+                names[index] = materials.get(index).name;
+
+            return java.util.Arrays.asList(names);
+        }
+
+        /**
+         * @param colorArrays color keyframe arrays, keyed by their original offset
+         * @param alphaArrays alpha keyframe arrays, keyed by their original offset
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private void collectArrays(TreeMap<Integer, byte[]> colorArrays, TreeMap<Integer, byte[]> alphaArrays)
+        {
+            for (MaterialColor material : materials)
+                collectOne(material, colorArrays, alphaArrays);
+        }
+
+        /**
+         * @param material one material
+         * @param colorArrays color keyframe arrays
+         * @param alphaArrays alpha keyframe arrays
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static void collectOne(MaterialColor material, TreeMap<Integer, byte[]> colorArrays, TreeMap<Integer, byte[]> alphaArrays)
+        {
+            int channel = 0;
+
+            while (channel < 5)
             {
-                byte[] rec = new byte[20];
-                for (int k = 0; k < 5; k++)
-                {
-                    long ch = m.rawCh[k];
-                    if (m.rawArr[k] != null)
-                        ch = (ch & ~0xFFFFL) | (newOff.get((int) (ch & 0xFFFF)) & 0xFFFF); // repoint offset
-                    for (int b = 0; b < 4; b++)
-                        rec[k * 4 + b] = (byte) (ch >> (8 * b));
-                }
-                recs.add(rec);
+                keepArray(material, channel, colorArrays, alphaArrays);
+                channel++;
             }
-            System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 20)), 0, anim, 8, dictSize);
-            System.arraycopy(data.toByteArray(), 0, anim, base, data.size());
+        }
+
+        /**
+         * @param material one material
+         * @param channel which channel
+         * @param colorArrays color keyframe arrays
+         * @param alphaArrays alpha keyframe arrays
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static void keepArray(MaterialColor material, int channel, TreeMap<Integer, byte[]> colorArrays,
+                TreeMap<Integer, byte[]> alphaArrays)
+        {
+            if (material.rawArr[channel] == null)
+                return;
+
+            int off = (int) (material.rawCh[channel] & 0xFFFF);
+            arrayMap(channel, colorArrays, alphaArrays).put(off, material.rawArr[channel]);
+        }
+
+        /**
+         * @param channel which channel
+         * @param colorArrays color keyframe arrays
+         * @param alphaArrays alpha keyframe arrays
+         * @return the map that channel belongs in
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static TreeMap<Integer, byte[]> arrayMap(int channel, TreeMap<Integer, byte[]> colorArrays,
+                TreeMap<Integer, byte[]> alphaArrays)
+        {
+            if (channel < 4)
+                return colorArrays;
+
+            return alphaArrays;
+        }
+
+        /**
+         * @param colorArrays color arrays, written first
+         * @param alphaArrays alpha arrays, written after the color region is padded
+         * @param base where the pool starts
+         * @param newOff original offset to the new offset
+         * @return the pooled bytes
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static byte[] poolArrays(TreeMap<Integer, byte[]> colorArrays, TreeMap<Integer, byte[]> alphaArrays, int base,
+                java.util.Map<Integer, Integer> newOff)
+        {
+            MemBuf pooled = MemBuf.create();
+            MemBuf.MemBufWriter data = pooled.writer();
+            appendArrays(data, colorArrays, base, newOff);
+            padColor(data);
+            appendArrays(data, alphaArrays, base, newOff);
+            padColor(data);
+
+            return pooled.reader().getBuffer();
+        }
+
+        /**
+         * @param data the channel pool
+         * @param arrays arrays in offset order
+         * @param base where the pool starts
+         * @param newOff original offset to the new offset
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static void appendArrays(MemBuf.MemBufWriter data, TreeMap<Integer, byte[]> arrays, int base,
+                java.util.Map<Integer, Integer> newOff)
+        {
+            for (java.util.Map.Entry<Integer, byte[]> entry : arrays.entrySet())
+            {
+                newOff.put(entry.getKey(), base + data.getPosition());
+                data.write(entry.getValue());
+            }
+        }
+
+        /**
+         * @param data the channel pool
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static void padColor(MemBuf.MemBufWriter data)
+        {
+            data.align(4);
+        }
+
+        /**
+         * @param matNames material names
+         * @param dictSize material dictionary size
+         * @param base where the pool starts
+         * @param pooled the channel pool
+         * @param newOff original offset to the new offset
+         * @return the animation block
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private byte[] packColor(List<String> matNames, int dictSize, int base, byte[] pooled, java.util.Map<Integer, Integer> newOff)
+        {
+            byte[] anim = new byte[base + pooled.length];
+            System.arraycopy(header, 0, anim, 0, 8);
+            byte[] dictionary = serialize(G3dDictionary.build(matNames, colorRecords(newOff), 20));
+            System.arraycopy(dictionary, 0, anim, 8, dictSize);
+            System.arraycopy(pooled, 0, anim, base, pooled.length);
+
             return anim;
+        }
+
+        /**
+         * @param newOff original offset to the new offset
+         * @return one 20-byte record per material
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private List<byte[]> colorRecords(java.util.Map<Integer, Integer> newOff)
+        {
+            List<byte[]> records = new ArrayList<>();
+            int index = 0;
+
+            while (index < materials.size())
+            {
+                records.add(colorRecord(materials.get(index), newOff));
+                index++;
+            }
+
+            return records;
+        }
+
+        /**
+         * @param material one material
+         * @param newOff original offset to the new offset
+         * @return the 20-byte record
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static byte[] colorRecord(MaterialColor material, java.util.Map<Integer, Integer> newOff)
+        {
+            byte[] record = new byte[20];
+            int channel = 0;
+
+            while (channel < 5)
+            {
+                MemBuf.putUInt32(record, channel * 4, retarget(material, channel, newOff));
+                channel++;
+            }
+
+            return record;
+        }
+
+        /**
+         * @param material one material
+         * @param channel which channel
+         * @param newOff original offset to the new offset
+         * @return the channel word, with a variable offset rewritten
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+         */
+        private static long retarget(MaterialColor material, int channel, java.util.Map<Integer, Integer> newOff)
+        {
+            long packed = material.rawCh[channel];
+
+            if (material.rawArr[channel] == null)
+                return packed;
+
+            int updated = newOff.get((int) (packed & 0xFFFF)) & 0xFFFF;
+
+            return (packed & ~0xFFFFL) | updated;
         }
 
         /** @return this animation's name */

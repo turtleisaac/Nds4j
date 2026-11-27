@@ -19,9 +19,10 @@
 
 package io.github.turtleisaac.nds4j.g3d;
 
+import io.github.turtleisaac.nds4j.framework.MemBuf;
+
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -149,7 +150,8 @@ public final class GltfExporter
     private static final class Build
     {
         private final TextureSet textures;
-        private final ByteArrayOutputStream bin = new ByteArrayOutputStream();
+        private final MemBuf binary = MemBuf.create();
+        private final MemBuf.MemBufWriter bin = binary.writer();
         private final List<String> bufferViews = new ArrayList<>();
         private final List<String> accessors = new ArrayList<>();
         private final List<String> primitives = new ArrayList<>();
@@ -187,7 +189,7 @@ public final class GltfExporter
                 for (int c = 0; c < 3; c++)
                 {
                     float v = pos[i * 3 + c];
-                    putFloat(v);
+                    bin.writeFloat(v);
                     min[c] = Math.min(min[c], v);
                     max[c] = Math.max(max[c], v);
                 }
@@ -199,14 +201,14 @@ public final class GltfExporter
             int uvAccessor = beginAccessor("VEC2", 5126, nVerts);
             for (int i = 0; i < nVerts; i++)
             {
-                putFloat(uv[i * 2] / texW);
-                putFloat(uv[i * 2 + 1] / texH);
+                bin.writeFloat(uv[i * 2] / texW);
+                bin.writeFloat(uv[i * 2 + 1] / texH);
             }
             endAccessor(34962, null);
 
             int idxAccessor = beginAccessor("SCALAR", 5125, idx.length);
             for (int v : idx)
-                putInt(v);
+                bin.writeInt(v);
             endAccessor(34963, null);
 
             primitives.add("{\"attributes\":{\"POSITION\":" + posAccessor + ",\"TEXCOORD_0\":" + uvAccessor
@@ -284,7 +286,7 @@ public final class GltfExporter
         private int beginAccessor(String type, int componentType, int count)
         {
             pad4();
-            accessors.add("__PENDING__" + type + "|" + componentType + "|" + count + "|" + bin.size());
+            accessors.add("__PENDING__" + type + "|" + componentType + "|" + count + "|" + bin.getPosition());
             return accessors.size() - 1;
         }
 
@@ -296,7 +298,7 @@ public final class GltfExporter
             int componentType = Integer.parseInt(parts[1]);
             int count = Integer.parseInt(parts[2]);
             int start = Integer.parseInt(parts[3]);
-            int length = bin.size() - start;
+            int length = bin.getPosition() - start;
             int view = bufferViews.size();
 
             bufferViews.add("{\"buffer\":0,\"byteOffset\":" + start + ",\"byteLength\":" + length
@@ -308,30 +310,13 @@ public final class GltfExporter
 
         private void pad4()
         {
-            while ((bin.size() & 3) != 0)
-                bin.write(0);
-        }
-
-        private void putFloat(float v)
-        {
-            int bits = Float.floatToIntBits(v);
-            bin.write(bits);
-            bin.write(bits >> 8);
-            bin.write(bits >> 16);
-            bin.write(bits >> 24);
-        }
-
-        private void putInt(int v)
-        {
-            bin.write(v);
-            bin.write(v >> 8);
-            bin.write(v >> 16);
-            bin.write(v >> 24);
+            while ((bin.getPosition() & 3) != 0)
+                bin.writeByte((byte) 0);
         }
 
         String finish(String name)
         {
-            byte[] buffer = bin.toByteArray();
+            byte[] buffer = binary.reader().getBuffer();
             List<String> nodes = new ArrayList<>();
             List<String> sceneNodes = new ArrayList<>();
             // One mesh with all primitives, under one node.
@@ -362,20 +347,6 @@ public final class GltfExporter
                     .append(Base64.getEncoder().encodeToString(buffer)).append("\"}]}");
 
             return sb.toString();
-        }
-
-        private static String pngDataUri(BufferedImage img)
-        {
-            try
-            {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                ImageIO.write(img, "png", out);
-                return Base64.getEncoder().encodeToString(out.toByteArray());
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException("Failed to PNG-encode a texture for glTF export", e);
-            }
         }
 
         // glTF numbers must not be NaN/Infinity and prefer a compact form.
@@ -446,9 +417,10 @@ public final class GltfExporter
     {
         try
         {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            ImageIO.write(img, "png", out);
-            return Base64.getEncoder().encodeToString(out.toByteArray());
+            MemBuf png = MemBuf.create();
+            ImageIO.write(img, "png", png.outputStream());
+
+            return Base64.getEncoder().encodeToString(png.reader().getBuffer());
         }
         catch (IOException e)
         {
@@ -607,7 +579,8 @@ public final class GltfExporter
         private final Model model;
         private final TextureSet textures;
         private final TextureSrtAnimationSet.Animation textureSrt;
-        private final ByteArrayOutputStream bin = new ByteArrayOutputStream();
+        private final MemBuf binary = MemBuf.create();
+        private final MemBuf.MemBufWriter bin = binary.writer();
         private final List<String> bufferViews = new ArrayList<>();
         private final List<String> accessors = new ArrayList<>();
         private final List<String> meshes = new ArrayList<>();
@@ -1041,7 +1014,7 @@ public final class GltfExporter
         private void putJoints(int[] indices)
         {
             for (int index : indices)
-                putU16(index);
+                bin.writeShort((short) index);
         }
 
         /**
@@ -1085,7 +1058,7 @@ public final class GltfExporter
         private void writeScaled(int[] bits, int sum)
         {
             for (int w : bits)
-                putFloat(w / (float) sum);
+                bin.writeFloat(w / (float) sum);
         }
 
         /**
@@ -1121,16 +1094,16 @@ public final class GltfExporter
         {
             for (int col = 0; col < 3; col++)
             {
-                putFloat((float) m[col * 3]);
-                putFloat((float) m[col * 3 + 1]);
-                putFloat((float) m[col * 3 + 2]);
-                putFloat(0);
+                bin.writeFloat((float) m[col * 3]);
+                bin.writeFloat((float) m[col * 3 + 1]);
+                bin.writeFloat((float) m[col * 3 + 2]);
+                bin.writeFloat(0);
             }
 
-            putFloat((float) m[9]);
-            putFloat((float) m[10]);
-            putFloat((float) m[11]);
-            putFloat(1);
+            bin.writeFloat((float) m[9]);
+            bin.writeFloat((float) m[10]);
+            bin.writeFloat((float) m[11]);
+            bin.writeFloat(1);
         }
 
         /**
@@ -1268,7 +1241,7 @@ public final class GltfExporter
             float tmax = (float) ((frames - 1) / FRAME_RATE);
 
             for (int fI = 0; fI < frames; fI++)
-                putFloat((float) (fI / FRAME_RATE));
+                bin.writeFloat((float) (fI / FRAME_RATE));
 
             endAccessor(0, "\"min\":[" + f(tmin) + "],\"max\":[" + f(tmax) + "]");
 
@@ -1299,42 +1272,120 @@ public final class GltfExporter
             emitChannel(node, frames, pose, bind, timeAcc, 2, samplersJson, channels);
         }
 
-        // kind: 0=translation (VEC3), 1=rotation (VEC4 quat, sign-continuous), 2=scale (VEC3)
+        /**
+         * Writes one translation, rotation, or scale sampler when the channel leaves the bind pose.
+         * @param kind 0 translation, 1 rotation, 2 scale
+         * @see "Khronos glTF 2.0, animation.channel"
+         */
         private void emitChannel(int node, int frames, Model.NodeTransform[][] pose, Model.NodeTransform bind,
                 int timeAcc, int kind, List<String> samplersJson, List<String> channels)
         {
-            int comps = kind == 1 ? 4 : 3;
-            float[][] vals = new float[frames][];
-            for (int fI = 0; fI < frames; fI++)
-                vals[fI] = sampleComponent(pose[fI][node], kind);
+            float[][] vals = sampleFrames(node, frames, pose, kind);
+            orientQuats(vals, kind);
 
-            // sign-continuity for quaternions (avoid nlerp taking the long way)
-            if (kind == 1)
-                for (int fI = 1; fI < frames; fI++)
-                {
-                    double dot = 0;
-                    for (int c = 0; c < 4; c++)
-                        dot += vals[fI][c] * vals[fI - 1][c];
-
-                    if (dot < 0)
-                        for (int c = 0; c < 4; c++)
-                            vals[fI][c] = -vals[fI][c];
-                }
-
-            float[] bindVal = sampleComponent(bind, kind);
-            if (!moves(vals, bindVal))
+            if (!moves(vals, sampleComponent(bind, kind)))
                 return;
 
-            int outAcc = beginAccessor(comps == 4 ? "VEC4" : "VEC3", 5126, frames);
-            for (float[] v : vals)
-                for (float c : v)
-                    putFloat(c);
+            publishChannel(node, frames, kind, vals, timeAcc, samplersJson, channels);
+        }
+
+        /**
+         * @return one sample per frame
+         * @see "Khronos glTF 2.0, animation.sampler"
+         */
+        private float[][] sampleFrames(int node, int frames, Model.NodeTransform[][] pose, int kind)
+        {
+            float[][] vals = new float[frames][];
+
+            for (int frame = 0; frame < frames; frame++)
+                vals[frame] = sampleComponent(pose[frame][node], kind);
+
+            return vals;
+        }
+
+        /**
+         * Keeps successive quaternions in the same hemisphere so interpolation takes the short arc.
+         * @see "Khronos glTF 2.0, animation.sampler"
+         */
+        private void orientQuats(float[][] vals, int kind)
+        {
+            if (kind != 1)
+                return;
+
+            walkQuats(vals);
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private static void walkQuats(float[][] vals)
+        {
+            for (int frame = 1; frame < vals.length; frame++)
+                flipQuat(vals[frame], vals[frame - 1]);
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private static void flipQuat(float[] current, float[] previous)
+        {
+            if (dot4(current, previous) >= 0)
+                return;
+
+            negate4(current);
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private static void negate4(float[] current)
+        {
+            for (int c = 0; c < 4; c++)
+                current[c] = -current[c];
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private static double dot4(float[] current, float[] previous)
+        {
+            double dot = 0;
+
+            for (int c = 0; c < 4; c++)
+                dot += current[c] * previous[c];
+
+            return dot;
+        }
+
+        /**
+         * @see "Khronos glTF 2.0, animation.channel"
+         */
+        private void publishChannel(int node, int frames, int kind, float[][] vals, int timeAcc, List<String> samplersJson,
+                List<String> channels)
+        {
+            String type = kind == 1 ? "VEC4" : "VEC3";
+            int outAcc = beginAccessor(type, 5126, frames);
+            writeSamples(vals);
             endAccessor(0, null);
 
             int samplerIdx = samplersJson.size();
             samplersJson.add("{\"input\":" + timeAcc + ",\"output\":" + outAcc + ",\"interpolation\":\"LINEAR\"}");
-            String path = kind == 0 ? "translation" : kind == 1 ? "rotation" : "scale";
-            channels.add("{\"sampler\":" + samplerIdx + ",\"target\":{\"node\":" + node + ",\"path\":\"" + path + "\"}}");
+            channels.add("{\"sampler\":" + samplerIdx + ",\"target\":{\"node\":" + node + ",\"path\":\""
+                    + channelPath(kind) + "\"}}");
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private void writeSamples(float[][] vals)
+        {
+            for (float[] sample : vals)
+                writeSample(sample);
+        }
+
+        /** @see "Khronos glTF 2.0, animation.sampler" */
+        private void writeSample(float[] sample)
+        {
+            for (float component : sample)
+                bin.writeFloat(component);
+        }
+
+        /** @see "Khronos glTF 2.0, animation.channel.target.path" */
+        private static String channelPath(int kind)
+        {
+            String[] paths = { "translation", "rotation", "scale" };
+
+            return paths[kind];
         }
 
         private float[] sampleComponent(Model.NodeTransform t, int kind)
@@ -1400,7 +1451,7 @@ public final class GltfExporter
                 for (int c = 0; c < 3; c++)
                 {
                     float v = (float) (raw[i * 3 + c] * posScale);
-                    putFloat(v);
+                    bin.writeFloat(v);
                     min[c] = Math.min(min[c], v);
                     max[c] = Math.max(max[c], v);
                 }
@@ -1412,14 +1463,14 @@ public final class GltfExporter
             int uvAccessor = beginAccessor("VEC2", 5126, nVerts);
             for (int i = 0; i < nVerts; i++)
             {
-                putFloat(uv[i * 2] / texW);
-                putFloat(uv[i * 2 + 1] / texH);
+                bin.writeFloat(uv[i * 2] / texW);
+                bin.writeFloat(uv[i * 2 + 1] / texH);
             }
             endAccessor(34962, null);
 
             int idxAccessor = beginAccessor("SCALAR", 5125, idx.length);
             for (int v : idx)
-                putInt(v);
+                bin.writeInt(v);
             endAccessor(34963, null);
 
             int material = materialFor(mesh);
@@ -1505,7 +1556,7 @@ public final class GltfExporter
 
         private String assemble(List<String> nodes, List<Integer> roots, List<String> animJson)
         {
-            byte[] buffer = bin.toByteArray();
+            byte[] buffer = binary.reader().getBuffer();
             StringBuilder sb = new StringBuilder();
             sb.append("{\"asset\":{\"version\":\"2.0\",\"generator\":\"Nds4j\"},");
 
@@ -1556,7 +1607,10 @@ public final class GltfExporter
         private int beginAccessor(String type, int componentType, int count)
         {
             pad4();
-            accessors.add("__PENDING__" + type + "|" + componentType + "|" + count + "|" + bin.size());
+            int origin = bin.getPosition();
+            String pending = "__PENDING__" + type + "|" + componentType + "|" + count + "|" + origin;
+            accessors.add(pending);
+
             return accessors.size() - 1;
         }
 
@@ -1568,7 +1622,7 @@ public final class GltfExporter
             int componentType = Integer.parseInt(parts[1]);
             int count = Integer.parseInt(parts[2]);
             int start = Integer.parseInt(parts[3]);
-            int length = bin.size() - start;
+            int length = bin.getPosition() - start;
             int view = bufferViews.size();
 
             String bv = "{\"buffer\":0,\"byteOffset\":" + start + ",\"byteLength\":" + length;
@@ -1576,42 +1630,16 @@ public final class GltfExporter
                 bv += ",\"target\":" + target;
 
             bufferViews.add(bv + "}");
-            accessors.set(i, "{\"bufferView\":" + view + ",\"componentType\":" + componentType
-                    + ",\"count\":" + count + ",\"type\":\"" + type + "\""
-                    + (extra != null ? "," + extra : "") + "}");
+            String accessor = "{\"bufferView\":" + view + ",\"componentType\":" + componentType + ",\"count\":" + count
+                    + ",\"type\":\"" + type + "\"";
+            if (extra != null)
+                accessor += "," + extra;
+            accessors.set(i, accessor + "}");
         }
 
         private void pad4()
         {
-            while ((bin.size() & 3) != 0)
-                bin.write(0);
-        }
-
-        private void putFloat(float v)
-        {
-            int bits = Float.floatToIntBits(v);
-            bin.write(bits);
-            bin.write(bits >> 8);
-            bin.write(bits >> 16);
-            bin.write(bits >> 24);
-        }
-
-        private void putInt(int v)
-        {
-            bin.write(v);
-            bin.write(v >> 8);
-            bin.write(v >> 16);
-            bin.write(v >> 24);
-        }
-
-        /**
-         * @param v an unsigned short
-         * @see "Khronos glTF 2.0, accessor.componentType 5123"
-         */
-        private void putU16(int v)
-        {
-            byte[] pair = { (byte) v, (byte) (v >>> 8) };
-            bin.write(pair, 0, pair.length);
+            bin.align(4);
         }
     }
 }

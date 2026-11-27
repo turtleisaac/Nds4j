@@ -409,5 +409,88 @@ class MemBufAlgebraTest
 
             assertThat(out.toByteArray()).containsExactly(0xEF, 0xBE, 0x04, 0x03, 0x02, 0x01);
         }
+
+        @Test
+        @DisplayName("floats, fx16, fx32 and signed fields round-trip at their edges")
+        void numericFields()
+        {
+            MemBuf buf = MemBuf.create();
+            MemBuf.MemBufWriter writer = buf.writer();
+            writer.writeFloat(1f);
+            writer.writeFloat(Float.intBitsToFloat(0xFF800000)); // -infinity
+            writer.writeFloat(Float.NaN);
+            writer.writeFloat(Float.intBitsToFloat(0x7F800001));
+            writer.writeFx16(1.0);
+            writer.writeFx16(-1.0);
+            writer.writeFx16(0.5);
+            writer.writeFx16(-0.5);
+            writer.writeFx32(1.0);
+            writer.writeFx32(-2.0);
+
+            MemBuf.MemBufReader reader = buf.reader();
+            assertThat(reader.readFloat()).isEqualTo(1f);
+            assertThat(reader.readFloat()).isEqualTo(Float.NEGATIVE_INFINITY);
+            assertThat(Float.floatToRawIntBits(reader.readFloat())).isEqualTo(0x7FC00000);
+            assertThat(Float.floatToRawIntBits(reader.readFloat())).isEqualTo(0x7FC00000);
+            assertThat(reader.readFx16()).isEqualTo(1.0);
+            assertThat(reader.readFx16()).isEqualTo(-1.0);
+            assertThat(reader.readFx16()).isEqualTo(0.5);
+            assertThat(reader.readFx16()).isEqualTo(-0.5);
+            assertThat(reader.readFx32()).isEqualTo(1.0);
+            assertThat(reader.readFx32()).isEqualTo(-2.0);
+
+            assertThat(MemBuf.fx16Bits(1.0)).isEqualTo(4096);
+            assertThat(MemBuf.fx16Bits(1.5 / 4096.0)).isEqualTo(2);
+            assertThat(MemBuf.fx32Bits(1.5 / 4096.0)).isEqualTo(2);
+            assertThat(MemBuf.fx32Bits(-1.6 / 4096.0)).isEqualTo(-2);
+            assertThat(MemBuf.fx16Bits(-1.0)).isEqualTo(0xF000);
+            assertThat(MemBuf.fx16Bits(0.5)).isEqualTo(2048);
+            assertThat(MemBuf.fx32Bits(-2.0)).isEqualTo(-8192);
+            assertThat(MemBuf.signExtend(0x1FF, 10)).isEqualTo(511);
+            assertThat(MemBuf.signExtend(0x200, 10)).isEqualTo(-512);
+            assertThat(MemBuf.signExtend(0x3FF, 10)).isEqualTo(-1);
+            assertThat(MemBuf.signExtend(0x600, 10)).isEqualTo(-512);
+            assertThat(MemBuf.signExtend(1, 1)).isEqualTo(-1);
+            assertThat(MemBuf.signExtend(0, 1)).isEqualTo(0);
+            assertThat(MemBuf.signExtend(0x8000, 16)).isEqualTo(-32768);
+            assertThat(MemBuf.signExtend(0x12345678, 32)).isEqualTo(0x12345678);
+        }
+
+        @Test
+        @DisplayName("an output stream appends into the same buffer")
+        void outputStreamAppends()
+        {
+            MemBuf buf = MemBuf.create();
+            byte[] chunk = { 9, 8, 7, 6 };
+            try
+            {
+                buf.outputStream().write(1);
+                buf.outputStream().write(chunk, 1, 2);
+            }
+            catch (java.io.IOException e)
+            {
+                throw new AssertionError(e);
+            }
+
+            assertThat(buf.reader().getBuffer()).containsExactly(1, 8, 7);
+        }
+
+        @Test
+        @DisplayName("a stream that refuses a write is reported")
+        void streamWriteFailure()
+        {
+            java.io.OutputStream broken = new java.io.OutputStream() {
+                @Override
+                public void write(int b) throws java.io.IOException
+                {
+                    throw new java.io.IOException("closed");
+                }
+            };
+
+            assertThatCode(() -> MemBuf.writeUInt16(broken, 1))
+                    .isInstanceOf(java.io.UncheckedIOException.class);
+            assertThatCode(() -> MemBuf.writeUInt32(broken, 1))
+                    .isInstanceOf(java.io.UncheckedIOException.class);
+        }
     }
 }

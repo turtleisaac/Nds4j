@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -192,17 +191,18 @@ public final class DisplayList
      */
     public static byte[] encodeCommands(List<Command> commands)
     {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        MemBuf buf = MemBuf.create();
+        MemBuf.MemBufWriter out = buf.writer();
         int n = commands.size();
         for (int i = 0; i < n; i += 4)
         {
             for (int j = 0; j < 4; j++)
-                out.write(i + j < n ? commands.get(i + j).opcode : NOP);
+                out.writeByte((byte) (i + j < n ? commands.get(i + j).opcode : NOP));
             for (int j = 0; j < 4 && i + j < n; j++)
                 for (int operand : commands.get(i + j).operands)
-                    putU32(out, operand);
+                    out.writeInt(operand);
         }
-        return out.toByteArray();
+        return buf.reader().getBuffer();
     }
 
     /** Decoded geometry: raw positions (x,y,z), texcoords (s,t in texel units), and triangle indices. */
@@ -233,7 +233,8 @@ public final class DisplayList
      */
     public static byte[] encode(float[] positions, float[] texcoords, int[] triangles)
     {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        MemBuf buf = MemBuf.create();
+        MemBuf.MemBufWriter out = buf.writer();
         command(out, BEGIN_VTXS, param(0)); // primitive 0 = separate triangles
         for (int t = 0; t + 2 < triangles.length; t += 3)
         {
@@ -247,7 +248,7 @@ public final class DisplayList
             }
         }
         command(out, END_VTXS);
-        return out.toByteArray();
+        return buf.reader().getBuffer();
     }
 
     /**
@@ -436,14 +437,14 @@ public final class DisplayList
 
     // --- encoding helpers ---
 
-    private static void command(ByteArrayOutputStream out, int opcode, int... params)
+    private static void command(MemBuf.MemBufWriter out, int opcode, int... params)
     {
-        out.write(opcode);
-        out.write(NOP);
-        out.write(NOP);
-        out.write(NOP); // one command per word, NOP-padded
+        out.writeByte((byte) opcode);
+        out.writeByte((byte) NOP);
+        out.writeByte((byte) NOP);
+        out.writeByte((byte) NOP); // one command per word, NOP-padded
         for (int p : params)
-            putU32(out, p);
+            out.writeInt(p);
     }
 
     private static int param(int v)
@@ -503,22 +504,4 @@ public final class DisplayList
         }
     }
 
-    /**
-     * @param out the display list being written
-     * @param v a parameter word
-     * @see "GBATEK DS 3D Video"
-     */
-    private static void putU32(ByteArrayOutputStream out, int v)
-    {
-        // The geometry engine reads parameter words little-endian.
-        MemBuf buf = MemBuf.create();
-        buf.writer().writeInt(v);
-        byte[] word = buf.reader().getBuffer();
-
-        // One byte per position, so this stays a straight-line write.
-        out.write(word[0]);
-        out.write(word[1]);
-        out.write(word[2]);
-        out.write(word[3]);
-    }
 }

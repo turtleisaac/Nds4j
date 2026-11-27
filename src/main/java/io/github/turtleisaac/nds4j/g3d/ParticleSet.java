@@ -887,7 +887,8 @@ public class ParticleSet
     private double fx32(int offset)
     {
         reader.setPosition(offset);
-        return reader.readInt() / 4096.0;
+
+        return reader.readFx32();
     }
 
     /**
@@ -897,6 +898,8 @@ public class ParticleSet
      */
     private double fx16(int offset)
     {
-        return reader.readInt16At(offset) / 4096.0;
+        reader.setPosition(offset);
+
+        return reader.readFx16();
     }
 }

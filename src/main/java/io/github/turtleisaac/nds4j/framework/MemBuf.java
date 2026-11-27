@@ -88,6 +88,40 @@ public class MemBuf
     }
 
     /**
+     * The low {@code bits} of {@code value}, sign-extended.
+     * @param value a word whose low field is signed
+     * @param bits the field width, from 1 to 32
+     * @return the signed field
+     * @see "GBATEK DS 3D Video, VTX_10 component packing"
+     */
+    public static int signExtend(int value, int bits)
+    {
+        int shift = 32 - bits;
+
+        return (value << shift) >> shift;
+    }
+
+    /**
+     * @param value a 1.3.12 quantity
+     * @return the rounded fx16 bits, in the low 16
+     * @see "NitroSDK include/nitro/fx/fx.h fx16"
+     */
+    public static int fx16Bits(double value)
+    {
+        return (int) Math.round(value * 4096.0) & 0xFFFF;
+    }
+
+    /**
+     * @param value a 1.19.12 quantity
+     * @return the rounded fx32 bits
+     * @see "NitroSDK include/nitro/fx/fx.h fx32"
+     */
+    public static int fx32Bits(double value)
+    {
+        return (int) Math.round(value * 4096.0);
+    }
+
+    /**
      * @param value a little-endian unsigned 32-bit value
      * @return the four bytes, low byte first
      */
@@ -327,6 +361,35 @@ public class MemBuf
             return ret;
         }
 
+        /**
+         * @return the next little-endian IEEE-754 binary32 value
+         * @see "GBATEK DS Memory Map, little-endian"
+         */
+        public float readFloat()
+        {
+            return Float.intBitsToFloat(readInt());
+        }
+
+        /**
+         * A 1.3.12 fixed-point halfword.
+         * @return the value in whole units
+         * @see "NitroSDK include/nitro/fx/fx.h fx16"
+         */
+        public double readFx16()
+        {
+            return readShort() / 4096.0;
+        }
+
+        /**
+         * A 1.19.12 fixed-point word.
+         * @return the value in whole units
+         * @see "NitroSDK include/nitro/fx/fx.h fx32"
+         */
+        public double readFx32()
+        {
+            return readInt() / 4096.0;
+        }
+
         public long readUInt32()
         {
             return ((long) readInt()) & 0xFFFFFFFFL;
@@ -478,6 +541,36 @@ public class MemBuf
             buf[writePos++] = (byte) ((i >> 16) & 0xff);
             buf[writePos++] = (byte) ((i >> 24) & 0xff);
             return this;
+        }
+
+        /**
+         * @param value an IEEE-754 binary32 value
+         * @return this writer
+         * @see "GBATEK DS Memory Map, little-endian"
+         */
+        public MemBufWriter writeFloat(float value)
+        {
+            return writeInt(Float.floatToIntBits(value));
+        }
+
+        /**
+         * @param value a 1.3.12 quantity
+         * @return this writer
+         * @see "NitroSDK include/nitro/fx/fx.h fx16"
+         */
+        public MemBufWriter writeFx16(double value)
+        {
+            return writeShort((short) fx16Bits(value));
+        }
+
+        /**
+         * @param value a 1.19.12 quantity
+         * @return this writer
+         * @see "NitroSDK include/nitro/fx/fx.h fx32"
+         */
+        public MemBufWriter writeFx32(double value)
+        {
+            return writeInt(fx32Bits(value));
         }
 
         public MemBufWriter writeUInt32(long i)

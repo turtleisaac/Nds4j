@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -142,13 +141,10 @@ public class VisibilityAnimationSet extends G3dFile
             cursor += blob.length;
         }
 
-        ByteArrayOutputStream vis0 = new ByteArrayOutputStream();
-        vis0.writeBytes("VIS0".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-        vis0.writeBytes(MemBuf.le32(cursor)); // VIS0 block size
-        vis0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs)
-            vis0.writeBytes(blob);
-        return G3dFile.assembleContainer("BVA0", version, vis0.toByteArray());
+        byte[] dictionary = serialize(G3dDictionary.build(names, recs, 4));
+        byte[] vis0 = NsbBlock.block("VIS0", cursor, dictionary, blobs);
+
+        return G3dFile.assembleContainer("BVA0", version, vis0);
     }
 
     private static List<byte[]> placeholders(int n)

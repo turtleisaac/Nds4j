@@ -113,8 +113,7 @@ final class Fx
      */
     static double readFx32(MemBuf.MemBufReader reader)
     {
-        // One little-endian word.
-        return fx32(reader.readInt());
+        return reader.readFx32();
     }
 
     /**
@@ -140,11 +139,7 @@ final class Fx
     static int signed10(int bits)
     {
         // Bit 9 is the sign of the 1.3.6 or 1.0.9 field.
-        int v = bits & 0x3FF;
-        if ((v & 0x200) == 0)
-            return v;
-
-        return v - 0x400;
+        return MemBuf.signExtend(bits, 10);
     }
 
     /**

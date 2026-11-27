@@ -83,6 +83,7 @@ public class ObjImportTest
         // vertex-count oracle: the display list emits exactly what the header declares (3 per triangle)
         assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
         assertThat(m.getVertexCount()).isEqualTo(8 * 3);
+        assertThat(m.getExpectedTriangleCount()).isEqualTo(8);
 
         // Decoded geometry reproduces the authored octahedron extents (±2 on each axis).
         Box box = m.getHeaderBoundingBox();
@@ -188,6 +189,7 @@ public class ObjImportTest
         // the whole geometry decodes (vertex-count oracle over all three shapes)
         assertThat(m.getVertexCount()).isEqualTo(m.getExpectedVertexCount());
         assertThat(m.getVertexCount()).isEqualTo(3 * 6); // 3 quads * 2 tris * 3 verts
+        assertThat(m.getExpectedTriangleCount()).isEqualTo(6);
 
         // each shape binds its own material -> its own texture, and each texture is the authored solid color
         for (int i = 0; i < 3; i++)
@@ -214,6 +216,16 @@ public class ObjImportTest
         int[] tris = { 0, 1, 2 };
         byte[] nsbmd = ModelBuilder.buildUntextured("big", pos, tris);
         Model m = new ModelSet(nsbmd).getModels().get(0);
+
+        Box box = m.getHeaderBoundingBox();
+        assertThat(box.min(0)).isCloseTo(0f, Offset.offset(0.05f));
+        assertThat(box.max(0)).isCloseTo(100f, Offset.offset(0.05f));
+        assertThat(box.max(1)).isCloseTo(80f, Offset.offset(0.05f));
+        assertThat(m.getExpectedVertexCount()).isEqualTo(3);
+        assertThat(m.getExpectedTriangleCount()).isEqualTo(1);
+        String gltf = GltfExporter.toGltf(m, null);
+        assertThat(gltf).contains("\"name\":\"big\"");
+        assertThat(gltf).contains("\"byteLength\":");
 
         float[] p = m.getMeshes().get(0).getPositions();
         int[] t = m.getMeshes().get(0).getTriangleIndices();

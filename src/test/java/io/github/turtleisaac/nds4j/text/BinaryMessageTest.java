@@ -59,8 +59,8 @@ class BinaryMessageTest
     @DisplayName("save() reproduces every BMG in New Super Mario Bros / Mario Kart DS / Animal Crossing byte-for-byte")
     void writtenBmgRoundTripsByteExactAcrossOtherRoms()
     {
-        for (String romName : new String[] {"New Super Mario Bros.nds", "Mario Kart DS.nds",
-                "Animal Crossing - Wild World.nds"})
+        for (String romName : new String[] { "New Super Mario Bros.nds", "Mario Kart DS.nds",
+                "Animal Crossing - Wild World.nds" })
             assertRoundTripsAcrossRom(romName);
     }
 
@@ -91,11 +91,14 @@ class BinaryMessageTest
             BinaryMessage bmg = new BinaryMessage(file);
             for (BinaryMessage.Message m : bmg.getMessages())
             {
-                if (m.isNull()) continue;
+                if (m.isNull())
+                    continue;
                 for (Object part : m.getParts())
                 {
-                    if (part instanceof String && !((String) part).isEmpty()) sawText = true;
-                    if (part instanceof BinaryMessage.Message.Escape) sawEscape = true;
+                    if (part instanceof String && !((String) part).isEmpty())
+                        sawText = true;
+                    if (part instanceof BinaryMessage.Message.Escape)
+                        sawEscape = true;
                 }
             }
         }
@@ -108,13 +111,13 @@ class BinaryMessageTest
     void authorFromScratch()
     {
         BinaryMessage bmg = new BinaryMessage();
-        BinaryMessage.Message greeting = new BinaryMessage.Message(new byte[]{1, 2},
-                Arrays.asList("Hello, ", new BinaryMessage.Message.Escape(3, new byte[]{0x12, 0x34}), "!"), false);
+        BinaryMessage.Message greeting = new BinaryMessage.Message(new byte[] { 1, 2 },
+                Arrays.asList("Hello, ", new BinaryMessage.Message.Escape(3, new byte[] { 0x12, 0x34 }), "!"), false);
         // A single space, not an empty string: an empty-string part carries zero encoded bytes, so it
         // can't be told apart from "zero parts" once re-parsed (both round-trip to the same file bytes,
         // but the in-memory parts list shape isn't preserved for that specific degenerate case).
-        BinaryMessage.Message minimal = new BinaryMessage.Message(new byte[]{0, 0}, Arrays.asList(" "), false);
-        BinaryMessage.Message nothing = new BinaryMessage.Message(new byte[]{9, 9}, Arrays.asList(), true);
+        BinaryMessage.Message minimal = new BinaryMessage.Message(new byte[] { 0, 0 }, Arrays.asList(" "), false);
+        BinaryMessage.Message nothing = new BinaryMessage.Message(new byte[] { 9, 9 }, Arrays.asList(), true);
         bmg.getMessages().add(greeting);
         bmg.getMessages().add(minimal);
         bmg.getMessages().add(nothing);
@@ -148,5 +151,21 @@ class BinaryMessageTest
         BinaryMessage bmg = new BinaryMessage();
         assertThatCode(() -> new BinaryMessage(bmg.save())).doesNotThrowAnyException();
         assertThat(new BinaryMessage(bmg.save()).getMessages()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a big-endian BMG keeps its text and its byte order")
+    void bigEndianRoundTrip()
+    {
+        BinaryMessage bmg = new BinaryMessage();
+        bmg.setBigEndian(true);
+        bmg.getMessages().add(new BinaryMessage.Message(new byte[] { 4, 5 }, Arrays.asList("Hi"), false));
+
+        byte[] saved = bmg.save();
+        BinaryMessage again = new BinaryMessage(saved);
+
+        assertThat(again.isBigEndian()).isTrue();
+        assertThat(again.getMessages()).containsExactlyElementsOf(bmg.getMessages());
+        assertThat(again.save()).isEqualTo(saved);
     }
 }
