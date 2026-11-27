@@ -65,6 +65,9 @@ final class Box
     float max(int axis)
     {
         // Decoded bounds are reduced to the same precision as the header.
-        return (float) max.at(axis);
+        double value = max.at(axis);
+        float corner = (float) value;
+
+        return corner;
     }
 }

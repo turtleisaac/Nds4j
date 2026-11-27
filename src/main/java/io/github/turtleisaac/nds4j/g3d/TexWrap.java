@@ -55,6 +55,9 @@ enum TexWrap
     boolean set(long param)
     {
         // A clear bit clamps, or does not flip.
-        return (param & mask) != 0;
+        if ((param & mask) == 0)
+            return false;
+
+        return true;
     }
 }

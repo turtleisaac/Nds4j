@@ -86,10 +86,13 @@ public class ObjImportTest
 
         // Decoded geometry reproduces the authored octahedron extents (±2 on each axis).
         Box box = m.getHeaderBoundingBox();
+        Box decoded = m.getDecodedBoundingBox();
         for (int c = 0; c < 3; c++)
         {
             assertThat(box.min(c)).as("box min axis %d", c).isCloseTo(-2f, Offset.offset(0.01f));
             assertThat(box.max(c)).as("box max axis %d", c).isCloseTo(2f, Offset.offset(0.01f));
+            assertThat(decoded.min(c)).as("decoded min axis %d", c).isCloseTo(-2f, Offset.offset(0.01f));
+            assertThat(decoded.max(c)).as("decoded max axis %d", c).isCloseTo(2f, Offset.offset(0.01f));
         }
         // Every decoded vertex is one of the six authored octahedron poles.
         float[] p = m.getMeshes().get(0).getPositions();
@@ -100,6 +103,7 @@ public class ObjImportTest
         }
 
         assertThat(ms.save()).as("authored NSBMD round-trips its own bytes").isEqualTo(nsbmd);
+        assertThat(ms.reencodeModels()).as("re-encoding the dictionaries and display lists is byte-exact").isEqualTo(nsbmd);
     }
 
     @Test

@@ -56,7 +56,7 @@ final class Vec3
     static Vec3 zero()
     {
         // An omitted translation is stored as zero.
-        return new Vec3(0, 0, 0);
+        return of(0, 0, 0);
     }
 
     /**
@@ -65,8 +65,10 @@ final class Vec3
      */
     static Vec3 one()
     {
-        // An omitted scale is stored as one.
-        return new Vec3(1, 1, 1);
+        // An omitted scale is stored as one on every axis.
+        double unit = 1;
+
+        return of(unit, unit, unit);
     }
 
     /**

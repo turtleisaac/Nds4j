@@ -71,6 +71,9 @@ public class AuthorNsbtxTest
                         .as("pixel (%d,%d) survives author->read", x, y)
                         .isEqualTo(img.getRGB(x, y) & 0xFFFFFF);
 
+        // Re-encoding the decoded image matches the texel bytes the file stores.
+        assertThat(set.encodeTextureData(decoded, t)).isEqualTo(set.getRawTextureData(t));
+
         // and the authored file round-trips its own bytes
         assertThat(set.save()).isEqualTo(file);
     }
@@ -113,14 +116,14 @@ public class AuthorNsbtxTest
         System.arraycopy("TEX0".getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0, block, 0, 4);
         putU32(block, 4, blockSize);
         // TexInfo
-        putU16(block, 12, (data.length >> 3));   // sizeTex (in 8-byte units)
-        putU16(block, 14, texOfsDict);           // ofsDict
-        putU32(block, 20, texDataOfs);           // ofsData
+        putU16(block, 12, (data.length >> 3)); // sizeTex (in 8-byte units)
+        putU16(block, 14, texOfsDict); // ofsDict
+        putU32(block, 20, texDataOfs); // ofsData
         // Tex4x4Info (24..43): point its dict at the tex dict, no 4x4 data
         putU16(block, 30, texOfsDict);
         // PlttInfo (44..59): plttOfsDict at +52
         putU16(block, 52, plttOfsDict);
-        putU32(block, 56, texDataOfs);           // plttDataOfs (unused by a direct texture)
+        putU32(block, 56, texDataOfs); // plttDataOfs (unused by a direct texture)
 
         System.arraycopy(texDictBytes, 0, block, texOfsDict, texDictBytes.length);
         System.arraycopy(plttDictBytes, 0, block, plttOfsDict, plttDictBytes.length);
@@ -135,9 +138,16 @@ public class AuthorNsbtxTest
         return buf.reader().getBuffer();
     }
 
-    private static void putU16(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
+    private static void putU16(byte[] d, int o, int v)
+    {
+        d[o] = (byte) v;
+        d[o + 1] = (byte) (v >> 8);
+    }
     private static void putU32(byte[] d, int o, long v)
     {
-        d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); d[o + 2] = (byte) (v >> 16); d[o + 3] = (byte) (v >> 24);
+        d[o] = (byte) v;
+        d[o + 1] = (byte) (v >> 8);
+        d[o + 2] = (byte) (v >> 16);
+        d[o + 3] = (byte) (v >> 24);
     }
 }

@@ -46,6 +46,9 @@ enum MatDictFlag
     boolean set(long entry)
     {
         // A set bit means the name is present but unused.
-        return (entry & mask) != 0;
+        long masked = entry & mask;
+        boolean present = masked == mask;
+
+        return present;
     }
 }

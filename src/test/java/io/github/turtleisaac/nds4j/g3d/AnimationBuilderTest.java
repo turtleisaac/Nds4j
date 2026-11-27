@@ -44,7 +44,8 @@ public class AnimationBuilderTest
     {
         int frames = 32;
         float[] scroll = new float[frames];
-        for (int i = 0; i < frames; i++) scroll[i] = i / (float) frames; // 0 -> ~1 ramp
+        for (int i = 0; i < frames; i++)
+            scroll[i] = i / (float) frames; // 0 -> ~1 ramp
 
         MaterialAnim mat = new MaterialAnim("water",
                 Channel.constant(1f), Channel.constant(1f), Channel.constant(0f),
@@ -53,6 +54,12 @@ public class AnimationBuilderTest
 
         TextureSrtAnimationSet set = new TextureSrtAnimationSet(nsbta);
         assertThat(set.save()).as("authored NSBTA round-trips its own bytes").isEqualTo(nsbta);
+
+        // The structured writer is not byte-identical to the author, but it decodes to the same track.
+        TextureSrtAnimationSet rewritten = new TextureSrtAnimationSet(set.encode());
+        TextureSrtAnimationSet.MaterialSrt again = rewritten.getAnimations().get(0).getMaterials().get(0);
+        assertThat(again.transSAt(frames / 2)).isCloseTo(0.5f, Offset.offset(1e-2f));
+        assertThat(again.scaleSAt(0)).isCloseTo(1f, Offset.offset(1e-3f));
 
         assertThat(set.getAnimations()).hasSize(1);
         TextureSrtAnimationSet.Animation anim = set.getAnimations().get(0);
@@ -79,7 +86,8 @@ public class AnimationBuilderTest
     {
         int frames = 16;
         float[] rot = new float[frames];
-        for (int i = 0; i < frames; i++) rot[i] = 360f * i / frames; // full spin
+        for (int i = 0; i < frames; i++)
+            rot[i] = 360f * i / frames; // full spin
 
         MaterialAnim mat = new MaterialAnim("spin",
                 Channel.constant(1f), Channel.constant(1f), Channel.keyframes(rot, 1),
@@ -88,7 +96,7 @@ public class AnimationBuilderTest
         TextureSrtAnimationSet.MaterialSrt m = new TextureSrtAnimationSet(nsbta).getAnimations().get(0).getMaterials().get(0);
 
         // rotation is stored as (sin,cos) fx16, so compare on the circle (wrap-safe)
-        for (int f : new int[]{0, 4, 8, 12})
+        for (int f : new int[] { 0, 4, 8, 12 })
         {
             double expected = Math.toRadians(rot[f]);
             double got = Math.toRadians(m.rotationAt(f));

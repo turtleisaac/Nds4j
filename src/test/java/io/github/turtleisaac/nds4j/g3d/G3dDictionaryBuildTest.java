@@ -48,7 +48,10 @@ public class G3dDictionaryBuildTest
         return d == null || d.length < o + 4 ? "" : new String(d, o, 4, StandardCharsets.ISO_8859_1);
     }
 
-    private static int u16(byte[] d, int o) { return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8); }
+    private static int u16(byte[] d, int o)
+    {
+        return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8);
+    }
     private static long u32(byte[] d, int o)
     {
         return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
@@ -68,15 +71,25 @@ public class G3dDictionaryBuildTest
         MemBuf.MemBufReader r = buf.reader();
         r.setPosition(pos);
         G3dDictionary original;
-        try { original = new G3dDictionary(r); }
-        catch (RuntimeException e) { return tally; }
+        try
+        {
+            original = new G3dDictionary(r);
+        }
+        catch (RuntimeException e)
+        {
+            return tally;
+        }
         int count = original.size();
         if (count == 0)
             return tally;
 
         List<String> names = new ArrayList<>();
         List<byte[]> records = new ArrayList<>();
-        for (int i = 0; i < count; i++) { names.add(original.getName(i)); records.add(original.getRecord(i)); }
+        for (int i = 0; i < count; i++)
+        {
+            names.add(original.getName(i));
+            records.add(original.getRecord(i));
+        }
         // duplicate names can't be represented by a name-keyed tree; skip (does not occur in practice)
         if (names.stream().distinct().count() != count)
             return tally;
@@ -87,22 +100,29 @@ public class G3dDictionaryBuildTest
         // (a) every name resolves to its entry
         boolean lookupOk = true;
         for (int i = 0; i < count; i++)
-            if (built.lookup(names.get(i)) != i) { lookupOk = false; break; }
-        if (lookupOk) tally[1]++;
+            if (built.lookup(names.get(i)) != i)
+            {
+                lookupOk = false;
+                break;
+            }
+        if (lookupOk)
+            tally[1]++;
 
         // (b) the built dictionary re-parses to identical names/records
         G3dDictionary reparsed = new G3dDictionary(MemBuf.create(serialize(built)).reader());
         boolean reparseOk = reparsed.size() == count;
         for (int i = 0; i < count && reparseOk; i++)
             reparseOk = reparsed.getName(i).equals(names.get(i)) && java.util.Arrays.equals(reparsed.getRecord(i), records.get(i));
-        if (reparseOk) tally[2]++;
+        if (reparseOk)
+            tally[2]++;
 
         // (c) bonus: byte-exact against the retail dictionary (matches when node numbering aligns)
         int origLen = 16 + count * (20 + original.getElementSize());
         if (pos + origLen <= block.length)
         {
             byte[] origBytes = java.util.Arrays.copyOfRange(block, pos, pos + origLen);
-            if (java.util.Arrays.equals(serialize(built), origBytes)) tally[3]++;
+            if (java.util.Arrays.equals(serialize(built), origBytes))
+                tally[3]++;
         }
         return tally;
     }
@@ -121,19 +141,31 @@ public class G3dDictionaryBuildTest
     void buildsValidDictionaries()
     {
         int[] tally = new int[4]; // tested, lookupOk, reparseOk, byteExact
-        for (String romName : new String[]{"Platinum.nds", "HeartGold.nds", "Diamond.nds"})
+        for (String romName : new String[] { "Platinum.nds", "HeartGold.nds", "Diamond.nds" })
         {
             NintendoDsRom rom;
-            try { rom = TestRoms.require(romName); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                rom = TestRoms.require(romName);
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             for (int i = 0; i < rom.getNumFiles(); i++)
             {
                 byte[] f = rom.getFile(i);
                 if (!magic(f, 0).equals("NARC"))
                     continue;
                 Narc narc;
-                try { narc = new Narc(f); }
-                catch (RuntimeException e) { continue; }
+                try
+                {
+                    narc = new Narc(f);
+                }
+                catch (RuntimeException e)
+                {
+                    continue;
+                }
                 for (int j = 0; j < narc.getNumFiles(); j++)
                 {
                     byte[] bf = narc.getFile(j);
@@ -179,15 +211,20 @@ public class G3dDictionaryBuildTest
     {
         NintendoDsRom rom = TestRoms.require("Platinum.nds");
         int checked = 0;
-        outer:
-        for (int i = 0; i < rom.getNumFiles(); i++)
+        outer: for (int i = 0; i < rom.getNumFiles(); i++)
         {
             byte[] f = rom.getFile(i);
             if (!magic(f, 0).equals("NARC"))
                 continue;
             Narc narc;
-            try { narc = new Narc(f); }
-            catch (RuntimeException e) { continue; }
+            try
+            {
+                narc = new Narc(f);
+            }
+            catch (RuntimeException e)
+            {
+                continue;
+            }
             for (int j = 0; j < narc.getNumFiles(); j++)
             {
                 byte[] file = narc.getFile(j);
@@ -220,8 +257,9 @@ public class G3dDictionaryBuildTest
     {
         // ball_blue / ball_w — verified by hand against the retail Patricia nodes
         List<String> names = List.of("ball_blue", "ball_w");
-        List<byte[]> records = List.of(new byte[]{1, 2, 3, 4}, new byte[]{5, 6, 7, 8});
+        List<byte[]> records = List.of(new byte[] { 1, 2, 3, 4 }, new byte[] { 5, 6, 7, 8 });
         G3dDictionary d = G3dDictionary.build(names, records, 4);
+        assertThat(d.getElementSize()).isEqualTo(4);
         assertThat(d.lookup("ball_blue")).isEqualTo(0);
         assertThat(d.lookup("ball_w")).isEqualTo(1);
         assertThat(d.lookup("nope")).isEqualTo(-1);
@@ -236,9 +274,9 @@ public class G3dDictionaryBuildTest
         // nodes: {127,1,0,0}{70,2,1,0}{46,0,2,1}
         int t = 8;
         assertThat(bytes[t] & 0xFF).isEqualTo(127);
-        assertThat(new int[]{bytes[t + 4] & 0xFF, bytes[t + 5] & 0xFF, bytes[t + 6] & 0xFF, bytes[t + 7] & 0xFF})
+        assertThat(new int[] { bytes[t + 4] & 0xFF, bytes[t + 5] & 0xFF, bytes[t + 6] & 0xFF, bytes[t + 7] & 0xFF })
                 .containsExactly(70, 2, 1, 0);
-        assertThat(new int[]{bytes[t + 8] & 0xFF, bytes[t + 9] & 0xFF, bytes[t + 10] & 0xFF, bytes[t + 11] & 0xFF})
+        assertThat(new int[] { bytes[t + 8] & 0xFF, bytes[t + 9] & 0xFF, bytes[t + 10] & 0xFF, bytes[t + 11] & 0xFF })
                 .containsExactly(46, 0, 2, 1);
     }
 }

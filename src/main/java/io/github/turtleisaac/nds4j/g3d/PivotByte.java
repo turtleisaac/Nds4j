@@ -56,6 +56,8 @@ enum PivotByte
     boolean set(int flags)
     {
         // A clear sign bit keeps the stored value.
-        return (flags & mask) != 0;
+        int masked = flags & mask;
+
+        return masked != 0;
     }
 }
