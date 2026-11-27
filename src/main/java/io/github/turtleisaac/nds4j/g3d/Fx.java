@@ -30,6 +30,7 @@ final class Fx
     /** 1.0 in fx32 and fx16. */
     static final double ONE = 4096.0;
 
+    /** Fixed-point helpers are static. */
     private Fx()
     {
     }
@@ -161,12 +162,6 @@ final class Fx
     }
 
     /**
-     * @param word a packed 10-bit vertex or delta
-     * @param divisor 64 for an absolute vertex, 4096 for a delta
-     * @return the three components
-     * @see "GBATEK DS 3D Video, VTX_10 and VTX_DIFF"
-     */
-    /**
      * @param word a packed XY, XZ or YZ word
      * @param cmd which pair of axes the word replaces
      * @param vtx the running vertex
@@ -200,6 +195,12 @@ final class Fx
         return vtx.with(1, a).with(2, b);
     }
 
+    /**
+     * @param word a packed 10-bit vertex or delta
+     * @param divisor 64 for an absolute vertex, 4096 for a delta
+     * @return the three components
+     * @see "GBATEK DS 3D Video, VTX_10 and VTX_DIFF"
+     */
     static Vec3 vtx10(int word, double divisor)
     {
         // X, Y and Z occupy bits 0-9, 10-19 and 20-29.

@@ -29,8 +29,14 @@ final class Vec3
     final double y;
     final double z;
 
+    /**
+     * @param x the X component
+     * @param y the Y component
+     * @param z the Z component
+     */
     private Vec3(double x, double y, double z)
     {
+        // Callers already converted fixed point.
         this.x = x;
         this.y = y;
         this.z = z;

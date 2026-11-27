@@ -28,8 +28,13 @@ final class Box
     final Vec3 min;
     final Vec3 max;
 
+    /**
+     * @param min the minimum corner
+     * @param max the maximum corner
+     */
     private Box(Vec3 min, Vec3 max)
     {
+        // Header boxes and decoded bounds share these corners.
         this.min = min;
         this.max = max;
     }

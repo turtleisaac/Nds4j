@@ -514,6 +514,8 @@ public final class DisplayList
         MemBuf buf = MemBuf.create();
         buf.writer().writeInt(v);
         byte[] word = buf.reader().getBuffer();
+
+        // One byte per position, so this stays a straight-line write.
         out.write(word[0]);
         out.write(word[1]);
         out.write(word[2]);

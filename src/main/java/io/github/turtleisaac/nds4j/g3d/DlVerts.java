@@ -212,11 +212,6 @@ final class DlVerts
     }
 
     /**
-     * @param commands display-list reader, on the two parameter words
-     * @param vtx running vertex
-     * @see "GBATEK DS 3D Video, VTX_16"
-     */
-    /**
      * @param c draw cursor
      * @see "GBATEK DS 3D Video, MTX_IDENTITY"
      */

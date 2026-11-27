@@ -544,13 +544,18 @@ public final class SoftwareRenderer
     private static void cameraCorner(double[][] c, int k, int v, float[] pos, Camera cam, double cy, double sy,
             double cp, double sp, int width, int height)
     {
+        // Offset from the camera centre.
         double x = pos[v * 3] - cam.centre[0];
         double y = pos[v * 3 + 1] - cam.centre[1];
         double z = pos[v * 3 + 2] - cam.centre[2];
+
+        // Yaw, then pitch.
         double x1 = cy * x + sy * z;
         double z1 = -sy * x + cy * z;
         double y2 = cp * y - sp * z1;
         double z2 = sp * y + cp * z1;
+
+        // Screen position and depth.
         c[k][0] = width / 2.0 + x1 * cam.scale;
         c[k][1] = height / 2.0 - y2 * cam.scale;
         c[k][2] = z2;
@@ -671,18 +676,23 @@ public final class SoftwareRenderer
     {
         if (textures == null)
             return null;
+
         // A texture-pattern (NSBTP) frame overrides which texture/palette this mesh samples.
         String[] override = frame != null ? frame.textureOverrideFor(meshIndex) : null;
         String texName = override != null ? override[0] : null;
         String pltName = override != null ? override[1] : null;
+
         if (texName == null)
         {
             Model.Material mat = mesh.getMaterial();
+
             if (mat == null || mat.getTextureName() == null)
                 return null;
+
             texName = mat.getTextureName();
             pltName = mat.getPaletteName();
         }
+
         String key = texName + " " + pltName;
         final String tName = texName, pName = pltName;
         return cache.computeIfAbsent(key, k -> {

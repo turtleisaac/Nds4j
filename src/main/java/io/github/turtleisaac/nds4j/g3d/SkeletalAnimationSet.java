@@ -1380,6 +1380,7 @@ public class SkeletalAnimationSet extends G3dFile
     // low 3 bits packing a sixth value); the third row is their cross product, completing the basis.
     private static Mat3 readRot5(byte[] d, int p)
     {
+        // Five stored fx16 values. Their low bits pack the sixth.
         MemBuf.MemBufReader reader = MemBuf.create(d).reader();
         reader.setPosition(p);
         int v0 = (short) reader.readUInt16();
@@ -1388,17 +1389,23 @@ public class SkeletalAnimationSet extends G3dFile
         int v3 = (short) reader.readUInt16();
         int v4 = (short) reader.readUInt16();
         int packed = (v3 & 7) | ((v2 & 7) << 3) | ((v1 & 7) << 6) | ((v0 & 7) << 9);
+
         if ((v4 & 1) != 0)
             packed |= 0xF000;
+
+        // The stored row values sit in the high 13 bits.
         double m00 = ((short) (v0 & 0xFFF8) >> 3) / 4096.0;
         double m01 = ((short) (v1 & 0xFFF8) >> 3) / 4096.0;
         double m02 = ((short) (v2 & 0xFFF8) >> 3) / 4096.0;
         double m10 = ((short) (v3 & 0xFFF8) >> 3) / 4096.0;
         double m11 = ((short) (v4 & 0xFFF8) >> 3) / 4096.0;
         double m12 = (short) packed / 4096.0;
+
+        // The third row is the cross product of the first two.
         double m20 = m01 * m12 - m02 * m11;
         double m21 = m02 * m10 - m00 * m12;
         double m22 = m00 * m11 - m01 * m10;
+
         return Mat3.of(m00, m01, m02, m10, m11, m12, m20, m21, m22);
     }
 

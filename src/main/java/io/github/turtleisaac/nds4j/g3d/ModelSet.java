@@ -144,21 +144,54 @@ public class ModelSet extends G3dFile
      */
     private static void rebuildModel(byte[] mdl0, byte[] record)
     {
-        // Dictionaries inside the model are rebuilt in place. Display lists are re-encoded.
-        MemBuf.MemBufReader reader = MemBuf.create(mdl0).reader();
+        // The model header names the material set and the shape set.
         int modelStart = MemBuf.create(record).reader().readInt();
+        int[] sets = readModelSets(mdl0, modelStart);
+
+        // Node dictionary, then the material set's texture and palette dictionaries.
+        rebuildMaterialDicts(mdl0, modelStart, sets[0]);
+
+        // Each shape's display list is re-encoded from its commands.
+        rebuildShapes(mdl0, modelStart + sets[1]);
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param modelStart start of one model
+     * @return the material-set and shape-set offsets
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdl"
+     */
+    private static int[] readModelSets(byte[] mdl0, int modelStart)
+    {
+        // Both offsets sit immediately after the model size.
+        MemBuf.MemBufReader reader = MemBuf.create(mdl0).reader();
         reader.setPosition(modelStart + 8);
         int ofsMat = reader.readInt();
         int ofsShp = reader.readInt();
+
+        return new int[] { ofsMat, ofsShp };
+    }
+
+    /**
+     * @param mdl0 the MDL0 block
+     * @param modelStart start of one model
+     * @param ofsMat material-set offset from the model start
+     * @see "NitroSystem include/nnsys/g3d/binres/res_struct.h NNSG3dResMdl"
+     */
+    private static void rebuildMaterialDicts(byte[] mdl0, int modelStart, int ofsMat)
+    {
+        // The node dictionary, then the material dictionary.
         rebuildDictInPlace(mdl0, modelStart + 0x40);
         int matSet = modelStart + ofsMat;
         rebuildDictInPlace(mdl0, matSet + 4);
+
+        // Texture and palette dictionaries are named from the material set.
+        MemBuf.MemBufReader reader = MemBuf.create(mdl0).reader();
         reader.setPosition(matSet);
         int ofsTex = reader.readUInt16();
         int ofsPlt = reader.readUInt16();
         rebuildDictInPlace(mdl0, matSet + ofsTex);
         rebuildDictInPlace(mdl0, matSet + ofsPlt);
-        rebuildShapes(mdl0, modelStart + ofsShp);
     }
 
     /**
@@ -254,19 +287,26 @@ public class ModelSet extends G3dFile
     {
         G3dDictionary dict = readDict(block, offset);
         int n = dict.size();
+
         if (n == 0)
             return;
+
+        // Names and records, in dictionary order.
         List<String> names = new ArrayList<>();
         List<byte[]> records = new ArrayList<>();
         java.util.Set<String> unique = new java.util.HashSet<>();
+
         for (int i = 0; i < n; i++)
         {
             names.add(dict.getName(i));
             records.add(dict.getRecord(i));
             unique.add(dict.getName(i));
         }
+
         if (unique.size() != n)
             return; // duplicate names: not name-keyable
+
+        // Same-size replacement. build() is byte-exact for a unique name set.
         MemBuf b = MemBuf.create();
         G3dDictionary.build(names, records, dict.getElementSize()).write(b.writer());
         byte[] rebuilt = b.reader().getBuffer();

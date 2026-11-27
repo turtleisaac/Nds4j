@@ -35,8 +35,20 @@ final class Mat3
     final double m21;
     final double m22;
 
+    /**
+     * @param m00 row 0, column 0
+     * @param m01 row 0, column 1
+     * @param m02 row 0, column 2
+     * @param m10 row 1, column 0
+     * @param m11 row 1, column 1
+     * @param m12 row 1, column 2
+     * @param m20 row 2, column 0
+     * @param m21 row 2, column 1
+     * @param m22 row 2, column 2
+     */
     private Mat3(double m00, double m01, double m02, double m10, double m11, double m12, double m20, double m21, double m22)
     {
+        // Stored row-major, matching MtxFx33.
         this.m00 = m00;
         this.m01 = m01;
         this.m02 = m02;

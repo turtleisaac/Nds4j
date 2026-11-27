@@ -43,8 +43,17 @@ final class TexAffine
     /** T translation. */
     final float f;
 
+    /**
+     * @param a column of S
+     * @param b column of S, T row
+     * @param c column of T, S row
+     * @param d column of T
+     * @param e S translation
+     * @param f T translation
+     */
     private TexAffine(float a, float b, float c, float d, float e, float f)
     {
+        // One NSBTA sample is this 2×3 matrix.
         this.a = a;
         this.b = b;
         this.c = c;

@@ -19,5 +19,8 @@
         <property name="eachLine" value="true"/>
     </module>
 
-    <module name="TreeWalker"/>
+    <module name="TreeWalker">
+        <!-- A javadoc that does not sit on a declaration is the stacked-block bug. -->
+        <module name="InvalidJavadocPosition"/>
+    </module>
 </module>

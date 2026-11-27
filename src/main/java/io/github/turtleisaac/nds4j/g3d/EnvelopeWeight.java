@@ -28,8 +28,13 @@ final class EnvelopeWeight
     final int joint;
     final double weight;
 
+    /**
+     * @param joint node index
+     * @param weight blend weight
+     */
     private EnvelopeWeight(int joint, double weight)
     {
+        // One NODEMIX term is a joint and the weight applied to it.
         this.joint = joint;
         this.weight = weight;
     }

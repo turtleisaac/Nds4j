@@ -190,6 +190,7 @@ public class ModelSetTest
                     continue;
                 Box decoded = model.getDecodedBoundingBox();
                 Box header = model.getHeaderBoundingBox();
+
                 float extent = 0;
                 for (int c = 0; c < 3; c++)
                     extent = Math.max(extent, header.max(c) - header.min(c));
@@ -211,6 +212,7 @@ public class ModelSetTest
                 }
             }
         }
+
         // Single-node models are the identity case and must be essentially perfect (retail Platinum ~98%).
         assertThat(singleOk).as("single-node models placed correctly (of %d)", singleTotal)
                 .isGreaterThan((int) (0.95 * singleTotal));

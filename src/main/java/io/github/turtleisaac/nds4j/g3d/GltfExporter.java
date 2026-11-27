@@ -838,13 +838,6 @@ public final class GltfExporter
          * @param bind bind-pose stack frame
          * @param mesh mesh index
          * @param vertex vertex index
-         * @return up to four joint indices and their weights, packed as {@code {joints, weights}}
-         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
-         */
-        /**
-         * @param bind bind-pose stack frame
-         * @param mesh mesh index
-         * @param vertex vertex index
          * @return that vertex's joints, or null for a rigid binding on joint 0
          * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
          */
@@ -857,12 +850,6 @@ public final class GltfExporter
             return jointIds(skin);
         }
 
-        /**
-         * @param table per-vertex array, or null
-         * @param vertex vertex index
-         * @return true when {@code vertex} has no entry
-         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
-         */
         /**
          * @param bind bind-pose stack frame
          * @param mesh mesh index
@@ -911,6 +898,12 @@ public final class GltfExporter
             return weights;
         }
 
+        /**
+         * @param table per-vertex array, or null
+         * @param vertex vertex index
+         * @return true when {@code vertex} has no entry
+         * @see "NitroSystem g3d/src/sbc.c NNSi_G3dFuncSbc_NODEMIX"
+         */
         private static boolean missing(int[][] table, int vertex)
         {
             if (table == null)

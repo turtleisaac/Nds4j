@@ -193,6 +193,7 @@ public class G3dDictionaryBuildTest
                 }
             }
         }
+
         Assumptions.assumeTrue(tally[0] > 100, "need retail dictionaries to test against");
         System.out.printf("G3dDictionary.build: tested=%d lookupOk=%d reparseOk=%d byteExact=%d%n",
                 tally[0], tally[1], tally[2], tally[3]);

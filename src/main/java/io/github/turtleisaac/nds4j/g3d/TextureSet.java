@@ -367,16 +367,6 @@ public class TextureSet extends G3dFile
     }
 
     /**
-     * Encodes an image back into a texture's on-disk texel bytes &mdash; the writer-side counterpart to
-     * {@link #getImage(Texture, Palette)}, for source&rarr;NSB* conversion. Paletted formats map each
-     * pixel to its palette index (color 0 handles transparency); direct color packs {@code BGR555}.
-     * Re-encoding a decoded texture reproduces its bytes exactly when the palette colors are distinct.
-     * @param img the image (its size must match the texture)
-     * @param texture the target texture (for format/size)
-     * @param palette the palette to index against (ignored for direct color)
-     * @return the encoded texel bytes, or null for an unsupported format (A3I5/A5I3/compressed 4x4)
-     */
-    /**
      * Encodes an image into texel bytes, choosing the same palette {@link #getImage(Texture)} decodes
      * against.
      * @param img the image
@@ -388,6 +378,16 @@ public class TextureSet extends G3dFile
         return encodeTextureData(img, texture, choosePalette(texture));
     }
 
+    /**
+     * Encodes an image back into a texture's on-disk texel bytes &mdash; the writer-side counterpart to
+     * {@link #getImage(Texture, Palette)}, for source&rarr;NSB* conversion. Paletted formats map each
+     * pixel to its palette index (color 0 handles transparency); direct color packs {@code BGR555}.
+     * Re-encoding a decoded texture reproduces its bytes exactly when the palette colors are distinct.
+     * @param img the image (its size must match the texture)
+     * @param texture the target texture (for format/size)
+     * @param palette the palette to index against (ignored for direct color)
+     * @return the encoded texel bytes, or null for an unsupported format (A3I5/A5I3/compressed 4x4)
+     */
     public byte[] encodeTextureData(BufferedImage img, Texture texture, Palette palette)
     {
         switch (texture.getFormat())

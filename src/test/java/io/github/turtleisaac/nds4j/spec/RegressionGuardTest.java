@@ -41,8 +41,7 @@ class RegressionGuardTest
          * Locales whose default numbering system is not Latin digits. Under these, {@code %d}
          * formats with Arabic-Indic or Thai numerals.
          */
-        private final String[] nonLatinDigitLocales =
-                {"ar-EG", "ar-SA", "fa-IR", "bn-IN", "ne-NP", "my-MM", "th-TH-u-nu-thai"};
+        private final String[] nonLatinDigitLocales = { "ar-EG", "ar-SA", "fa-IR", "bn-IN", "ne-NP", "my-MM", "th-TH-u-nu-thai" };
 
         @Test
         @DisplayName("a filename is the same on every machine, whatever its locale")
@@ -133,12 +132,6 @@ class RegressionGuardTest
     class Decompression
     {
         /**
-         * Builds the shape {@code decompress} has to cope with: BLZ-compressed data followed by
-         * an appended tail, which is what an arm9 binary with a footer looks like. Only the
-         * header arithmetic matters here - the test asserts that the appended-data path is
-         * entered and survives, not that any particular bytes come back out.
-         */
-        /**
          * Builds the exact shape {@code decompress} has to cope with: a BLZ footer sitting four
          * bytes before the end, i.e. an arm9 binary with an appended tail.
          * <p>
@@ -191,13 +184,15 @@ class RegressionGuardTest
             // either way, and the only outward difference between the fixed and broken versions
             // is whether the truncation throws.
             int amount;
-            try {
+            try
+            {
                 java.lang.reflect.Method detect = CodeCompression.class
                         .getDeclaredMethod("detectAppendedData", byte[].class);
                 detect.setAccessible(true);
                 amount = (int) detect.invoke(null, (Object) withAppendedTail());
             }
-            catch (ReflectiveOperationException e) {
+            catch (ReflectiveOperationException e)
+            {
                 throw new AssertionError("detectAppendedData could not be called", e);
             }
 
@@ -249,7 +244,8 @@ class RegressionGuardTest
          */
         private boolean compressedFlagOf(byte[] data)
         {
-            return new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {}.wasCompressed();
+            return new io.github.turtleisaac.nds4j.binaries.CodeBinary(data, 0, 0) {
+            }.wasCompressed();
         }
 
         @Test
@@ -277,8 +273,7 @@ class RegressionGuardTest
             // nothing from the compiler, and a CodeBinary reference to an Overlay silently
             // answering the other question.
             byte[] plain = "an overlay with nothing compressed about it".getBytes();
-            io.github.turtleisaac.nds4j.binaries.Overlay overlay =
-                    new io.github.turtleisaac.nds4j.binaries.Overlay(plain, 0, 0, 0, 0, 0, 0, 0, 1);
+            io.github.turtleisaac.nds4j.binaries.Overlay overlay = new io.github.turtleisaac.nds4j.binaries.Overlay(plain, 0, 0, 0, 0, 0, 0, 0, 1);
 
             assertThat(overlay.isCompressed())
                     .as("the table entry says compressed, because flags bit 0 is set")
@@ -366,11 +361,13 @@ class RegressionGuardTest
             byte[] first = TestRoms.require("HeartGold.nds").save(false);
 
             java.nio.file.Path tmp;
-            try {
+            try
+            {
                 tmp = java.nio.file.Files.createTempFile("nds4j-fixedpoint", ".nds");
                 java.nio.file.Files.write(tmp, first);
             }
-            catch (java.io.IOException e) {
+            catch (java.io.IOException e)
+            {
                 throw new AssertionError(e);
             }
             byte[] second = NintendoDsRom.fromFile(tmp.toString()).save(false);

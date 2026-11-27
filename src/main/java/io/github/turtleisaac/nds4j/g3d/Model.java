@@ -255,16 +255,21 @@ public class Model
      */
     private static Box readHeaderBox(MemBuf.MemBufReader reader, int info)
     {
-        // Dimensions are fx16, scaled by the header's box position scale.
+        // The box scale is fx32. The corners are fx16 in that scale.
         reader.setPosition(info + 0x24);
         double boxScale = reader.readUInt32() / 4096.0;
+
+        // Minimum corner.
         reader.setPosition(info + 0x18);
         double x = Fx.fx16(reader.readUInt16()) * boxScale;
         double y = Fx.fx16(reader.readUInt16()) * boxScale;
         double z = Fx.fx16(reader.readUInt16()) * boxScale;
+
+        // Width, height and depth.
         double w = Fx.fx16(reader.readUInt16()) * boxScale;
         double h = Fx.fx16(reader.readUInt16()) * boxScale;
         double d = Fx.fx16(reader.readUInt16()) * boxScale;
+
         // Store the same single precision the old header arrays kept.
         return Box.of(
                 Vec3.of((float) x, (float) y, (float) z),
@@ -950,13 +955,6 @@ public class Model
     }
 
     /**
-     * @param d display-list bytes
-     * @param pos cursor on the texcoord word
-     * @param uv running texcoord
-     * @return the cursor after the word
-     * @see "GBATEK DS 3D Video, TEXCOORD"
-     */
-    /**
      * @param commands display-list reader, on the primitive word
      * @param primitive current primitive type, or -1
      * @param primVerts vertices of the open primitive
@@ -1001,17 +999,6 @@ public class Model
         emit(draw, positions, texcoords, primVerts);
     }
 
-    /**
-     * @param d display-list bytes
-     * @param pos cursor on the two vertex words
-     * @param vtx running vertex
-     * @param uv running texcoord
-     * @param primVerts vertices of the open primitive
-     * @param positions emitted positions
-     * @param texcoords emitted texcoords
-     * @return the cursor after the vertex
-     * @see "GBATEK DS 3D Video, VTX_16"
-     */
     /**
      * @param op geometry opcode
      * @param pos cursor on the parameters, just after the opcode word
@@ -1770,11 +1757,13 @@ public class Model
          */
         private void include(float x, float y, float z)
         {
-            // Each axis tracks its own minimum and maximum.
+            // Each axis tracks its own minimum.
             any = true;
             minX = Math.min(minX, x);
             minY = Math.min(minY, y);
             minZ = Math.min(minZ, z);
+
+            // Then its maximum.
             maxX = Math.max(maxX, x);
             maxY = Math.max(maxY, y);
             maxZ = Math.max(maxZ, z);

@@ -32,8 +32,15 @@ final class DlWord
     private final int third;
     private final int fourth;
 
+    /**
+     * @param first the low opcode
+     * @param second the second opcode
+     * @param third the third opcode
+     * @param fourth the high opcode
+     */
     private DlWord(int first, int second, int third, int fourth)
     {
+        // The four opcodes stay in the order the GPU consumes them.
         this.first = first;
         this.second = second;
         this.third = third;
