@@ -67,29 +67,123 @@ public class TextureSrtAnimationSet extends G3dFile
      */
     public byte[] encode()
     {
-        List<String> names = new ArrayList<>();
-        for (Animation a : animations)
-            names.add(a.name);
-        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
-        byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++)
-            blobs[i] = animations.get(i).encodeBlob();
+        // SRT0 is the name dictionary followed by each animation's own block.
+        List<String> names = srtNames();
+        byte[][] blobs = srtBlobs();
 
-        List<byte[]> recs = new ArrayList<>();
-        int cursor = 8 + dictSize;
-        for (byte[] blob : blobs)
+        return srtFile(names, blobs);
+    }
+
+    /**
+     * @return the animation names in file order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private List<String> srtNames()
+    {
+        List<String> names = new ArrayList<>();
+        int index = animations.size();
+
+        while (index > 0)
         {
-            recs.add(rec4(cursor));
-            cursor += blob.length;
+            index--;
+            names.add(0, animations.get(index).name);
         }
 
+        return names;
+    }
+
+    /**
+     * @return each animation's SRT0 payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private byte[][] srtBlobs()
+    {
+        byte[][] blobs = new byte[animations.size()][];
+        int index = animations.size();
+
+        while (index > 0)
+        {
+            index--;
+            blobs[index] = animations.get(index).encodeBlob();
+        }
+
+        return blobs;
+    }
+
+    /**
+     * @param names animation names
+     * @param blobs animation payloads
+     * @return the BTA0 container
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private byte[] srtFile(List<String> names, byte[][] blobs)
+    {
+        int origin = 8 + serialize(G3dDictionary.build(names, placeholders(names.size(), 4), 4)).length;
         ByteArrayOutputStream srt0 = new ByteArrayOutputStream();
         srt0.writeBytes("SRT0".getBytes(StandardCharsets.US_ASCII));
-        srt0.writeBytes(rec4(cursor));
-        srt0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs)
-            srt0.writeBytes(blob);
+        srt0.writeBytes(MemBuf.le32(srtEnd(blobs, origin)));
+        srt0.writeBytes(serialize(G3dDictionary.build(names, srtRecords(blobs, origin), 4)));
+        writeSrtPayloads(srt0, blobs);
+
         return G3dFile.assembleContainer("BTA0", version, srt0.toByteArray());
+    }
+
+    /**
+     * @param blobs animation payloads
+     * @param origin offset of the first payload
+     * @return a 4-byte offset record per payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private static List<byte[]> srtRecords(byte[][] blobs, int origin)
+    {
+        List<byte[]> records = new ArrayList<>();
+        int cursor = origin;
+        int index = 0;
+
+        while (index < blobs.length)
+        {
+            records.add(MemBuf.le32(cursor));
+            cursor += blobs[index].length;
+            index++;
+        }
+
+        return records;
+    }
+
+    /**
+     * @param blobs animation payloads
+     * @param origin offset of the first payload
+     * @return the offset just past the last payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private static int srtEnd(byte[][] blobs, int origin)
+    {
+        int cursor = origin;
+        int index = 0;
+
+        while (index < blobs.length)
+        {
+            cursor += blobs[index].length;
+            index++;
+        }
+
+        return cursor;
+    }
+
+    /**
+     * @param out the SRT0 block
+     * @param blobs animation payloads
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+     */
+    private static void writeSrtPayloads(ByteArrayOutputStream out, byte[][] blobs)
+    {
+        int index = 0;
+
+        while (index < blobs.length)
+        {
+            out.writeBytes(blobs[index]);
+            index++;
+        }
     }
 
     /**
@@ -127,13 +221,6 @@ public class TextureSrtAnimationSet extends G3dFile
         MemBuf b = MemBuf.create();
         d.write(b.writer());
         return b.reader().getBuffer();
-    }
-    private static byte[] rec4(long v)
-    {
-        byte[] r = new byte[4];
-        for (int i = 0; i < 4; i++)
-            r[i] = (byte) (v >> (8 * i));
-        return r;
     }
     private static boolean isConst(long info)
     {
@@ -213,58 +300,257 @@ public class TextureSrtAnimationSet extends G3dFile
         // const → its 4-byte value, fx16 values masked to 16 bits).
         byte[] encodeBlob()
         {
-            List<String> matNames = new ArrayList<>();
-            for (MaterialSrt m : materials)
-                matNames.add(m.name);
+            // Constant channels stay inline; variable channels are appended and their offsets rewritten.
+            List<String> matNames = srtMaterialNames();
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 40), 40)).length;
             int base = 8 + dictSize;
+            SrtPool pool = poolChannels(base);
 
+            return packSrt(matNames, dictSize, base, pool);
+        }
+
+        /**
+         * @return the material names in file order
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private List<String> srtMaterialNames()
+        {
+            List<String> names = new ArrayList<>();
+            int index = 0;
+
+            while (index < materials.size())
+            {
+                names.add(materials.get(index).name);
+                index++;
+            }
+
+            return names;
+        }
+
+        /**
+         * @param base offset where channel data begins
+         * @return the appended channel bytes and the rewritten parameter words
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private SrtPool poolChannels(int base)
+        {
             ByteArrayOutputStream data = new ByteArrayOutputStream();
-            long[][] np = new long[materials.size()][];
-            for (int m = 0; m < materials.size(); m++)
+            long[][] params = new long[materials.size()][];
+            int index = 0;
+
+            while (index < materials.size())
             {
-                long[] param = materials.get(m).rawParam;
-                np[m] = param.clone();
-                int firstVar = 5;
-                for (int c = 0; c < 5; c++)
-                    if (!isConst(param[c * 2]))
-                    {
-                        firstVar = c;
-                        break;
-                    }
-                for (int c = 0; c < firstVar; c++)
-                    data.writeBytes(rec4((param[c * 2] & ELEM_FX16) != 0 ? (param[c * 2 + 1] & 0xFFFF) : param[c * 2 + 1]));
-                for (int c = firstVar; c < 5; c++)
-                {
-                    long info = param[c * 2], off = param[c * 2 + 1];
-                    if (isConst(info))
-                    {
-                        data.writeBytes(rec4((info & ELEM_FX16) != 0 ? (off & 0xFFFF) : off));
-                    }
-                    else
-                    {
-                        np[m][c * 2 + 1] = base + data.size();
-                        data.writeBytes(materials.get(m).rawArray[c]);
-                        while (data.size() % 4 != 0)
-                            data.write(0);
-                    }
-                }
+                params[index] = appendMaterial(data, base, index);
+                index++;
             }
 
-            byte[] anim = new byte[base + data.size()];
-            System.arraycopy(header, 0, anim, 0, 8);
-            List<byte[]> recs = new ArrayList<>();
-            for (int m = 0; m < materials.size(); m++)
+            return new SrtPool(data.toByteArray(), params);
+        }
+
+        /**
+         * @param data the channel pool
+         * @param base offset where channel data begins
+         * @param index which material
+         * @return that material's parameter words, with variable offsets rewritten
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private long[] appendMaterial(ByteArrayOutputStream data, int base, int index)
+        {
+            long[] param = materials.get(index).rawParam;
+            long[] next = param.clone();
+            int firstVar = firstVariable(param, 0);
+            writeLeading(data, param, firstVar);
+            writeTail(data, base, index, param, next, firstVar);
+
+            return next;
+        }
+
+        /**
+         * @param param the ten channel words
+         * @param channel the channel to test
+         * @return the first variable channel, or 5 when every channel is constant
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static int firstVariable(long[] param, int channel)
+        {
+            if (channel >= 5)
+                return 5;
+
+            return constantOrNext(param, channel);
+        }
+
+        /**
+         * @param param the ten channel words
+         * @param channel the channel to test
+         * @return this channel when it is variable, otherwise the next variable channel
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static int constantOrNext(long[] param, int channel)
+        {
+            if (isConst(param[channel * 2]))
+                return firstVariable(param, channel + 1);
+
+            return channel;
+        }
+
+        /**
+         * @param data the channel pool
+         * @param param the ten channel words
+         * @param firstVar the first variable channel
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static void writeLeading(ByteArrayOutputStream data, long[] param, int firstVar)
+        {
+            int channel = 0;
+
+            while (channel < firstVar)
             {
-                byte[] rec = new byte[40];
-                for (int k = 0; k < 10; k++)
-                    for (int b = 0; b < 4; b++)
-                        rec[k * 4 + b] = (byte) (np[m][k] >> (8 * b));
-                recs.add(rec);
+                data.writeBytes(constWord(param, channel));
+                channel++;
             }
-            System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 40)), 0, anim, 8, dictSize);
-            System.arraycopy(data.toByteArray(), 0, anim, base, data.size());
+        }
+
+        /**
+         * @param data the channel pool
+         * @param base offset where channel data begins
+         * @param index which material
+         * @param param the original parameter words
+         * @param next the rewritten parameter words
+         * @param firstVar the first variable channel
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private void writeTail(ByteArrayOutputStream data, int base, int index, long[] param, long[] next, int firstVar)
+        {
+            int channel = firstVar;
+
+            while (channel < 5)
+            {
+                writeChannel(data, base, index, param, next, channel);
+                channel++;
+            }
+        }
+
+        /**
+         * @param data the channel pool
+         * @param base offset where channel data begins
+         * @param index which material
+         * @param param the original parameter words
+         * @param next the rewritten parameter words
+         * @param channel which channel
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private void writeChannel(ByteArrayOutputStream data, int base, int index, long[] param, long[] next, int channel)
+        {
+            if (isConst(param[channel * 2]))
+            {
+                data.writeBytes(constWord(param, channel));
+
+                return;
+            }
+
+            next[channel * 2 + 1] = base + data.size();
+            data.writeBytes(materials.get(index).rawArray[channel]);
+            padWord(data);
+        }
+
+        /**
+         * @param param the ten channel words
+         * @param channel which channel
+         * @return the 4-byte constant value, masked to 16 bits when the channel is fx16
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static byte[] constWord(long[] param, int channel)
+        {
+            long info = param[channel * 2];
+            long off = param[channel * 2 + 1];
+
+            if ((info & ELEM_FX16) != 0)
+                return MemBuf.le32(off & 0xFFFF);
+
+            return MemBuf.le32(off);
+        }
+
+        /**
+         * @param data the channel pool
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static void padWord(ByteArrayOutputStream data)
+        {
+            while (data.size() % 4 != 0)
+                data.write(0);
+        }
+
+        /**
+         * @param matNames material names
+         * @param dictSize material dictionary size
+         * @param base offset where channel data begins
+         * @param pool the channel pool and rewritten parameters
+         * @return the animation block
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private byte[] packSrt(List<String> matNames, int dictSize, int base, SrtPool pool)
+        {
+            byte[] anim = new byte[base + pool.data.length];
+            System.arraycopy(header, 0, anim, 0, 8);
+            byte[] dictionary = serialize(G3dDictionary.build(matNames, srtMaterialRecords(pool.params), 40));
+            System.arraycopy(dictionary, 0, anim, 8, dictSize);
+            System.arraycopy(pool.data, 0, anim, base, pool.data.length);
+
             return anim;
+        }
+
+        /**
+         * @param params rewritten parameter words, one row per material
+         * @return one 40-byte dictionary record per material
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static List<byte[]> srtMaterialRecords(long[][] params)
+        {
+            List<byte[]> records = new ArrayList<>();
+            int index = 0;
+
+            while (index < params.length)
+            {
+                records.add(paramRecord(params[index]));
+                index++;
+            }
+
+            return records;
+        }
+
+        /**
+         * @param param ten little-endian parameter words
+         * @return the 40-byte record
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static byte[] paramRecord(long[] param)
+        {
+            byte[] record = new byte[40];
+            int index = 0;
+
+            while (index < 10)
+            {
+                MemBuf.putUInt32(record, index * 4, param[index]);
+                index++;
+            }
+
+            return record;
+        }
+
+        /**
+         * Appended channel bytes and the parameter words that point into them.
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexSRTAnm"
+         */
+        private static final class SrtPool
+        {
+            private final byte[] data;
+            private final long[][] params;
+
+            private SrtPool(byte[] data, long[][] params)
+            {
+                this.data = data;
+                this.params = params;
+            }
         }
 
         /** @return this animation's name */

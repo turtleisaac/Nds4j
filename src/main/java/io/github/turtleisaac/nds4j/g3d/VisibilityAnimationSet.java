@@ -119,10 +119,10 @@ public class VisibilityAnimationSet extends G3dFile
             blob[1] = 0x00;
             blob[2] = 0x41;
             blob[3] = 0x56; // NNS visibility-anim tag ("V\0AV")
-            u16(blob, 4, nf);
-            u16(blob, 6, nn);
-            u16(blob, 8, size);
-            u16(blob, 10, 0);
+            MemBuf.putUInt16(blob, 4, nf);
+            MemBuf.putUInt16(blob, 6, nn);
+            MemBuf.putUInt16(blob, 8, size);
+            MemBuf.putUInt16(blob, 10, 0);
             int bit = 0;
             for (int f = 0; f < nf; f++)
                 for (int n = 0; n < nn; n++)
@@ -138,13 +138,13 @@ public class VisibilityAnimationSet extends G3dFile
         int cursor = 8 + dictSize; // animation data follows magic+size+dict
         for (byte[] blob : blobs)
         {
-            recs.add(rec4(cursor));
+            recs.add(MemBuf.le32(cursor));
             cursor += blob.length;
         }
 
         ByteArrayOutputStream vis0 = new ByteArrayOutputStream();
         vis0.writeBytes("VIS0".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-        vis0.writeBytes(rec4(cursor)); // VIS0 block size
+        vis0.writeBytes(MemBuf.le32(cursor)); // VIS0 block size
         vis0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
         for (byte[] blob : blobs)
             vis0.writeBytes(blob);
@@ -153,28 +153,16 @@ public class VisibilityAnimationSet extends G3dFile
 
     private static List<byte[]> placeholders(int n)
     {
-        List<byte[]> l = new ArrayList<>();
-        for (int i = 0; i < n; i++)
-            l.add(rec4(0));
-        return l;
+        byte[][] rows = new byte[n][];
+        java.util.Arrays.setAll(rows, index -> MemBuf.le32(0));
+
+        return new ArrayList<>(java.util.Arrays.asList(rows));
     }
     private static byte[] serialize(G3dDictionary d)
     {
         MemBuf b = MemBuf.create();
         d.write(b.writer());
         return b.reader().getBuffer();
-    }
-    private static byte[] rec4(long v)
-    {
-        byte[] r = new byte[4];
-        for (int i = 0; i < 4; i++)
-            r[i] = (byte) (v >> (8 * i));
-        return r;
-    }
-    private static void u16(byte[] d, int o, int v)
-    {
-        d[o] = (byte) v;
-        d[o + 1] = (byte) (v >> 8);
     }
 
     /**

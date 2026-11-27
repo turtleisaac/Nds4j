@@ -58,7 +58,9 @@ import java.util.PriorityQueue;
  */
 public final class NitroHuffman
 {
-    private NitroHuffman() {}
+    private NitroHuffman()
+    {
+    }
 
     /**
      * @return true if {@code data} carries a Nitro Huffman header (type {@code 0x24} or {@code 0x28})
@@ -69,18 +71,22 @@ public final class NitroHuffman
      */
     public static boolean isCompressed(byte[] data)
     {
-        if (data == null || data.length < 5) return false;
+        if (data == null || data.length < 5)
+            return false;
         int type = data[0] & 0xFF;
-        if (type != 0x24 && type != 0x28) return false;
+        if (type != 0x24 && type != 0x28)
+            return false;
         long size = u24(data, 1);
         int headerEnd = 4;
         if (size == 0)
         {
-            if (data.length < 9) return false;
-            size = u32(data, 4);
+            if (data.length < 9)
+                return false;
+            size = MemBuf.uint32(data, 4);
             headerEnd = 8;
         }
-        if (size <= 0 || data.length <= headerEnd) return false;
+        if (size <= 0 || data.length <= headerEnd)
+            return false;
         int treeSizeByte = data[headerEnd] & 0xFF;
         long treeEnd = headerEnd + (treeSizeByte + 1) * 2L;
         return treeEnd <= data.length;
@@ -94,84 +100,305 @@ public final class NitroHuffman
      */
     public static byte[] decompress(byte[] data)
     {
-        int type = data[0] & 0xFF;
-        int blockBits;
-        if (type == 0x24) blockBits = 4;
-        else if (type == 0x28) blockBits = 8;
-        else throw new IllegalArgumentException(String.format("not a Nitro Huffman stream (type 0x%02X)", type));
+        int blockBits = huffmanWidth(data[0] & 0xFF);
+        HuffmanHeader header = huffmanHeader(data);
+        int treeSizeByte = data[header.headerEnd] & 0xFF;
+        int treeTableStart = header.headerEnd + 1;
+        int treeEnd = header.headerEnd + (treeSizeByte + 1) * 2;
 
+        return inflate(data, blockBits, header.size, treeTableStart, treeEnd);
+    }
+
+    /**
+     * @param type the Huffman type byte
+     * @return 4 or 8, the width of one symbol
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static int huffmanWidth(int type)
+    {
+        if (type == 0x24)
+            return 4;
+
+        return huffmanEight(type);
+    }
+
+    /**
+     * @param type the Huffman type byte
+     * @return 8 when the stream is 8-bit Huffman
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static int huffmanEight(int type)
+    {
+        if (type == 0x28)
+            return 8;
+
+        throw new IllegalArgumentException(String.format("not a Nitro Huffman stream (type 0x%02X)", type));
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @return the decompressed size and where the tree-size byte sits
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static HuffmanHeader huffmanHeader(byte[] data)
+    {
         long size = u24(data, 1);
-        int headerEnd = 4; // position of the treeSizeByte
-        if (size == 0)
-        {
-            size = u32(data, 4);
-            headerEnd = 8;
-        }
 
-        int treeSizeByte = data[headerEnd] & 0xFF;
-        int treeTableStart = headerEnd + 1;      // the root node's own address
-        int treeEnd = headerEnd + (treeSizeByte + 1) * 2; // exclusive bound; also where the bitstream begins
+        if (size != 0)
+            return new HuffmanHeader(size, 4);
 
+        return new HuffmanHeader(MemBuf.uint32(data, 4), 8);
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param blockBits 4 or 8
+     * @param size the decompressed size
+     * @param treeStart the root node's address
+     * @param treeEnd where the bitstream begins
+     * @return the decompressed bytes
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static byte[] inflate(byte[] data, int blockBits, long size, int treeStart, int treeEnd)
+    {
         byte[] out = new byte[(int) size];
-        int op = 0, ip = treeEnd;
-        int word = 0, bitsLeft = 0;
-        int cachedNibble = -1;
+        BitCursor cursor = new BitCursor(treeEnd);
+        int[] cached = new int[] { -1 };
+        int op = 0;
 
         while (op < size)
-        {
-            int nodeAddr = treeTableStart;
-            boolean isData = false;
-            while (!isData)
-            {
-                if (bitsLeft == 0)
-                {
-                    if (ip + 4 > data.length)
-                        throw new IllegalArgumentException("truncated Nitro Huffman bitstream");
-                    word = (data[ip] & 0xFF) | ((data[ip + 1] & 0xFF) << 8)
-                            | ((data[ip + 2] & 0xFF) << 16) | ((data[ip + 3] & 0xFF) << 24);
-                    ip += 4;
-                    bitsLeft = 32;
-                }
-                bitsLeft--;
-                boolean bitIsOne = ((word >>> bitsLeft) & 1) != 0;
+            op = storeSymbol(out, op, blockBits, follow(data, cursor, treeStart, treeEnd), cached);
 
-                if (nodeAddr < 0 || nodeAddr >= treeEnd || nodeAddr >= data.length)
-                    throw new IllegalArgumentException("Nitro Huffman tree reference out of bounds");
-                int raw = data[nodeAddr] & 0xFF;
-                int offset = raw & 0x3F;
-                boolean zeroIsData = (raw & 0x80) != 0;
-                boolean oneIsData = (raw & 0x40) != 0;
-                int zeroAddr = (nodeAddr & ~1) + offset * 2 + 2;
-
-                if (bitIsOne) { nodeAddr = zeroAddr + 1; isData = oneIsData; }
-                else { nodeAddr = zeroAddr; isData = zeroIsData; }
-            }
-            if (nodeAddr < 0 || nodeAddr >= data.length)
-                throw new IllegalArgumentException("Nitro Huffman tree reference out of bounds");
-            int symbol = data[nodeAddr] & 0xFF;
-
-            if (blockBits == 8)
-            {
-                out[op++] = (byte) symbol;
-            }
-            else if (cachedNibble < 0)
-            {
-                cachedNibble = symbol & 0xF;
-            }
-            else
-            {
-                out[op++] = (byte) ((cachedNibble << 4) | (symbol & 0xF));
-                cachedNibble = -1;
-            }
-        }
         return out;
     }
 
+    /**
+     * @param data the compressed bytes
+     * @param cursor the bitstream
+     * @param node the current tree node
+     * @param treeEnd where the bitstream begins
+     * @return the next symbol
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static int follow(byte[] data, BitCursor cursor, int node, int treeEnd)
+    {
+        Step step = step(data, cursor, node, treeEnd);
+
+        if (!step.data)
+            return follow(data, cursor, step.node, treeEnd);
+
+        requireSymbol(data, step.node);
+
+        return data[step.node] & 0xFF;
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param cursor the bitstream
+     * @param node the current tree node
+     * @param treeEnd where the bitstream begins
+     * @return the child taken by the next bit
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static Step step(byte[] data, BitCursor cursor, int node, int treeEnd)
+    {
+        refill(data, cursor);
+        boolean one = takeBit(cursor);
+        requireTree(data, node, treeEnd);
+
+        return child(data, node, one);
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param cursor the bitstream
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static void refill(byte[] data, BitCursor cursor)
+    {
+        if (cursor.bitsLeft != 0)
+            return;
+
+        loadWord(data, cursor);
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param cursor the bitstream
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static void loadWord(byte[] data, BitCursor cursor)
+    {
+        if (cursor.ip + 4 > data.length)
+            throw new IllegalArgumentException("truncated Nitro Huffman bitstream");
+
+        cursor.word = (int) MemBuf.uint32(data, cursor.ip);
+        cursor.ip += 4;
+        cursor.bitsLeft = 32;
+    }
+
+    /**
+     * @param cursor the bitstream
+     * @return the next bit
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static boolean takeBit(BitCursor cursor)
+    {
+        cursor.bitsLeft--;
+
+        return ((cursor.word >>> cursor.bitsLeft) & 1) != 0;
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param node a tree-node address
+     * @param treeEnd where the bitstream begins
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static void requireTree(byte[] data, int node, int treeEnd)
+    {
+        if (node < 0)
+            throw new IllegalArgumentException("Nitro Huffman tree reference out of bounds");
+
+        requireInTable(data, node, treeEnd);
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param node a tree-node address
+     * @param treeEnd where the bitstream begins
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static void requireInTable(byte[] data, int node, int treeEnd)
+    {
+        if (node >= treeEnd || node >= data.length)
+            throw new IllegalArgumentException("Nitro Huffman tree reference out of bounds");
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param node a symbol address
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static void requireSymbol(byte[] data, int node)
+    {
+        if (node < 0 || node >= data.length)
+            throw new IllegalArgumentException("Nitro Huffman tree reference out of bounds");
+    }
+
+    /**
+     * @param data the compressed bytes
+     * @param node the current tree node
+     * @param one whether the bit just read was 1
+     * @return that child
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static Step child(byte[] data, int node, boolean one)
+    {
+        int raw = data[node] & 0xFF;
+        int offset = raw & 0x3F;
+        int zeroAddr = (node & ~1) + offset * 2 + 2;
+
+        if (one)
+            return new Step(zeroAddr + 1, (raw & 0x40) != 0);
+
+        return new Step(zeroAddr, (raw & 0x80) != 0);
+    }
+
+    /**
+     * @param out the decompressed bytes
+     * @param op the next output index
+     * @param blockBits 4 or 8
+     * @param symbol the symbol just decoded
+     * @param cached the previous nibble, or -1
+     * @return the next output index
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static int storeSymbol(byte[] out, int op, int blockBits, int symbol, int[] cached)
+    {
+        if (blockBits == 8)
+        {
+            out[op] = (byte) symbol;
+
+            return op + 1;
+        }
+
+        return storeNibble(out, op, symbol, cached);
+    }
+
+    /**
+     * @param out the decompressed bytes
+     * @param op the next output index
+     * @param symbol a 4-bit symbol
+     * @param cached the previous nibble, or -1
+     * @return the next output index
+     * @see "GBATEK DS Cartridge Nitro Huffman"
+     */
+    private static int storeNibble(byte[] out, int op, int symbol, int[] cached)
+    {
+        if (cached[0] < 0)
+        {
+            cached[0] = symbol & 0xF;
+
+            return op;
+        }
+
+        out[op] = (byte) ((cached[0] << 4) | (symbol & 0xF));
+        cached[0] = -1;
+
+        return op + 1;
+    }
+
+    /** The decompressed size and the tree-size byte's offset. @see "GBATEK DS Cartridge Nitro Huffman" */
+    private static final class HuffmanHeader
+    {
+        private final long size;
+        private final int headerEnd;
+
+        private HuffmanHeader(long size, int headerEnd)
+        {
+            this.size = size;
+            this.headerEnd = headerEnd;
+        }
+    }
+
+    /** One bit cursor over the Huffman bitstream. @see "GBATEK DS Cartridge Nitro Huffman" */
+    private static final class BitCursor
+    {
+        private int ip;
+        private int word;
+        private int bitsLeft;
+
+        private BitCursor(int ip)
+        {
+            this.ip = ip;
+        }
+    }
+
+    /** A tree step: the child address and whether that child is a symbol. @see "GBATEK DS Cartridge Nitro Huffman" */
+    private static final class Step
+    {
+        private final int node;
+        private final boolean data;
+
+        private Step(int node, boolean data)
+        {
+            this.node = node;
+            this.data = data;
+        }
+    }
+
     /** Compresses with 4-bit Huffman (type {@code 0x24}). @param data the raw bytes @return the compressed stream. */
-    public static byte[] compress4Bit(byte[] data) { return compress(data, 4); }
+    public static byte[] compress4Bit(byte[] data)
+    {
+        return compress(data, 4);
+    }
 
     /** Compresses with 8-bit Huffman (type {@code 0x28}). @param data the raw bytes @return the compressed stream. */
-    public static byte[] compress8Bit(byte[] data) { return compress(data, 8); }
+    public static byte[] compress8Bit(byte[] data)
+    {
+        return compress(data, 8);
+    }
 
     private static byte[] compress(byte[] data, int blockBits)
     {
@@ -182,18 +409,24 @@ public final class NitroHuffman
         long[] freq = new long[alphabet];
         if (blockBits == 8)
         {
-            for (byte b : data) freq[b & 0xFF]++;
+            for (byte b : data)
+                freq[b & 0xFF]++;
         }
         else
         {
-            for (byte b : data) { freq[(b >> 4) & 0xF]++; freq[b & 0xF]++; }
+            for (byte b : data)
+            {
+                freq[(b >> 4) & 0xF]++;
+                freq[b & 0xF]++;
+            }
         }
 
         Node[] leafBySymbol = new Node[alphabet];
         List<Node> leaves = new ArrayList<>();
         for (int i = 0; i < alphabet; i++)
         {
-            if (freq[i] == 0) continue;
+            if (freq[i] == 0)
+                continue;
             Node leaf = Node.leaf(i, freq[i]);
             leafBySymbol[i] = leaf;
             leaves.add(leaf);
@@ -203,7 +436,8 @@ public final class NitroHuffman
         // zero-frequency filler leaves that the bitstream never actually selects.
         for (int i = 0; i < alphabet && leaves.size() < 2; i++)
         {
-            if (freq[i] != 0) continue;
+            if (freq[i] != 0)
+                continue;
             Node leaf = Node.leaf(i, 0);
             leafBySymbol[i] = leaf;
             leaves.add(leaf);
@@ -232,7 +466,10 @@ public final class NitroHuffman
         // from the next u32" -- see isCompressed/decompress), so a genuinely empty input must use it.
         if (data.length == 0)
         {
-            out.write(0); out.write(0); out.write(0); out.write(0);
+            out.write(0);
+            out.write(0);
+            out.write(0);
+            out.write(0);
         }
 
         // Breadth-first tree serialisation: mirrors the read-side addressing scheme exactly, so a
@@ -258,8 +495,10 @@ public final class NitroHuffman
                     throw new IllegalArgumentException(
                             "Huffman tree too wide to encode (its BFS frontier exceeds the format's 6-bit offset field)");
                 int b = off;
-                if (n.child0.isData) b |= 0x80;
-                if (n.child1.isData) b |= 0x40;
+                if (n.child0.isData)
+                    b |= 0x80;
+                if (n.child1.isData)
+                    b |= 0x40;
                 out.write(b);
                 bfs.add(n.child0);
                 bfs.add(n.child1);
@@ -285,7 +524,8 @@ public final class NitroHuffman
                         bitsFilled = 0;
                     }
                     bitsFilled++;
-                    if (bit) word |= 1 << (32 - bitsFilled);
+                    if (bit)
+                        word |= 1 << (32 - bitsFilled);
                 }
             }
         }
@@ -308,7 +548,8 @@ public final class NitroHuffman
     private static boolean[] pathFromRoot(Node leaf)
     {
         int depth = 0;
-        for (Node n = leaf; n.parent != null; n = n.parent) depth++;
+        for (Node n = leaf; n.parent != null; n = n.parent)
+            depth++;
         boolean[] path = new boolean[depth];
         Node n = leaf;
         for (int d = depth - 1; d >= 0; d--)
@@ -349,10 +590,5 @@ public final class NitroHuffman
     private static long u24(byte[] d, int off)
     {
         return (d[off] & 0xFFL) | ((d[off + 1] & 0xFFL) << 8) | ((d[off + 2] & 0xFFL) << 16);
-    }
-
-    private static long u32(byte[] d, int off)
-    {
-        return (d[off] & 0xFFL) | ((d[off + 1] & 0xFFL) << 8) | ((d[off + 2] & 0xFFL) << 16) | ((d[off + 3] & 0xFFL) << 24);
     }
 }

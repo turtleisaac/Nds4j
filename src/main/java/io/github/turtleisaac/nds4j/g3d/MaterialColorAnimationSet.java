@@ -89,29 +89,69 @@ public class MaterialColorAnimationSet extends G3dFile
      */
     public byte[] encode()
     {
-        List<String> names = new ArrayList<>();
-        for (Animation a : animations)
-            names.add(a.name);
-        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
-        byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++)
-            blobs[i] = animations.get(i).encodeBlob();
+        // MAT0 is the name dictionary followed by each animation's own block.
+        String[] names = colorNames();
+        byte[][] blobs = colorBlobs();
 
-        List<byte[]> recs = new ArrayList<>();
-        int cursor = 8 + dictSize;
-        for (byte[] blob : blobs)
+        return colorFile(names, blobs);
+    }
+
+    /**
+     * @return the animation names in file order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private String[] colorNames()
+    {
+        String[] names = new String[animations.size()];
+        int index = 0;
+
+        while (index < names.length)
         {
-            recs.add(rec4(cursor));
-            cursor += blob.length;
+            names[index] = animations.get(index).name;
+            index++;
         }
 
-        ByteArrayOutputStream mat0 = new ByteArrayOutputStream();
-        mat0.writeBytes("MAT0".getBytes(StandardCharsets.US_ASCII));
-        mat0.writeBytes(rec4(cursor));
-        mat0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        return names;
+    }
+
+    /**
+     * @return each animation's MAT0 payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private byte[][] colorBlobs()
+    {
+        byte[][] blobs = new byte[animations.size()][];
+        int index = 0;
+
+        while (index < blobs.length)
+        {
+            blobs[index] = animations.get(index).encodeBlob();
+            index++;
+        }
+
+        return blobs;
+    }
+
+    /**
+     * @param names animation names
+     * @param blobs animation payloads
+     * @return the BMA0 container
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResMatCAnm"
+     */
+    private byte[] colorFile(String[] names, byte[][] blobs)
+    {
+        List<String> listed = java.util.Arrays.asList(names);
+        int origin = 8 + serialize(G3dDictionary.build(listed, placeholders(listed.size(), 4), 4)).length;
+        MemBuf mat0 = MemBuf.create();
+        MemBuf.MemBufWriter writer = mat0.writer();
+        writer.write("MAT0".getBytes(StandardCharsets.US_ASCII));
+        writer.write(MemBuf.le32(NsbBlock.end(blobs, origin)));
+        writer.write(serialize(G3dDictionary.build(listed, NsbBlock.offsets(blobs, origin), 4)));
+
         for (byte[] blob : blobs)
-            mat0.writeBytes(blob);
-        return G3dFile.assembleContainer("BMA0", version, mat0.toByteArray());
+            writer.write(blob);
+
+        return G3dFile.assembleContainer("BMA0", version, mat0.reader().getBuffer());
     }
 
     /**
@@ -172,13 +212,6 @@ public class MaterialColorAnimationSet extends G3dFile
         MemBuf b = MemBuf.create();
         d.write(b.writer());
         return b.reader().getBuffer();
-    }
-    private static byte[] rec4(long v)
-    {
-        byte[] r = new byte[4];
-        for (int i = 0; i < 4; i++)
-            r[i] = (byte) (v >> (8 * i));
-        return r;
     }
 
     /**

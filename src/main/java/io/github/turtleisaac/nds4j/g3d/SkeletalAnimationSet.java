@@ -21,7 +21,6 @@ package io.github.turtleisaac.nds4j.g3d;
 
 import io.github.turtleisaac.nds4j.framework.MemBuf;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -158,29 +157,58 @@ public class SkeletalAnimationSet extends G3dFile
      */
     public byte[] encode()
     {
-        List<String> names = new ArrayList<>();
-        for (Animation a : animations)
-            names.add(a.name);
-        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size()), 4)).length;
-        byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++)
-            blobs[i] = reassemble(animations.get(i).payload);
+        // Each animation is relayed, then packed behind a JNT0 dictionary.
+        List<String> names = animationNames();
+        byte[][] blobs = reassembledBlobs();
 
-        List<byte[]> recs = new ArrayList<>();
-        int cursor = 8 + dictSize;
-        for (byte[] blob : blobs)
+        return bcaFile(names, blobs);
+    }
+
+    /**
+     * @return the animation names in file order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
+     */
+    private List<String> animationNames()
+    {
+        List<String> names = new ArrayList<>();
+
+        for (Animation anim : animations)
         {
-            recs.add(rec4(cursor));
-            cursor += blob.length;
+            names.add(anim.name);
         }
 
-        ByteArrayOutputStream jnt0 = new ByteArrayOutputStream();
-        jnt0.writeBytes("JNT0".getBytes(StandardCharsets.US_ASCII));
-        jnt0.writeBytes(rec4(cursor));
-        jnt0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
-        for (byte[] blob : blobs)
-            jnt0.writeBytes(blob);
-        return G3dFile.assembleContainer("BCA0", version, jnt0.toByteArray());
+        return names;
+    }
+
+    /**
+     * @return each animation's reassembled payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
+     */
+    private byte[][] reassembledBlobs()
+    {
+        byte[][] blobs = new byte[animations.size()][];
+
+        for (int i = 0; i < animations.size(); i++)
+        {
+            blobs[i] = reassemble(animations.get(i).payload);
+        }
+
+        return blobs;
+    }
+
+    /**
+     * @param names animation names
+     * @param blobs reassembled payloads
+     * @return the BCA0 container
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
+     */
+    private byte[] bcaFile(List<String> names, byte[][] blobs)
+    {
+        int origin = 8 + serialize(G3dDictionary.build(names, placeholders(animations.size()), 4)).length;
+        byte[] dictionary = serialize(G3dDictionary.build(names, NsbBlock.offsets(blobs, origin), 4));
+        byte[] jnt0 = NsbBlock.block("JNT0", NsbBlock.end(blobs, origin), dictionary, blobs);
+
+        return G3dFile.assembleContainer("BCA0", version, jnt0);
     }
 
     // --- the byte-exact NSBCA payload writer (relays a decoded animation, offsets recomputed) ---
@@ -565,20 +593,21 @@ public class SkeletalAnimationSet extends G3dFile
     {
         // Node blocks, then the two rotation pools, then the keyframe arrays.
         int cur = (20 + head.nn * 2 + 3) & ~3;
-        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        MemBuf bodyBuf = MemBuf.create();
+        MemBuf.MemBufWriter body = bodyBuf.writer();
         int[] newNodeOfs = stampNodes(body, parts.nodeRaw, cur);
-        int newR3 = cur + body.size();
-        body.writeBytes(parts.rot3);
-        int newR5 = cur + body.size();
-        body.writeBytes(parts.rot5);
+        int newR3 = cur + body.getPosition();
+        body.write(parts.rot3);
+        int newR5 = cur + body.getPosition();
+        body.write(parts.rot5);
         Map<Integer, Integer> newArrOff = placeArrays(a, parts.arrays, body, cur);
         padAlign(body, cur, 4);
 
         // Copy the header, then the repointed pieces into the gaps the sizes describe.
-        byte[] out = new byte[cur + body.size()];
+        byte[] out = new byte[cur + body.getPosition()];
         System.arraycopy(a, 0, out, 0, 20);
-        writeU32(out, 12, newR3);
-        writeU32(out, 16, newR5);
+        MemBuf.putUInt32(out, 12, newR3);
+        MemBuf.putUInt32(out, 16, newR5);
         patchNodes(out, parts, newNodeOfs, newArrOff);
         System.arraycopy(parts.rot3, 0, out, newR3, parts.rot3.length);
         System.arraycopy(parts.rot5, 0, out, newR5, parts.rot5.length);
@@ -594,14 +623,14 @@ public class SkeletalAnimationSet extends G3dFile
      * @return each node's new offset
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
      */
-    private static int[] stampNodes(ByteArrayOutputStream body, byte[][] nodeRaw, int cur)
+    private static int[] stampNodes(MemBuf.MemBufWriter body, byte[][] nodeRaw, int cur)
     {
         int[] newNodeOfs = new int[nodeRaw.length];
 
         for (int n = 0; n < nodeRaw.length; n++)
         {
-            newNodeOfs[n] = cur + body.size();
-            body.writeBytes(nodeRaw[n]);
+            newNodeOfs[n] = cur + body.getPosition();
+            body.write(nodeRaw[n]);
         }
 
         return newNodeOfs;
@@ -615,7 +644,7 @@ public class SkeletalAnimationSet extends G3dFile
      * @return original array offset to its new offset
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
      */
-    private static Map<Integer, Integer> placeArrays(byte[] a, Map<Integer, int[]> arrays, ByteArrayOutputStream body, int cur)
+    private static Map<Integer, Integer> placeArrays(byte[] a, Map<Integer, int[]> arrays, MemBuf.MemBufWriter body, int cur)
     {
         Map<Integer, Integer> placed = new HashMap<>();
         int prevKind = -1;
@@ -638,13 +667,13 @@ public class SkeletalAnimationSet extends G3dFile
      * @return this array's kind
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
      */
-    private static int placeOneArray(byte[] a, ByteArrayOutputStream body, int cur, Map<Integer, Integer> placed, int prevKind, Map.Entry<Integer, int[]> entry)
+    private static int placeOneArray(byte[] a, MemBuf.MemBufWriter body, int cur, Map<Integer, Integer> placed, int prevKind, Map.Entry<Integer, int[]> entry)
     {
         int kind = entry.getValue()[1];
         int el = entry.getValue()[2];
         padAlign(body, cur, arrayAlign(kind, prevKind, el));
-        placed.put(entry.getKey(), cur + body.size());
-        body.writeBytes(Arrays.copyOfRange(a, entry.getKey(), entry.getKey() + entry.getValue()[0]));
+        placed.put(entry.getKey(), cur + body.getPosition());
+        body.write(Arrays.copyOfRange(a, entry.getKey(), entry.getKey() + entry.getValue()[0]));
 
         return kind;
     }
@@ -670,11 +699,11 @@ public class SkeletalAnimationSet extends G3dFile
      * @param align the modulus to reach
      * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResJntAnm"
      */
-    private static void padAlign(ByteArrayOutputStream body, int cur, int align)
+    private static void padAlign(MemBuf.MemBufWriter body, int cur, int align)
     {
-        while ((cur + body.size()) % align != 0)
+        while ((cur + body.getPosition()) % align != 0)
         {
-            body.write(0);
+            body.writeByte((byte) 0);
         }
     }
 
@@ -690,7 +719,7 @@ public class SkeletalAnimationSet extends G3dFile
         for (int n = 0; n < newNodeOfs.length; n++)
         {
             patchNode(out, parts.nodeRaw[n], parts.nodeFields.get(n), newNodeOfs[n], newArrOff);
-            writeU16(out, 20 + n * 2, newNodeOfs[n]);
+            MemBuf.putUInt16(out, 20 + n * 2, newNodeOfs[n]);
         }
     }
 
@@ -719,7 +748,7 @@ public class SkeletalAnimationSet extends G3dFile
     {
         for (int[] field : fields)
         {
-            writeU32(block, field[0], newArrOff.get(field[1]));
+            MemBuf.putUInt32(block, field[0], newArrOff.get(field[1]));
         }
     }
 
@@ -794,7 +823,7 @@ public class SkeletalAnimationSet extends G3dFile
     {
         List<byte[]> l = new ArrayList<>();
         for (int i = 0; i < n; i++)
-            l.add(rec4(0));
+            l.add(MemBuf.le32(0));
         return l;
     }
     private static byte[] serialize(G3dDictionary d)
@@ -802,22 +831,6 @@ public class SkeletalAnimationSet extends G3dFile
         MemBuf b = MemBuf.create();
         d.write(b.writer());
         return b.reader().getBuffer();
-    }
-    private static byte[] rec4(long v)
-    {
-        byte[] r = new byte[4];
-        writeU32(r, 0, v);
-        return r;
-    }
-    private static void writeU16(byte[] d, int o, int v)
-    {
-        d[o] = (byte) v;
-        d[o + 1] = (byte) (v >> 8);
-    }
-    private static void writeU32(byte[] d, int o, long v)
-    {
-        for (int i = 0; i < 4; i++)
-            d[o + i] = (byte) (v >> (8 * i));
     }
 
     /**

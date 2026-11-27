@@ -88,7 +88,7 @@ public class NitroFont extends GenericNtrFile
         {
             if (pos + 8 > blockRegion.length)
                 throw new RuntimeException("Malformed NFTR: block " + i + " runs past end of file");
-            long blockSize = u32(blockRegion, pos + 4);
+            long blockSize = MemBuf.uint32(blockRegion, pos + 4);
             if (blockSize < 8 || pos + blockSize > blockRegion.length)
                 throw new RuntimeException("Malformed NFTR: block " + i + " has an out-of-range size (" + blockSize + ")");
             blockStarts.add(pos);
@@ -136,12 +136,13 @@ public class NitroFont extends GenericNtrFile
             throw new RuntimeException("NFTR is missing its FINF (font info) block");
     }
 
-    private static int u8(byte[] d, int o) { return d[o] & 0xFF; }
-    private static int s8(byte[] d, int o) { return d[o]; }
-    private static int u16(byte[] d, int o) { return (d[o] & 0xFF) | ((d[o + 1] & 0xFF) << 8); }
-    private static long u32(byte[] d, int o)
+    private static int u8(byte[] d, int o)
     {
-        return (d[o] & 0xFFL) | ((d[o + 1] & 0xFFL) << 8) | ((d[o + 2] & 0xFFL) << 16) | ((d[o + 3] & 0xFFL) << 24);
+        return d[o] & 0xFF;
+    }
+    private static int s8(byte[] d, int o)
+    {
+        return d[o];
     }
 
     /* END SECTION: decode */
@@ -387,8 +388,8 @@ public class NitroFont extends GenericNtrFile
      */
     public static class FontInfo
     {
-        private final byte[] file;  // the block region, so the metric setters can edit in place
-        private final int body;     // absolute offset of this block's body within file
+        private final byte[] file; // the block region, so the metric setters can edit in place
+        private final int body; // absolute offset of this block's body within file
         private final int fontType;
         private int lineFeed;
         private final int defaultCharIndex;
@@ -411,15 +412,15 @@ public class NitroFont extends GenericNtrFile
             body = b;
             fontType = u8(d, b);
             lineFeed = u8(d, b + 1);
-            defaultCharIndex = u16(d, b + 2);
+            defaultCharIndex = MemBuf.uint16(d, b + 2);
             defaultLeft = s8(d, b + 4);
             defaultGlyphWidth = u8(d, b + 5);
             defaultCharWidth = u8(d, b + 6);
             encoding = u8(d, b + 7);
-            glyphOffset = u32(d, b + 8);
-            widthOffset = u32(d, b + 12);
-            mapOffset = u32(d, b + 16);
-            long blockLen = u32(d, blockStart + 4);
+            glyphOffset = MemBuf.uint32(d, b + 8);
+            widthOffset = MemBuf.uint32(d, b + 12);
+            mapOffset = MemBuf.uint32(d, b + 16);
+            long blockLen = MemBuf.uint32(d, blockStart + 4);
             if (blockLen >= 0x20)
             {
                 height = u8(d, b + 20);
@@ -433,59 +434,129 @@ public class NitroFont extends GenericNtrFile
         }
 
         /** @return the font type (0 = bitmap glyph font, the only kind decoded here) */
-        public int getFontType() { return fontType; }
+        public int getFontType()
+        {
+            return fontType;
+        }
         /** @return the line feed (vertical advance between lines), in pixels */
-        public int getLineFeed() { return lineFeed; }
+        public int getLineFeed()
+        {
+            return lineFeed;
+        }
         /** @return the glyph index used for code points the font does not map */
-        public int getDefaultCharIndex() { return defaultCharIndex; }
+        public int getDefaultCharIndex()
+        {
+            return defaultCharIndex;
+        }
         /** @return the default left bearing applied when a glyph has no CWDH entry */
-        public int getDefaultLeft() { return defaultLeft; }
+        public int getDefaultLeft()
+        {
+            return defaultLeft;
+        }
         /** @return the default glyph (ink) width */
-        public int getDefaultGlyphWidth() { return defaultGlyphWidth; }
+        public int getDefaultGlyphWidth()
+        {
+            return defaultGlyphWidth;
+        }
         /** @return the default character advance width */
-        public int getDefaultCharWidth() { return defaultCharWidth; }
+        public int getDefaultCharWidth()
+        {
+            return defaultCharWidth;
+        }
         /** @return the text encoding: 0=UTF-8, 1=Unicode (UTF-16), 2=Shift-JIS, 3=CP1252 */
-        public int getEncoding() { return encoding; }
+        public int getEncoding()
+        {
+            return encoding;
+        }
         /** @return the file offset (to block body) of the CGLP glyph block */
-        public long getGlyphOffset() { return glyphOffset; }
+        public long getGlyphOffset()
+        {
+            return glyphOffset;
+        }
         /** @return the file offset (to block body) of the first CWDH width block */
-        public long getWidthOffset() { return widthOffset; }
+        public long getWidthOffset()
+        {
+            return widthOffset;
+        }
         /** @return the file offset (to block body) of the first CMAP map block */
-        public long getMapOffset() { return mapOffset; }
+        public long getMapOffset()
+        {
+            return mapOffset;
+        }
         /** @return the font height (version 0x0102 only), or -1 */
-        public int getHeight() { return height; }
+        public int getHeight()
+        {
+            return height;
+        }
         /** @return the font width (version 0x0102 only), or -1 */
-        public int getWidth() { return width; }
+        public int getWidth()
+        {
+            return width;
+        }
         /** @return the underline/ascent position (version 0x0102 only), or -1 */
-        public int getAscent() { return ascent; }
+        public int getAscent()
+        {
+            return ascent;
+        }
 
         /** Sets the line feed (vertical advance between lines), in pixels, in place. @param v 0..255 */
-        public void setLineFeed(int v) { lineFeed = v & 0xFF; file[body + 1] = (byte) lineFeed; }
+        public void setLineFeed(int v)
+        {
+            lineFeed = v & 0xFF;
+            file[body + 1] = (byte) lineFeed;
+        }
         /** Sets the default left bearing (signed) used when a glyph has no CWDH entry, in place. @param v the bearing */
-        public void setDefaultLeft(int v) { defaultLeft = (byte) v; file[body + 4] = (byte) v; }
+        public void setDefaultLeft(int v)
+        {
+            defaultLeft = (byte) v;
+            file[body + 4] = (byte) v;
+        }
         /** Sets the default glyph (ink) width, in place. @param v 0..255 */
-        public void setDefaultGlyphWidth(int v) { defaultGlyphWidth = v & 0xFF; file[body + 5] = (byte) defaultGlyphWidth; }
+        public void setDefaultGlyphWidth(int v)
+        {
+            defaultGlyphWidth = v & 0xFF;
+            file[body + 5] = (byte) defaultGlyphWidth;
+        }
         /** Sets the default character advance width, in place. @param v 0..255 */
-        public void setDefaultCharWidth(int v) { defaultCharWidth = v & 0xFF; file[body + 6] = (byte) defaultCharWidth; }
+        public void setDefaultCharWidth(int v)
+        {
+            defaultCharWidth = v & 0xFF;
+            file[body + 6] = (byte) defaultCharWidth;
+        }
 
         /**
          * Sets the font height (version 0x0102 headers only), in place.
          * @param v 0..255
          * @throws IllegalStateException if this header carries no height/width/ascent fields
          */
-        public void setHeight(int v) { requireExtended(); height = v & 0xFF; file[body + 20] = (byte) height; }
+        public void setHeight(int v)
+        {
+            requireExtended();
+            height = v & 0xFF;
+            file[body + 20] = (byte) height;
+        }
         /**
          * Sets the font width (version 0x0102 headers only), in place.
          * @param v 0..255
          * @throws IllegalStateException if this header carries no height/width/ascent fields
          */
-        public void setWidth(int v) { requireExtended(); width = v & 0xFF; file[body + 21] = (byte) width; }
+        public void setWidth(int v)
+        {
+            requireExtended();
+            width = v & 0xFF;
+            file[body + 21] = (byte) width;
+        }
         /**
          * Sets the underline/ascent position (version 0x0102 headers only), in place.
          * @param v 0..255
          * @throws IllegalStateException if this header carries no height/width/ascent fields
          */
-        public void setAscent(int v) { requireExtended(); ascent = v & 0xFF; file[body + 22] = (byte) ascent; }
+        public void setAscent(int v)
+        {
+            requireExtended();
+            ascent = v & 0xFF;
+            file[body + 22] = (byte) ascent;
+        }
 
         private void requireExtended()
         {
@@ -502,10 +573,10 @@ public class NitroFont extends GenericNtrFile
         private final byte[] file;
         private final int cellWidth;
         private final int cellHeight;
-        private final int cellSize;   // bytes per glyph tile (the stride; may exceed the packed pixel bytes)
+        private final int cellSize; // bytes per glyph tile (the stride; may exceed the packed pixel bytes)
         private final int baselinePos;
         private final int maxCharWidth;
-        private final int bpp;        // bits per pixel (1, 2, or 3)
+        private final int bpp; // bits per pixel (1, 2, or 3)
         private final int flags;
         private final int bitmapStart;
         private final int numGlyphs;
@@ -516,33 +587,57 @@ public class NitroFont extends GenericNtrFile
             int b = blockStart + 8;
             cellWidth = u8(d, b);
             cellHeight = u8(d, b + 1);
-            cellSize = u16(d, b + 2);
+            cellSize = MemBuf.uint16(d, b + 2);
             baselinePos = s8(d, b + 4);
             maxCharWidth = u8(d, b + 5);
             bpp = u8(d, b + 6);
             flags = u8(d, b + 7);
             bitmapStart = b + 8;
-            long blockLen = u32(d, blockStart + 4);
+            long blockLen = MemBuf.uint32(d, blockStart + 4);
             int dataBytes = (int) blockLen - 0x10;
             numGlyphs = cellSize > 0 ? dataBytes / cellSize : 0;
         }
 
         /** @return the glyph cell width, in pixels */
-        public int getCellWidth() { return cellWidth; }
+        public int getCellWidth()
+        {
+            return cellWidth;
+        }
         /** @return the glyph cell height, in pixels */
-        public int getCellHeight() { return cellHeight; }
+        public int getCellHeight()
+        {
+            return cellHeight;
+        }
         /** @return the number of bytes stored per glyph tile */
-        public int getCellSize() { return cellSize; }
+        public int getCellSize()
+        {
+            return cellSize;
+        }
         /** @return the baseline position within the cell */
-        public int getBaselinePos() { return baselinePos; }
+        public int getBaselinePos()
+        {
+            return baselinePos;
+        }
         /** @return the maximum proportional character width */
-        public int getMaxCharWidth() { return maxCharWidth; }
+        public int getMaxCharWidth()
+        {
+            return maxCharWidth;
+        }
         /** @return the bit depth (bits per pixel): 1, 2, or 3 */
-        public int getBpp() { return bpp; }
+        public int getBpp()
+        {
+            return bpp;
+        }
         /** @return the glyph flags/rotation byte */
-        public int getFlags() { return flags; }
+        public int getFlags()
+        {
+            return flags;
+        }
         /** @return the number of glyph tiles */
-        public int getNumGlyphs() { return numGlyphs; }
+        public int getNumGlyphs()
+        {
+            return numGlyphs;
+        }
 
         /**
          * Reads a glyph's raw pixel values (0..2^bpp-1), row-major, {@code cellWidth*cellHeight} entries.
@@ -633,35 +728,44 @@ public class NitroFont extends GenericNtrFile
         private final int indexEnd;
         private final long nextOffset;
         private final byte[][] entries; // each = {left, glyphWidth, charWidth}, or empty if the range is ill-formed
-        private final byte[] file;      // the block region, so setWidths can edit in place
-        private final int entryBase;    // absolute offset of the first entry within file
+        private final byte[] file; // the block region, so setWidths can edit in place
+        private final int entryBase; // absolute offset of the first entry within file
 
         WidthGroup(byte[] d, int blockStart)
         {
             file = d;
             int b = blockStart + 8;
-            indexBegin = u16(d, b);
-            indexEnd = u16(d, b + 2);
-            nextOffset = u32(d, b + 4);
+            indexBegin = MemBuf.uint16(d, b);
+            indexEnd = MemBuf.uint16(d, b + 2);
+            nextOffset = MemBuf.uint32(d, b + 4);
             entryBase = b + 8;
             // Some retail (Game Freak) fonts store an ill-formed range (indexEnd < indexBegin); treat that
             // as "no decodable entries" rather than reading garbage. The block is still preserved verbatim.
             int count = indexEnd >= indexBegin ? (indexEnd - indexBegin + 1) : 0;
-            long blockLen = u32(d, blockStart + 4);
+            long blockLen = MemBuf.uint32(d, blockStart + 4);
             int available = ((int) blockLen - 0x10) / 3;
             if (count > available)
                 count = Math.max(available, 0);
             entries = new byte[count][];
             for (int i = 0; i < count; i++)
-                entries[i] = new byte[]{d[entryBase + i * 3], d[entryBase + i * 3 + 1], d[entryBase + i * 3 + 2]};
+                entries[i] = new byte[] { d[entryBase + i * 3], d[entryBase + i * 3 + 1], d[entryBase + i * 3 + 2] };
         }
 
         /** @return the first glyph index this group covers */
-        public int getIndexBegin() { return indexBegin; }
+        public int getIndexBegin()
+        {
+            return indexBegin;
+        }
         /** @return the last glyph index this group covers */
-        public int getIndexEnd() { return indexEnd; }
+        public int getIndexEnd()
+        {
+            return indexEnd;
+        }
         /** @return the number of decoded width entries */
-        public int getNumEntries() { return entries.length; }
+        public int getNumEntries()
+        {
+            return entries.length;
+        }
 
         /**
          * @param glyphIndex the glyph index
@@ -673,7 +777,7 @@ public class NitroFont extends GenericNtrFile
             if (local < 0 || local >= entries.length)
                 return null;
             byte[] e = entries[local];
-            return new int[]{e[0], e[1] & 0xFF, e[2] & 0xFF};
+            return new int[] { e[0], e[1] & 0xFF, e[2] & 0xFF };
         }
 
         /**
@@ -692,7 +796,7 @@ public class NitroFont extends GenericNtrFile
             if (local < 0 || local >= entries.length)
                 throw new IndexOutOfBoundsException("glyph " + glyphIndex + " not in width group [" + indexBegin + ", " + indexEnd + "]");
             byte l = (byte) left, g = (byte) glyphWidth, a = (byte) advance;
-            entries[local] = new byte[]{l, g, a};
+            entries[local] = new byte[] { l, g, a };
             file[entryBase + local * 3] = l;
             file[entryBase + local * 3 + 1] = g;
             file[entryBase + local * 3 + 2] = a;
@@ -720,50 +824,67 @@ public class NitroFont extends GenericNtrFile
         CharMap(byte[] d, int blockStart)
         {
             int b = blockStart + 8;
-            codeBegin = u16(d, b);
-            codeEnd = u16(d, b + 2);
-            mapType = u16(d, b + 4); // low half of the u32 map-type field
-            nextOffset = u32(d, b + 8);
+            codeBegin = MemBuf.uint16(d, b);
+            codeEnd = MemBuf.uint16(d, b + 2);
+            mapType = MemBuf.uint16(d, b + 4); // low half of the u32 map-type field
+            nextOffset = MemBuf.uint32(d, b + 8);
             int mapBase = b + 12;
             switch (mapType)
             {
                 case 0: // direct: a single base index, incremented per code point
-                    directBase = u16(d, mapBase);
-                    tableIndices = null; pairCodes = null; pairGlyphs = null;
+                    directBase = MemBuf.uint16(d, mapBase);
+                    tableIndices = null;
+                    pairCodes = null;
+                    pairGlyphs = null;
                     break;
                 case 1: // table: one u16 glyph index per code point in [begin, end]
                 {
                     int n = codeEnd - codeBegin + 1;
                     tableIndices = new int[Math.max(0, n)];
                     for (int i = 0; i < tableIndices.length; i++)
-                        tableIndices[i] = u16(d, mapBase + i * 2);
-                    directBase = -1; pairCodes = null; pairGlyphs = null;
+                        tableIndices[i] = MemBuf.uint16(d, mapBase + i * 2);
+                    directBase = -1;
+                    pairCodes = null;
+                    pairGlyphs = null;
                     break;
                 }
                 case 2: // sparse pairs: a count, then (code, glyph) u16 pairs
                 {
-                    int n = u16(d, mapBase);
+                    int n = MemBuf.uint16(d, mapBase);
                     pairCodes = new int[n];
                     pairGlyphs = new int[n];
                     for (int i = 0; i < n; i++)
                     {
-                        pairCodes[i] = u16(d, mapBase + 2 + i * 4);
-                        pairGlyphs[i] = u16(d, mapBase + 2 + i * 4 + 2);
+                        pairCodes[i] = MemBuf.uint16(d, mapBase + 2 + i * 4);
+                        pairGlyphs[i] = MemBuf.uint16(d, mapBase + 2 + i * 4 + 2);
                     }
-                    directBase = -1; tableIndices = null;
+                    directBase = -1;
+                    tableIndices = null;
                     break;
                 }
                 default:
-                    directBase = -1; tableIndices = null; pairCodes = null; pairGlyphs = null;
+                    directBase = -1;
+                    tableIndices = null;
+                    pairCodes = null;
+                    pairGlyphs = null;
             }
         }
 
         /** @return the first code point this block covers */
-        public int getCodeBegin() { return codeBegin; }
+        public int getCodeBegin()
+        {
+            return codeBegin;
+        }
         /** @return the last code point this block covers */
-        public int getCodeEnd() { return codeEnd; }
+        public int getCodeEnd()
+        {
+            return codeEnd;
+        }
         /** @return the mapping method: 0 = direct, 1 = table, 2 = sparse pairs */
-        public int getMapType() { return mapType; }
+        public int getMapType()
+        {
+            return mapType;
+        }
 
         /**
          * @param codePoint the code point

@@ -19,6 +19,8 @@
 
 package io.github.turtleisaac.nds4j.sound;
 
+import io.github.turtleisaac.nds4j.framework.MemBuf;
+
 /**
  * Minimal canonical RIFF/WAVE (PCM) codec, so decoded DS audio ({@link Wave}, {@link Stream}) can be
  * played in any tool and a WAV can be imported back as a {@link Wave}. Pure JVM, no {@code javax.sound}
@@ -26,7 +28,9 @@ package io.github.turtleisaac.nds4j.sound;
  */
 public final class WavFile
 {
-    private WavFile() {}
+    private WavFile()
+    {
+    }
 
     /** @return a 16-bit mono PCM WAV file for {@code samples} at {@code sampleRate} Hz. */
     public static byte[] mono16(short[] samples, int sampleRate)
@@ -52,13 +56,13 @@ public final class WavFile
         writeU32(out, 4, 36 + dataSize);
         writeString(out, 8, "WAVE");
         writeString(out, 12, "fmt ");
-        writeU32(out, 16, 16);          // fmt chunk size
-        writeU16(out, 20, 1);           // PCM
+        writeU32(out, 16, 16); // fmt chunk size
+        writeU16(out, 20, 1); // PCM
         writeU16(out, 22, channels);
         writeU32(out, 24, sampleRate);
         writeU32(out, 28, byteRate);
         writeU16(out, 32, blockAlign);
-        writeU16(out, 34, 16);          // bits per sample
+        writeU16(out, 34, 16); // bits per sample
         writeString(out, 36, "data");
         writeU32(out, 40, dataSize);
         int p = 44;
@@ -94,82 +98,263 @@ public final class WavFile
      */
     public static Pcm read(byte[] wav)
     {
+        requireWave(wav);
+        WavChunks chunks = walkChunks(wav);
+        requirePcm(chunks);
+
+        return mix(wav, chunks);
+    }
+
+    /**
+     * @param wav the file bytes
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void requireWave(byte[] wav)
+    {
         if (wav == null || wav.length < 12)
             throw new IllegalArgumentException("not a WAV file");
+
+        requireRiff(wav);
+    }
+
+    /**
+     * @param wav the file bytes
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void requireRiff(byte[] wav)
+    {
         if (!ascii(wav, 0, 4).equals("RIFF") || !ascii(wav, 8, 4).equals("WAVE"))
             throw new IllegalArgumentException("not a RIFF/WAVE file");
+    }
 
-        int fmt = -1, channels = 0, sampleRate = 0, bits = 0;
-        int dataOff = -1, dataLen = 0;
+    /**
+     * @param wav the file bytes
+     * @return the fmt chunk and the data chunk
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static WavChunks walkChunks(byte[] wav)
+    {
+        WavChunks chunks = new WavChunks();
         int p = 12;
-        while (p + 8 <= wav.length)
-        {
-            String id = ascii(wav, p, 4);
-            int size = (int) u32(wav, p + 4);
-            int body = p + 8;
-            if (body + size > wav.length)
-                throw new IllegalArgumentException("WAV chunk '" + id + "' overruns the file");
-            if (id.equals("fmt "))
-            {
-                if (size < 16) throw new IllegalArgumentException("WAV fmt chunk too short");
-                fmt = u16(wav, body);
-                channels = u16(wav, body + 2);
-                sampleRate = (int) u32(wav, body + 4);
-                bits = u16(wav, body + 14);
-            }
-            else if (id.equals("data"))
-            {
-                dataOff = body;
-                dataLen = size;
-            }
-            p = body + size + (size & 1); // chunks are word-aligned
-        }
-        if (fmt < 0) throw new IllegalArgumentException("WAV has no fmt chunk");
-        if (dataOff < 0) throw new IllegalArgumentException("WAV has no data chunk");
-        if (fmt != 1) throw new IllegalArgumentException("WAV encoding " + fmt + " is not PCM");
-        if (channels < 1) throw new IllegalArgumentException("WAV has no channels");
-        if (sampleRate < 1) throw new IllegalArgumentException("WAV has no sample rate");
-        if (bits != 8 && bits != 16)
-            throw new IllegalArgumentException("WAV bits-per-sample " + bits + " is not 8 or 16");
 
-        int bytesPerFrame = channels * (bits / 8);
-        if (bytesPerFrame <= 0) throw new IllegalArgumentException("WAV frame size is 0");
-        int frames = dataLen / bytesPerFrame;
-        short[] mono = new short[frames];
-        for (int i = 0; i < frames; i++)
+        while (p + 8 <= wav.length)
+            p = oneChunk(wav, p, chunks);
+
+        return chunks;
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param p start of a chunk
+     * @param chunks where fmt and data are recorded
+     * @return the start of the next chunk
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static int oneChunk(byte[] wav, int p, WavChunks chunks)
+    {
+        String id = ascii(wav, p, 4);
+        int size = (int) MemBuf.uint32(wav, p + 4);
+        int body = p + 8;
+        requireFits(wav, id, body, size);
+        takeFmt(wav, id, body, size, chunks);
+        takeData(id, body, size, chunks);
+
+        return body + size + (size & 1);
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param id the chunk id
+     * @param body where the chunk payload starts
+     * @param size the payload size
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void requireFits(byte[] wav, String id, int body, int size)
+    {
+        if (body + size > wav.length)
+            throw new IllegalArgumentException("WAV chunk '" + id + "' overruns the file");
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param id the chunk id
+     * @param body where the chunk payload starts
+     * @param size the payload size
+     * @param chunks where the fmt fields are recorded
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void takeFmt(byte[] wav, String id, int body, int size, WavChunks chunks)
+    {
+        if (!id.equals("fmt "))
+            return;
+
+        readFmt(wav, body, size, chunks);
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param body where the fmt payload starts
+     * @param size the payload size
+     * @param chunks where the fmt fields are recorded
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void readFmt(byte[] wav, int body, int size, WavChunks chunks)
+    {
+        if (size < 16)
+            throw new IllegalArgumentException("WAV fmt chunk too short");
+
+        chunks.fmt = MemBuf.uint16(wav, body);
+        chunks.channels = MemBuf.uint16(wav, body + 2);
+        chunks.sampleRate = (int) MemBuf.uint32(wav, body + 4);
+        chunks.bits = MemBuf.uint16(wav, body + 14);
+    }
+
+    /**
+     * @param id the chunk id
+     * @param body where the chunk payload starts
+     * @param size the payload size
+     * @param chunks where the data chunk is recorded
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void takeData(String id, int body, int size, WavChunks chunks)
+    {
+        if (!id.equals("data"))
+            return;
+
+        chunks.dataOff = body;
+        chunks.dataLen = size;
+    }
+
+    /**
+     * @param chunks the fmt and data chunks
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static void requirePcm(WavChunks chunks)
+    {
+        boolean[] ok = { chunks.fmt >= 0, chunks.dataOff >= 0, chunks.fmt == 1, chunks.channels >= 1, chunks.sampleRate >= 1 };
+        String[] messages = {
+                "WAV has no fmt chunk",
+                "WAV has no data chunk",
+                "WAV encoding " + chunks.fmt + " is not PCM",
+                "WAV has no channels",
+                "WAV has no sample rate"
+        };
+        int index = 0;
+
+        while (index < ok.length)
         {
-            int acc = 0;
-            for (int c = 0; c < channels; c++)
-            {
-                int o = dataOff + i * bytesPerFrame + c * (bits / 8);
-                if (bits == 8) acc += ((wav[o] & 0xFF) - 128) << 8; // unsigned 8-bit → signed 16
-                else acc += (short) u16(wav, o);
-            }
-            mono[i] = (short) (acc / channels);
+            if (!ok[index])
+                throw new IllegalArgumentException(messages[index]);
+
+            index++;
         }
-        return new Pcm(mono, sampleRate, channels, bits);
+
+        requireBits(chunks);
+    }
+
+    /** @param chunks the fmt and data chunks */
+    private static void requireBits(WavChunks chunks)
+    {
+        if (chunks.bits != 8 && chunks.bits != 16)
+            throw new IllegalArgumentException("WAV bits-per-sample " + chunks.bits + " is not 8 or 16");
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param chunks the fmt and data chunks
+     * @return mono 16-bit frames
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static Pcm mix(byte[] wav, WavChunks chunks)
+    {
+        int bytesPerFrame = chunks.channels * (chunks.bits / 8);
+        requireFrame(bytesPerFrame);
+        int frames = chunks.dataLen / bytesPerFrame;
+        short[] mono = new short[frames];
+
+        for (int i = 0; i < frames; i++)
+            mono[i] = mixFrame(wav, chunks, bytesPerFrame, i);
+
+        return new Pcm(mono, chunks.sampleRate, chunks.channels, chunks.bits);
+    }
+
+    /** @param bytesPerFrame bytes in one interleaved frame */
+    private static void requireFrame(int bytesPerFrame)
+    {
+        if (bytesPerFrame <= 0)
+            throw new IllegalArgumentException("WAV frame size is 0");
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param chunks the fmt and data chunks
+     * @param bytesPerFrame bytes in one interleaved frame
+     * @param frame which frame
+     * @return the channels averaged to one signed sample
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static short mixFrame(byte[] wav, WavChunks chunks, int bytesPerFrame, int frame)
+    {
+        int acc = 0;
+
+        for (int c = 0; c < chunks.channels; c++)
+        {
+            int o = chunks.dataOff + frame * bytesPerFrame + c * (chunks.bits / 8);
+            acc += sample(wav, chunks.bits, o);
+        }
+
+        return (short) (acc / chunks.channels);
+    }
+
+    /**
+     * @param wav the file bytes
+     * @param bits 8 or 16
+     * @param offset the sample's first byte
+     * @return a signed 16-bit sample
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static int sample(byte[] wav, int bits, int offset)
+    {
+        if (bits == 8)
+            return ((wav[offset] & 0xFF) - 128) << 8;
+
+        return (short) MemBuf.uint16(wav, offset);
+    }
+
+    /**
+     * The fmt fields and the data chunk found while walking a WAVE file.
+     * @see "Multimedia Programming Interface and Data Specifications 1.0, RIFF WAVE"
+     */
+    private static final class WavChunks
+    {
+        private int fmt = -1;
+        private int channels;
+        private int sampleRate;
+        private int bits;
+        private int dataOff = -1;
+        private int dataLen;
     }
 
     private static String ascii(byte[] b, int o, int n)
     {
         return new String(b, o, n, java.nio.charset.StandardCharsets.ISO_8859_1);
     }
-    private static int u16(byte[] b, int o) { return (b[o] & 0xFF) | ((b[o + 1] & 0xFF) << 8); }
-    private static long u32(byte[] b, int o)
-    {
-        return (b[o] & 0xFFL) | ((b[o + 1] & 0xFFL) << 8) | ((b[o + 2] & 0xFFL) << 16) | ((b[o + 3] & 0xFFL) << 24);
-    }
 
     private static void writeString(byte[] b, int o, String s)
     {
-        for (int i = 0; i < s.length(); i++) b[o + i] = (byte) s.charAt(i);
+        for (int i = 0; i < s.length(); i++)
+            b[o + i] = (byte) s.charAt(i);
     }
     private static void writeU32(byte[] b, int o, int v)
     {
-        b[o] = (byte) v; b[o + 1] = (byte) (v >> 8); b[o + 2] = (byte) (v >> 16); b[o + 3] = (byte) (v >> 24);
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
+        b[o + 2] = (byte) (v >> 16);
+        b[o + 3] = (byte) (v >> 24);
     }
     private static void writeU16(byte[] b, int o, int v)
     {
-        b[o] = (byte) v; b[o + 1] = (byte) (v >> 8);
+        b[o] = (byte) v;
+        b[o + 1] = (byte) (v >> 8);
     }
 }

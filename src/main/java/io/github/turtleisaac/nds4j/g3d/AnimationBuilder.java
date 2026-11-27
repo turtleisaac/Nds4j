@@ -40,7 +40,9 @@ import java.util.List;
  */
 public final class AnimationBuilder
 {
-    private AnimationBuilder() {}
+    private AnimationBuilder()
+    {
+    }
 
     // NNS_G3D_TEXSRTANM_ELEM info bits (mirror of TextureSrtAnimationSet).
     private static final long ELEM_STEP_2 = 0x40000000L, ELEM_STEP_4 = 0x80000000L;
@@ -56,11 +58,17 @@ public final class AnimationBuilder
 
         private Channel(boolean constant, float value, float[] keys, int step)
         {
-            this.constant = constant; this.value = value; this.keys = keys; this.step = step;
+            this.constant = constant;
+            this.value = value;
+            this.keys = keys;
+            this.step = step;
         }
 
         /** A channel that holds {@code value} for the whole animation. */
-        public static Channel constant(float value) { return new Channel(true, value, null, 1); }
+        public static Channel constant(float value)
+        {
+            return new Channel(true, value, null, 1);
+        }
 
         /**
          * A channel sampled from {@code keys}, one key every {@code step} frames (step 1, 2 or 4), linearly
@@ -82,11 +90,14 @@ public final class AnimationBuilder
         final Channel scaleS, scaleT, rotation, transS, transT;
 
         public MaterialAnim(String name, Channel scaleS, Channel scaleT, Channel rotation,
-                            Channel transS, Channel transT)
+                Channel transS, Channel transT)
         {
             this.name = name;
-            this.scaleS = scaleS; this.scaleT = scaleT; this.rotation = rotation;
-            this.transS = transS; this.transT = transT;
+            this.scaleS = scaleS;
+            this.scaleT = scaleT;
+            this.rotation = rotation;
+            this.transS = transS;
+            this.transT = transT;
         }
     }
 
@@ -103,14 +114,17 @@ public final class AnimationBuilder
 
         // SRT0 block: "SRT0" + size + animation dictionary (4-byte offset records, block-relative) + the
         // animation block. Measure the dictionary's serialized length so the animation offset is exact.
-        int animDictLen = serialize(G3dDictionary.build(List.of(animName), List.of(rec4(0)), 4)).length;
+        int animDictLen = serialize(G3dDictionary.build(List.of(animName), List.of(MemBuf.le32(0)), 4)).length;
         int animOffset = 8 + animDictLen;
-        byte[] animDict = serialize(G3dDictionary.build(List.of(animName), List.of(rec4(animOffset)), 4));
+        byte[] animDict = serialize(G3dDictionary.build(List.of(animName), List.of(MemBuf.le32(animOffset)), 4));
 
         int srtLen = 8 + animDict.length + animBlock.length;
         byte[] srt0 = new byte[srtLen];
-        srt0[0] = 'S'; srt0[1] = 'R'; srt0[2] = 'T'; srt0[3] = '0';
-        u32(srt0, 4, srtLen);
+        srt0[0] = 'S';
+        srt0[1] = 'R';
+        srt0[2] = 'T';
+        srt0[3] = '0';
+        MemBuf.putUInt32(srt0, 4, srtLen);
         System.arraycopy(animDict, 0, srt0, 8, animDict.length);
         System.arraycopy(animBlock, 0, srt0, animOffset, animBlock.length);
 
@@ -122,12 +136,14 @@ public final class AnimationBuilder
     private static byte[] buildAnimation(int frameCount, List<MaterialAnim> materials)
     {
         List<String> names = new ArrayList<>();
-        for (MaterialAnim m : materials) names.add(m.name);
+        for (MaterialAnim m : materials)
+            names.add(m.name);
 
         // The material dictionary's serialized length is fixed by its record count (40-byte records), so
         // measure it first; the keyframe arrays start right after it.
         List<byte[]> dummy = new ArrayList<>();
-        for (int i = 0; i < materials.size(); i++) dummy.add(new byte[40]);
+        for (int i = 0; i < materials.size(); i++)
+            dummy.add(new byte[40]);
         int dictLen = serialize(G3dDictionary.build(names, dummy, 40)).length;
         int arrayBase = 8 + dictLen; // animation-member-relative offset where keyframe data begins
 
@@ -148,8 +164,9 @@ public final class AnimationBuilder
         byte[] arrayBytes = arrays.toByteArray();
 
         byte[] out = new byte[8 + dict.length + arrayBytes.length];
-        out[0] = 'T'; out[1] = ' ';        // member tag (decoder reads only the frame count)
-        u16(out, 4, frameCount);
+        out[0] = 'T';
+        out[1] = ' '; // member tag (decoder reads only the frame count)
+        MemBuf.putUInt16(out, 4, frameCount);
         System.arraycopy(dict, 0, out, 8, dict.length);
         System.arraycopy(arrayBytes, 0, out, 8 + dict.length, arrayBytes.length);
         return out;
@@ -158,31 +175,32 @@ public final class AnimationBuilder
     // Encodes a scale or translation channel into a record's (info, off) pair at recOfs, appending keyframe
     // bytes (fx16) to `arrays` for the variable case and returning the running array cursor via arrayBase.
     private static void encodeScaleTrans(byte[] rec, int recOfs, Channel ch, int frameCount,
-                                         int arrayBase, ByteArrayOutputStream arrays)
+            int arrayBase, ByteArrayOutputStream arrays)
     {
         if (ch.constant)
         {
-            u32(rec, recOfs, ELEM_CONST | ELEM_FX16);
-            u32(rec, recOfs + 4, fx16(ch.value) & 0xFFFF);
+            MemBuf.putUInt32(rec, recOfs, ELEM_CONST | ELEM_FX16);
+            MemBuf.putUInt32(rec, recOfs + 4, fx16(ch.value) & 0xFFFF);
             return;
         }
         int off = arrayBase + arrays.size();
         int count = valueCount(frameCount, ch.step);
-        for (int i = 0; i < count; i++) writeU16(arrays, fx16(sampleKey(ch, i)));
-        u32(rec, recOfs, ELEM_FX16 | stepBits(ch.step));
-        u32(rec, recOfs + 4, off);
+        for (int i = 0; i < count; i++)
+            MemBuf.writeUInt16(arrays, fx16(sampleKey(ch, i)));
+        MemBuf.putUInt32(rec, recOfs, ELEM_FX16 | stepBits(ch.step));
+        MemBuf.putUInt32(rec, recOfs + 4, off);
     }
 
     // Encodes the rotation channel as (sin, cos) fx16 pairs; degrees in, packed pair out.
     private static void encodeRotation(byte[] rec, int recOfs, Channel ch, int frameCount,
-                                       int arrayBase, ByteArrayOutputStream arrays)
+            int arrayBase, ByteArrayOutputStream arrays)
     {
         if (ch.constant)
         {
             int sin = fx16((float) Math.sin(Math.toRadians(ch.value)));
             int cos = fx16((float) Math.cos(Math.toRadians(ch.value)));
-            u32(rec, recOfs, ELEM_CONST);
-            u32(rec, recOfs + 4, ((cos & 0xFFFF) << 16) | (sin & 0xFFFF));
+            MemBuf.putUInt32(rec, recOfs, ELEM_CONST);
+            MemBuf.putUInt32(rec, recOfs + 4, ((cos & 0xFFFF) << 16) | (sin & 0xFFFF));
             return;
         }
         int off = arrayBase + arrays.size();
@@ -190,11 +208,11 @@ public final class AnimationBuilder
         for (int i = 0; i < count; i++)
         {
             double rad = Math.toRadians(sampleKey(ch, i));
-            writeU16(arrays, fx16((float) Math.sin(rad)));
-            writeU16(arrays, fx16((float) Math.cos(rad)));
+            MemBuf.writeUInt16(arrays, fx16((float) Math.sin(rad)));
+            MemBuf.writeUInt16(arrays, fx16((float) Math.cos(rad)));
         }
-        u32(rec, recOfs, stepBits(ch.step));
-        u32(rec, recOfs + 4, off);
+        MemBuf.putUInt32(rec, recOfs, stepBits(ch.step));
+        MemBuf.putUInt32(rec, recOfs + 4, off);
     }
 
     // Reads the i-th stored key (arrays may hold fewer keys than frames when step > 1).
@@ -203,7 +221,10 @@ public final class AnimationBuilder
         return ch.keys[Math.min(i, ch.keys.length - 1)];
     }
 
-    private static long stepBits(int step) { return step == 4 ? ELEM_STEP_4 : step == 2 ? ELEM_STEP_2 : 0; }
+    private static long stepBits(int step)
+    {
+        return step == 4 ? ELEM_STEP_4 : step == 2 ? ELEM_STEP_2 : 0;
+    }
 
     // Matches TextureSrtAnimationSet.valueCount so the writer emits exactly as many keys as the reader reads.
     private static int valueCount(int frames, int step)
@@ -218,12 +239,8 @@ public final class AnimationBuilder
         return b.reader().getBuffer();
     }
 
-    private static byte[] rec4(long v) { byte[] r = new byte[4]; u32(r, 0, v); return r; }
-    private static int fx16(float v) { return Math.round(v * 4096) & 0xFFFF; }
-    private static void writeU16(ByteArrayOutputStream o, int v) { o.write(v & 0xFF); o.write((v >> 8) & 0xFF); }
-    private static void u16(byte[] d, int o, int v) { d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); }
-    private static void u32(byte[] d, int o, long v)
+    private static int fx16(float v)
     {
-        d[o] = (byte) v; d[o + 1] = (byte) (v >> 8); d[o + 2] = (byte) (v >> 16); d[o + 3] = (byte) (v >> 24);
+        return Math.round(v * 4096) & 0xFFFF;
     }
 }

@@ -28,11 +28,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 class MemBufAlgebraTest
 {
     /** Values that straddle every sign boundary an 8-bit field can have. */
-    private static final int[] BYTE_DOMAIN = {0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF};
+    private static final int[] BYTE_DOMAIN = { 0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF };
     /** Likewise for 16-bit. */
-    private static final int[] SHORT_DOMAIN = {0x0000, 0x0001, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF};
+    private static final int[] SHORT_DOMAIN = { 0x0000, 0x0001, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF };
     /** Likewise for 32-bit. */
-    private static final long[] INT_DOMAIN = {0L, 1L, 0x7FFFFFFFL, 0x80000000L, 0xFFFFFFFEL, 0xFFFFFFFFL};
+    private static final long[] INT_DOMAIN = { 0L, 1L, 0x7FFFFFFFL, 0x80000000L, 0xFFFFFFFEL, 0xFFFFFFFFL };
 
     private static MemBuf.MemBufReader readerOver(byte[] bytes)
     {
@@ -152,10 +152,10 @@ class MemBufAlgebraTest
         @DisplayName("reads interpret bytes as little-endian")
         void readsAreLittleEndian()
         {
-            assertThat(readerOver(new byte[]{0x34, 0x12}).readUInt16()).isEqualTo(0x1234);
-            assertThat(readerOver(new byte[]{0x78, 0x56, 0x34, 0x12}).readUInt32()).isEqualTo(0x12345678L);
+            assertThat(readerOver(new byte[] { 0x34, 0x12 }).readUInt16()).isEqualTo(0x1234);
+            assertThat(readerOver(new byte[] { 0x78, 0x56, 0x34, 0x12 }).readUInt32()).isEqualTo(0x12345678L);
             // High bit set: the case where a signed shift would corrupt the value.
-            assertThat(readerOver(new byte[]{0x00, 0x00, 0x00, (byte) 0x80}).readUInt32())
+            assertThat(readerOver(new byte[] { 0x00, 0x00, 0x00, (byte) 0x80 }).readUInt32())
                     .isEqualTo(0x80000000L);
         }
     }
@@ -209,7 +209,7 @@ class MemBufAlgebraTest
         @DisplayName("align(n) is the least multiple of n at or after the current position")
         void alignDefinition()
         {
-            for (int alignment : new int[]{2, 4, 8, 16, 512})
+            for (int alignment : new int[] { 2, 4, 8, 16, 512 })
             {
                 for (int start = 0; start < 3 * alignment; start++)
                 {
@@ -235,7 +235,7 @@ class MemBufAlgebraTest
         @DisplayName("align is idempotent")
         void alignIsIdempotent()
         {
-            for (int alignment : new int[]{2, 4, 512})
+            for (int alignment : new int[] { 2, 4, 512 })
             {
                 for (int start = 0; start < 2 * alignment; start++)
                 {
@@ -262,7 +262,7 @@ class MemBufAlgebraTest
         {
             // A fixed-width field is a contract about size, so neither a short nor an
             // over-long value may change how many bytes are emitted.
-            for (String s : new String[]{"", "A", "ABC", "ABCD", "ABCDEFGHIJKL", "ABCDEFGHIJKLMNOP"})
+            for (String s : new String[] { "", "A", "ABC", "ABCD", "ABCDEFGHIJKL", "ABCDEFGHIJKLMNOP" })
             {
                 MemBuf buf = MemBuf.create();
                 buf.writer().writeString(s, 4);
@@ -294,7 +294,8 @@ class MemBufAlgebraTest
             // Any read charset that is not the same mapping silently destroys bytes >= 0x80,
             // which is exactly what a UTF-8 read path did.
             StringBuilder sb = new StringBuilder();
-            for (int c = 0; c < 256; c++) sb.append((char) c);
+            for (int c = 0; c < 256; c++)
+                sb.append((char) c);
             String all = sb.toString();
 
             MemBuf buf = MemBuf.create();
@@ -329,7 +330,8 @@ class MemBufAlgebraTest
             byte[] chunk = new byte[4096];
             new Random(5).nextBytes(chunk);
             MemBuf buf = MemBuf.create();
-            for (int i = 0; i < 64; i++) buf.writer().write(chunk);
+            for (int i = 0; i < 64; i++)
+                buf.writer().write(chunk);
 
             byte[] out = buf.reader().getBuffer();
             assertThat(out).hasSize(64 * chunk.length);
@@ -348,6 +350,64 @@ class MemBufAlgebraTest
             assertThatCode(() -> buf.reader().readBytes(64))
                     .as("over-read must throw")
                     .isInstanceOf(RuntimeException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("fixed-width words")
+    class Words
+    {
+        @Test
+        @DisplayName("little-endian words round-trip at an offset, including the sign boundaries")
+        void littleEndianWords()
+        {
+            byte[] data = new byte[16];
+
+            for (long value : INT_DOMAIN)
+            {
+                MemBuf.putUInt32(data, 4, value);
+                assertThat(MemBuf.le32(value)).containsExactly(data[4], data[5], data[6], data[7]);
+                assertThat(MemBuf.uint32(data, 4)).isEqualTo(value);
+                assertThat(MemBuf.uint32(data, 4, false)).isEqualTo(value);
+                assertThat(MemBuf.create(data).reader().readUInt32At(4)).isEqualTo(value);
+            }
+
+            for (int value : SHORT_DOMAIN)
+            {
+                MemBuf.putUInt16(data, 2, value);
+                assertThat(MemBuf.le16(value)).containsExactly(data[2], data[3]);
+                assertThat(MemBuf.uint16(data, 2)).isEqualTo(value);
+                assertThat(MemBuf.uint16(data, 2, false)).isEqualTo(value);
+                assertThat(MemBuf.int16(data, 2)).isEqualTo((short) value);
+                assertThat(MemBuf.create(data).reader().readUInt16At(2)).isEqualTo(value);
+                assertThat(MemBuf.create(data).reader().readInt16At(2)).isEqualTo((short) value);
+            }
+
+            MemBuf.putUInt32(data, 8, 0x01020304L);
+            assertThat(MemBuf.int32(data, 8)).isEqualTo(0x01020304);
+        }
+
+        @Test
+        @DisplayName("big-endian words read high byte first")
+        void bigEndianWords()
+        {
+            byte[] data = new byte[] { 0x12, 0x34, 0x56, 0x78, 0, 0 };
+
+            assertThat(MemBuf.uint16be(data, 0)).isEqualTo(0x1234);
+            assertThat(MemBuf.uint16(data, 0, true)).isEqualTo(0x1234);
+            assertThat(MemBuf.uint32be(data, 0)).isEqualTo(0x12345678L);
+            assertThat(MemBuf.uint32(data, 0, true)).isEqualTo(0x12345678L);
+        }
+
+        @Test
+        @DisplayName("a stream receives the same little-endian bytes")
+        void streamWords()
+        {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            MemBuf.writeUInt16(out, 0xBEEF);
+            MemBuf.writeUInt32(out, 0x01020304L);
+
+            assertThat(out.toByteArray()).containsExactly(0xEF, 0xBE, 0x04, 0x03, 0x02, 0x01);
         }
     }
 }

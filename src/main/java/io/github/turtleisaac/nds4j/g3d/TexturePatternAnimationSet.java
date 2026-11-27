@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -105,30 +106,76 @@ public class TexturePatternAnimationSet extends G3dFile
     // (frame, texIdx, pltIdx), then the 16-byte texture and palette name tables.
     private static byte[] encode(List<Animation> animations, int version)
     {
+        // PAT0 is the name dictionary followed by each animation's own block.
+        List<String> names = patternNames(animations);
+        byte[][] blobs = patternBlobs(animations);
+        byte[] pat0 = patternBlock(names, blobs);
+
+        return G3dFile.assembleContainer("BTP0", version, pat0);
+    }
+
+    /**
+     * @param animations the pattern animations
+     * @return their names in file order
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+     */
+    private static List<String> patternNames(List<Animation> animations)
+    {
         List<String> names = new ArrayList<>();
-        for (Animation a : animations)
-            names.add(a.name);
 
-        int dictSize = serialize(G3dDictionary.build(names, placeholders(animations.size(), 4), 4)).length;
+        for (Animation animation : animations)
+            names.add(animation.name);
+
+        return names;
+    }
+
+    /**
+     * @param animations the pattern animations
+     * @return each animation's PAT0 payload
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+     */
+    private static byte[][] patternBlobs(List<Animation> animations)
+    {
         byte[][] blobs = new byte[animations.size()][];
-        for (int i = 0; i < animations.size(); i++)
-            blobs[i] = animations.get(i).encodeBlob();
+        int index = 0;
 
-        List<byte[]> recs = new ArrayList<>();
-        int cursor = 8 + dictSize;
-        for (byte[] blob : blobs)
+        while (index < animations.size())
         {
-            recs.add(rec4(cursor));
-            cursor += blob.length;
+            blobs[index] = animations.get(index).encodeBlob();
+            index++;
         }
 
+        return blobs;
+    }
+
+    /**
+     * @param names animation names
+     * @param blobs animation payloads
+     * @return the PAT0 block
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+     */
+    private static byte[] patternBlock(List<String> names, byte[][] blobs)
+    {
+        int dictSize = serialize(G3dDictionary.build(names, placeholders(names.size(), 4), 4)).length;
+        int origin = 8 + dictSize;
         ByteArrayOutputStream pat0 = new ByteArrayOutputStream();
         pat0.writeBytes("PAT0".getBytes(StandardCharsets.US_ASCII));
-        pat0.writeBytes(rec4(cursor));
-        pat0.writeBytes(serialize(G3dDictionary.build(names, recs, 4)));
+        pat0.writeBytes(MemBuf.le32(NsbBlock.end(blobs, origin)));
+        pat0.writeBytes(serialize(G3dDictionary.build(names, NsbBlock.offsets(blobs, origin), 4)));
+        appendPayloads(pat0, blobs);
+
+        return pat0.toByteArray();
+    }
+
+    /**
+     * @param out the PAT0 block
+     * @param blobs animation payloads
+     * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+     */
+    private static void appendPayloads(ByteArrayOutputStream out, byte[][] blobs)
+    {
         for (byte[] blob : blobs)
-            pat0.writeBytes(blob);
-        return G3dFile.assembleContainer("BTP0", version, pat0.toByteArray());
+            out.writeBytes(blob);
     }
 
     private static List<byte[]> placeholders(int n, int recSize)
@@ -143,18 +190,6 @@ public class TexturePatternAnimationSet extends G3dFile
         MemBuf b = MemBuf.create();
         d.write(b.writer());
         return b.reader().getBuffer();
-    }
-    private static byte[] rec4(long v)
-    {
-        byte[] r = new byte[4];
-        for (int i = 0; i < 4; i++)
-            r[i] = (byte) (v >> (8 * i));
-        return r;
-    }
-    private static void u16w(byte[] d, int o, int v)
-    {
-        d[o] = (byte) v;
-        d[o + 1] = (byte) (v >> 8);
     }
 
     /**
@@ -252,64 +287,197 @@ public class TexturePatternAnimationSet extends G3dFile
         // rebuild this animation's data block byte-exactly (header, material dict, keyframe arrays, name tables)
         byte[] encodeBlob()
         {
-            int nf = frameCount, nt = texNames.length, np = pltNames.length;
-            List<String> matNames = new ArrayList<>();
-            for (MaterialPattern m : materials)
-                matNames.add(m.name);
+            // Keyframe arrays sit after the material dictionary; name tables follow them.
+            List<String> matNames = patternMaterialNames();
             int dictSize = serialize(G3dDictionary.build(matNames, placeholders(materials.size(), 8), 8)).length;
+            KeyLayout keys = keyLayout(12 + dictSize);
+            int ofsTex = keys.cursor;
+            int ofsPlt = ofsTex + texNames.length * 16;
 
-            int kfStart = 12 + dictSize, cursor = kfStart;
-            byte[][] kfBlobs = new byte[materials.size()][];
-            int[] matOff = new int[materials.size()];
-            for (int m = 0; m < materials.size(); m++)
-            {
-                TreeMap<Integer, TexturePalette> kf = materials.get(m).keyframes;
-                byte[] kb = new byte[kf.size() * 4];
-                int q = 0;
-                for (java.util.Map.Entry<Integer, TexturePalette> e : kf.entrySet())
-                {
-                    u16w(kb, q * 4, e.getKey());
-                    kb[q * 4 + 2] = (byte) indexOf(texNames, e.getValue().getTexture());
-                    kb[q * 4 + 3] = (byte) indexOf(pltNames, e.getValue().getPalette());
-                    q++;
-                }
-                matOff[m] = cursor;
-                kfBlobs[m] = kb;
-                cursor += kb.length;
-            }
-            int ofsTex = cursor, ofsPlt = ofsTex + nt * 16, animSize = ofsPlt + np * 16;
+            return patternAnim(matNames, dictSize, keys, ofsTex, ofsPlt);
+        }
 
-            List<byte[]> recs = new ArrayList<>();
-            for (int m = 0; m < materials.size(); m++)
+        /**
+         * @return the material names in file order
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private List<String> patternMaterialNames()
+        {
+            String[] names = new String[materials.size()];
+            int index = names.length;
+
+            while (index > 0)
             {
-                int numKf = materials.get(m).keyframes.size();
-                int ratio = nf == 0 ? 0 : (numKf * 4096) / nf;
-                byte[] rec = new byte[8];
-                u16w(rec, 0, numKf);
-                u16w(rec, 2, 0);
-                u16w(rec, 4, ratio);
-                u16w(rec, 6, matOff[m]);
-                recs.add(rec);
+                index--;
+                names[index] = materials.get(index).name;
             }
 
+            return java.util.Arrays.asList(names);
+        }
+
+        /**
+         * @param start offset of the first keyframe array
+         * @return the keyframe bytes and where each material's array begins
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private KeyLayout keyLayout(int start)
+        {
+            byte[][] blobs = new byte[materials.size()][];
+            int[] offsets = new int[materials.size()];
+            int cursor = start;
+            int index = 0;
+
+            while (index < materials.size())
+            {
+                blobs[index] = keyBytes(materials.get(index));
+                offsets[index] = cursor;
+                cursor += blobs[index].length;
+                index++;
+            }
+
+            return new KeyLayout(blobs, offsets, cursor);
+        }
+
+        /**
+         * @param material one material's keyframes
+         * @return frame, texture index, palette index, packed as 4 bytes each
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private byte[] keyBytes(MaterialPattern material)
+        {
+            byte[] bytes = new byte[material.keyframes.size() * 4];
+            int index = 0;
+
+            for (Map.Entry<Integer, TexturePalette> entry : material.keyframes.entrySet())
+            {
+                MemBuf.putUInt16(bytes, index * 4, entry.getKey());
+                bytes[index * 4 + 2] = (byte) indexOf(texNames, entry.getValue().getTexture());
+                bytes[index * 4 + 3] = (byte) indexOf(pltNames, entry.getValue().getPalette());
+                index++;
+            }
+
+            return bytes;
+        }
+
+        /**
+         * @param matNames material names
+         * @param dictSize material dictionary size
+         * @param keys keyframe layout
+         * @param ofsTex offset of the texture name table
+         * @param ofsPlt offset of the palette name table
+         * @return the animation block
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private byte[] patternAnim(List<String> matNames, int dictSize, KeyLayout keys, int ofsTex, int ofsPlt)
+        {
+            int animSize = ofsPlt + pltNames.length * 16;
             byte[] anim = new byte[animSize];
             anim[0] = 0x4d;
             anim[1] = 0;
             anim[2] = 0x50;
-            anim[3] = 0x54; // NNS pattern-anim tag ("M\0PT")
-            u16w(anim, 4, nf);
-            anim[6] = (byte) nt;
-            anim[7] = (byte) np;
-            u16w(anim, 8, ofsTex);
-            u16w(anim, 10, ofsPlt);
-            System.arraycopy(serialize(G3dDictionary.build(matNames, recs, 8)), 0, anim, 12, dictSize);
-            for (int m = 0; m < materials.size(); m++)
-                System.arraycopy(kfBlobs[m], 0, anim, matOff[m], kfBlobs[m].length);
-            for (int t = 0; t < nt; t++)
-                writeName(anim, ofsTex + t * 16, texNames[t]);
-            for (int t = 0; t < np; t++)
-                writeName(anim, ofsPlt + t * 16, pltNames[t]);
+            anim[3] = 0x54;
+            MemBuf.putUInt16(anim, 4, frameCount);
+            anim[6] = (byte) texNames.length;
+            anim[7] = (byte) pltNames.length;
+            MemBuf.putUInt16(anim, 8, ofsTex);
+            MemBuf.putUInt16(anim, 10, ofsPlt);
+            byte[] dictionary = serialize(G3dDictionary.build(matNames, materialRecords(keys), 8));
+            System.arraycopy(dictionary, 0, anim, 12, dictSize);
+            copyKeys(anim, keys);
+            copyNames(anim, ofsTex, texNames);
+            copyNames(anim, ofsPlt, pltNames);
+
             return anim;
+        }
+
+        /**
+         * @param keys keyframe layout
+         * @return one 8-byte dictionary record per material
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private List<byte[]> materialRecords(KeyLayout keys)
+        {
+            List<byte[]> records = new ArrayList<>();
+            int index = 0;
+
+            while (index < materials.size())
+            {
+                records.add(materialRecord(materials.get(index).keyframes.size(), keys.offsets[index]));
+                index++;
+            }
+
+            return records;
+        }
+
+        /**
+         * @param numKf how many keyframes the material has
+         * @param offset where that keyframe array starts
+         * @return the 8-byte material record
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private byte[] materialRecord(int numKf, int offset)
+        {
+            byte[] record = new byte[8];
+            MemBuf.putUInt16(record, 0, numKf);
+            MemBuf.putUInt16(record, 2, 0);
+            MemBuf.putUInt16(record, 4, keyRatio(numKf));
+            MemBuf.putUInt16(record, 6, offset);
+
+            return record;
+        }
+
+        /**
+         * @param numKf how many keyframes the material has
+         * @return {@code numKf * 4096 / frameCount}, or 0 when the animation has no frames
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private int keyRatio(int numKf)
+        {
+            if (frameCount == 0)
+                return 0;
+
+            return (numKf * 4096) / frameCount;
+        }
+
+        /**
+         * @param anim the animation block
+         * @param keys keyframe layout
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private void copyKeys(byte[] anim, KeyLayout keys)
+        {
+            for (int index = 0; index < keys.blobs.length; index++)
+                System.arraycopy(keys.blobs[index], 0, anim, keys.offsets[index], keys.blobs[index].length);
+        }
+
+        /**
+         * @param anim the animation block
+         * @param at where the first name is written
+         * @param names 16-byte name slots
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private static void copyNames(byte[] anim, int at, String[] names)
+        {
+            for (int index = 0; index < names.length; index++)
+                writeName(anim, at + index * 16, names[index]);
+        }
+
+        /**
+         * Keyframe bytes and the offset of each material's array.
+         * @see "NitroSDK include/nnsys/g3d/binres/res_struct.h NNSG3dResTexPatAnm"
+         */
+        private static final class KeyLayout
+        {
+            private final byte[][] blobs;
+            private final int[] offsets;
+            private final int cursor;
+
+            private KeyLayout(byte[][] blobs, int[] offsets, int cursor)
+            {
+                this.blobs = blobs;
+                this.offsets = offsets;
+                this.cursor = cursor;
+            }
         }
 
         private static int indexOf(String[] arr, String s)

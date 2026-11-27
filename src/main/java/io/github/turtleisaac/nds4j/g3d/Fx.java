@@ -77,8 +77,7 @@ final class Fx
      */
     static int uint16(byte[] data, int offset)
     {
-        // Hand the two bytes to MemBuf instead of shifting them here.
-        return slice(data, offset, 2).readUInt16();
+        return MemBuf.uint16(data, offset);
     }
 
     /**
@@ -89,8 +88,7 @@ final class Fx
      */
     static long uint32(byte[] data, int offset)
     {
-        // Hand the four bytes to MemBuf instead of shifting them here.
-        return slice(data, offset, 4).readUInt32();
+        return MemBuf.uint32(data, offset);
     }
 
     /**

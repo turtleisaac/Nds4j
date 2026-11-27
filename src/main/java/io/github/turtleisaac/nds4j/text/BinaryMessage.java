@@ -19,6 +19,8 @@
 
 package io.github.turtleisaac.nds4j.text;
 
+import io.github.turtleisaac.nds4j.framework.MemBuf;
+
 import java.io.ByteArrayOutputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
@@ -63,7 +65,7 @@ import java.util.Objects;
 public class BinaryMessage
 {
     private static final byte[] MAGIC = "MESGbmg1".getBytes(StandardCharsets.US_ASCII);
-    private static final String[] ENCODING_NAMES = {null, "windows-1252", "UTF-16", "Shift_JIS", "UTF-8"};
+    private static final String[] ENCODING_NAMES = { null, "windows-1252", "UTF-16", "Shift_JIS", "UTF-8" };
 
     private boolean bigEndian;
     private int encoding; // 1=cp1252, 2=utf-16, 3=shift-jis, 4=utf-8
@@ -86,7 +88,7 @@ public class BinaryMessage
 
     private boolean hasFlw1;
     private long flw1Unk0C;
-    private List<byte[]> instructions = new ArrayList<>();      // raw, 8 bytes each, unfiltered
+    private List<byte[]> instructions = new ArrayList<>(); // raw, 8 bytes each, unfiltered
     private short[] labelIndices = new short[0];
     private byte[] labelBmgIds = new byte[0];
 
@@ -114,18 +116,18 @@ public class BinaryMessage
         // Endianness isn't declared anywhere -- sniffed the same way ndspy does: read the total-length
         // field both ways and trust whichever interpretation is the smaller (i.e. plausible) value. Every
         // real BMG length is tiny compared to 2^32, so the wrong endianness reads as an enormous number.
-        long lenLe = u32(data, 8, false);
-        long lenBe = u32(data, 8, true);
+        long lenLe = MemBuf.uint32(data, 8, false);
+        long lenBe = MemBuf.uint32(data, 8, true);
         bigEndian = lenBe < lenLe;
         declaredTotalLength = bigEndian ? lenBe : lenLe;
 
-        long sectionCount = u32(data, 12, bigEndian);
+        long sectionCount = MemBuf.uint32(data, 12, bigEndian);
         encoding = data[16] & 0xFF;
         if (encoding <= 0 || encoding >= ENCODING_NAMES.length)
             throw new RuntimeException("Unknown BMG encoding value: " + encoding);
-        unk14 = u32(data, 17, bigEndian);
-        unk18 = u32(data, 21, bigEndian);
-        unk1C = u32(data, 25, bigEndian);
+        unk14 = MemBuf.uint32(data, 17, bigEndian);
+        unk18 = MemBuf.uint32(data, 21, bigEndian);
+        unk1C = MemBuf.uint32(data, 25, bigEndian);
         headerPadding = Arrays.copyOfRange(data, 29, 32);
 
         List<long[]> inf1Entries = new ArrayList<>(); // {offset, infoStart, infoEnd}
@@ -135,19 +137,19 @@ public class BinaryMessage
         for (int s = 0; s < sectionCount; s++)
         {
             String sectionMagic = new String(data, off, 4, StandardCharsets.US_ASCII);
-            long sectionLen = u32(data, off + 4, bigEndian);
+            long sectionLen = MemBuf.uint32(data, off + 4, bigEndian);
             switch (sectionMagic)
             {
                 case "INF1":
                 {
-                    int count = (int) u16(data, off + 8, bigEndian);
-                    inf1EntryLength = (int) u16(data, off + 10, bigEndian);
-                    inf1Id = u32(data, off + 12, bigEndian);
+                    int count = (int) MemBuf.uint16(data, off + 8, bigEndian);
+                    inf1EntryLength = (int) MemBuf.uint16(data, off + 10, bigEndian);
+                    inf1Id = MemBuf.uint32(data, off + 12, bigEndian);
                     for (int i = 0; i < count; i++)
                     {
                         int entryOff = off + 16 + i * inf1EntryLength;
-                        long msgOffset = u32(data, entryOff, bigEndian);
-                        inf1Entries.add(new long[]{msgOffset, entryOff + 4, entryOff + inf1EntryLength});
+                        long msgOffset = MemBuf.uint32(data, entryOff, bigEndian);
+                        inf1Entries.add(new long[] { msgOffset, entryOff + 4, entryOff + inf1EntryLength });
                     }
                     break;
                 }
@@ -158,9 +160,9 @@ public class BinaryMessage
                 case "FLW1":
                 {
                     hasFlw1 = true;
-                    int instructionsCount = (int) u16(data, off + 8, bigEndian);
-                    int labelsCount = (int) u16(data, off + 10, bigEndian);
-                    flw1Unk0C = u32(data, off + 12, bigEndian);
+                    int instructionsCount = (int) MemBuf.uint16(data, off + 8, bigEndian);
+                    int labelsCount = (int) MemBuf.uint16(data, off + 10, bigEndian);
+                    flw1Unk0C = MemBuf.uint32(data, off + 12, bigEndian);
                     int instTableStart = off + 16;
                     instructions = new ArrayList<>();
                     for (int i = 0; i < instructionsCount; i++)
@@ -171,7 +173,7 @@ public class BinaryMessage
                     labelBmgIds = new byte[labelsCount];
                     for (int i = 0; i < labelsCount; i++)
                     {
-                        labelIndices[i] = (short) u16(data, indicesStart + i * 2, bigEndian);
+                        labelIndices[i] = (short) MemBuf.uint16(data, indicesStart + i * 2, bigEndian);
                         labelBmgIds[i] = data[bmgIdsStart + i];
                     }
                     break;
@@ -179,15 +181,15 @@ public class BinaryMessage
                 case "FLI1":
                 {
                     hasFli1 = true;
-                    int count = (int) u16(data, off + 8, bigEndian);
-                    int entryLength = (int) u16(data, off + 10, bigEndian);
-                    fli1Unk0C = u32(data, off + 12, bigEndian);
+                    int count = (int) MemBuf.uint16(data, off + 8, bigEndian);
+                    int entryLength = (int) MemBuf.uint16(data, off + 10, bigEndian);
+                    fli1Unk0C = MemBuf.uint32(data, off + 12, bigEndian);
                     scripts = new ArrayList<>();
                     for (int i = 0; i < count; i++)
                     {
                         int entryOff = off + 16 + i * entryLength;
-                        long id = u32(data, entryOff, bigEndian);
-                        short index = (short) u16(data, entryOff + 4, bigEndian);
+                        long id = MemBuf.uint32(data, entryOff, bigEndian);
+                        short index = (short) MemBuf.uint16(data, entryOff + 4, bigEndian);
                         byte[] padding = Arrays.copyOfRange(data, entryOff + 6, entryOff + entryLength);
                         scripts.add(new Script(id, index, padding));
                     }
@@ -206,8 +208,8 @@ public class BinaryMessage
 
         String charsetName = charsetName();
         int charWidth = "UTF-16".equalsIgnoreCase(ENCODING_NAMES[encoding]) ? 2 : 1;
-        byte[] nullMarker = charWidth == 2 ? (bigEndian ? new byte[]{0, 0} : new byte[]{0, 0}) : new byte[]{0};
-        byte[] escMarker = charWidth == 2 ? (bigEndian ? new byte[]{0, 0x1A} : new byte[]{0x1A, 0}) : new byte[]{0x1A};
+        byte[] nullMarker = charWidth == 2 ? (bigEndian ? new byte[] { 0, 0 } : new byte[] { 0, 0 }) : new byte[] { 0 };
+        byte[] escMarker = charWidth == 2 ? (bigEndian ? new byte[] { 0, 0x1A } : new byte[] { 0x1A, 0 }) : new byte[] { 0x1A };
 
         for (long[] entry : inf1Entries)
         {
@@ -290,8 +292,7 @@ public class BinaryMessage
         writeU32(out, unk1C, bigEndian);
         writeBytes(out, headerPadding);
 
-        writeSection(out, "INF1", true, sec ->
-        {
+        writeSection(out, "INF1", true, sec -> {
             writeU16(sec, messages.size(), bigEndian);
             writeU16(sec, entryLen, bigEndian);
             writeU32(sec, inf1Id, bigEndian);
@@ -303,14 +304,16 @@ public class BinaryMessage
         if (hasFlw1)
         {
             numSections++;
-            writeSection(out, "FLW1", true, sec ->
-            {
+            writeSection(out, "FLW1", true, sec -> {
                 writeU16(sec, instructions.size(), bigEndian);
                 writeU16(sec, labelIndices.length, bigEndian);
                 writeU32(sec, flw1Unk0C, bigEndian);
-                for (byte[] inst : instructions) writeBytes(sec, inst);
-                for (short idx : labelIndices) writeU16(sec, idx & 0xFFFF, bigEndian);
-                for (byte id : labelBmgIds) sec.write(id);
+                for (byte[] inst : instructions)
+                    writeBytes(sec, inst);
+                for (short idx : labelIndices)
+                    writeU16(sec, idx & 0xFFFF, bigEndian);
+                for (byte id : labelBmgIds)
+                    sec.write(id);
             });
         }
         if (hasFli1)
@@ -320,8 +323,7 @@ public class BinaryMessage
             // multiple like every other section, but (verified against retail files) the physical
             // bytes are NOT actually padded to match -- it's always the last section, so nothing
             // after it depends on the declared length being physically accurate.
-            writeSection(out, "FLI1", false, sec ->
-            {
+            writeSection(out, "FLI1", false, sec -> {
                 int scriptEntryLen = scripts.isEmpty() ? 8 : 6 + scripts.get(0).padding.length;
                 writeU16(sec, scripts.size(), bigEndian);
                 writeU16(sec, scriptEntryLen, bigEndian);
@@ -338,14 +340,18 @@ public class BinaryMessage
         byte[] result = out.toByteArray();
         patchU32(result, sectionCountPos, numSections, bigEndian);
         long computedTotalLen = result.length;
-        while (computedTotalLen % 32 != 0) computedTotalLen++;
+        while (computedTotalLen % 32 != 0)
+            computedTotalLen++;
         patchU32(result, totalLenPos, declaredTotalLength != 0 ? declaredTotalLength : computedTotalLen, bigEndian);
         return result;
     }
 
     // --- section helpers ---------------------------------------------------------------------
 
-    private interface SectionBody { void write(ByteArrayOutputStream sec); }
+    private interface SectionBody
+    {
+        void write(ByteArrayOutputStream sec);
+    }
 
     // physicallyPad: true for INF1/DAT1/FLW1 (the section's own bytes are zero-padded to a 32-byte
     // multiple); false for FLI1 (only the declared length in its header is rounded up -- see save()).
@@ -357,7 +363,8 @@ public class BinaryMessage
         body.write(sec);
         byte[] bytes = sec.toByteArray();
         int declaredLen = bytes.length;
-        while (declaredLen % 32 != 0) declaredLen++;
+        while (declaredLen % 32 != 0)
+            declaredLen++;
         if (physicallyPad && declaredLen != bytes.length)
             bytes = Arrays.copyOf(bytes, declaredLen);
         patchU32(bytes, 4, declaredLen, bigEndian);
@@ -374,9 +381,11 @@ public class BinaryMessage
 
     private static boolean regionEquals(byte[] data, int off, byte[] pattern)
     {
-        if (off + pattern.length > data.length) return false;
+        if (off + pattern.length > data.length)
+            return false;
         for (int i = 0; i < pattern.length; i++)
-            if (data[off + i] != pattern[i]) return false;
+            if (data[off + i] != pattern[i])
+                return false;
         return true;
     }
 
@@ -397,40 +406,36 @@ public class BinaryMessage
         return Charset.forName(charsetName).encode(String.valueOf(c)).array();
     }
 
-    // --- little/big-endian primitives (data carries its own endianness flag, so these take it as a param) ---
-
-    private static long u32(byte[] d, int off, boolean be)
-    {
-        if (be)
-            return ((d[off] & 0xFFL) << 24) | ((d[off + 1] & 0xFFL) << 16) | ((d[off + 2] & 0xFFL) << 8) | (d[off + 3] & 0xFFL);
-        return (d[off] & 0xFFL) | ((d[off + 1] & 0xFFL) << 8) | ((d[off + 2] & 0xFFL) << 16) | ((d[off + 3] & 0xFFL) << 24);
-    }
-
-    private static long u16(byte[] d, int off, boolean be)
-    {
-        if (be)
-            return ((d[off] & 0xFFL) << 8) | (d[off + 1] & 0xFFL);
-        return (d[off] & 0xFFL) | ((d[off + 1] & 0xFFL) << 8);
-    }
-
     private static void writeU32(ByteArrayOutputStream out, long v, boolean be)
     {
         if (be)
         {
-            out.write((int) ((v >> 24) & 0xFF)); out.write((int) ((v >> 16) & 0xFF));
-            out.write((int) ((v >> 8) & 0xFF)); out.write((int) (v & 0xFF));
+            out.write((int) ((v >> 24) & 0xFF));
+            out.write((int) ((v >> 16) & 0xFF));
+            out.write((int) ((v >> 8) & 0xFF));
+            out.write((int) (v & 0xFF));
         }
         else
         {
-            out.write((int) (v & 0xFF)); out.write((int) ((v >> 8) & 0xFF));
-            out.write((int) ((v >> 16) & 0xFF)); out.write((int) ((v >> 24) & 0xFF));
+            out.write((int) (v & 0xFF));
+            out.write((int) ((v >> 8) & 0xFF));
+            out.write((int) ((v >> 16) & 0xFF));
+            out.write((int) ((v >> 24) & 0xFF));
         }
     }
 
     private static void writeU16(ByteArrayOutputStream out, int v, boolean be)
     {
-        if (be) { out.write((v >> 8) & 0xFF); out.write(v & 0xFF); }
-        else { out.write(v & 0xFF); out.write((v >> 8) & 0xFF); }
+        if (be)
+        {
+            out.write((v >> 8) & 0xFF);
+            out.write(v & 0xFF);
+        }
+        else
+        {
+            out.write(v & 0xFF);
+            out.write((v >> 8) & 0xFF);
+        }
     }
 
     // ByteArrayOutputStream's own writeBytes(byte[]) convenience method is a Java 11 API: it compiles
@@ -448,29 +453,45 @@ public class BinaryMessage
     {
         if (be)
         {
-            data[off] = (byte) (v >> 24); data[off + 1] = (byte) (v >> 16);
-            data[off + 2] = (byte) (v >> 8); data[off + 3] = (byte) v;
+            data[off] = (byte) (v >> 24);
+            data[off + 1] = (byte) (v >> 16);
+            data[off + 2] = (byte) (v >> 8);
+            data[off + 3] = (byte) v;
         }
         else
         {
-            data[off] = (byte) v; data[off + 1] = (byte) (v >> 8);
-            data[off + 2] = (byte) (v >> 16); data[off + 3] = (byte) (v >> 24);
+            data[off] = (byte) v;
+            data[off + 1] = (byte) (v >> 8);
+            data[off + 2] = (byte) (v >> 16);
+            data[off + 3] = (byte) (v >> 24);
         }
     }
 
     // --- accessors -----------------------------------------------------------------------------
 
     /** @return the messages in this file, in INF1 order. */
-    public List<Message> getMessages() { return messages; }
+    public List<Message> getMessages()
+    {
+        return messages;
+    }
 
     /** @return true if this file's multi-byte fields are big-endian (every known title except Super Princess Peach is little-endian). */
-    public boolean isBigEndian() { return bigEndian; }
+    public boolean isBigEndian()
+    {
+        return bigEndian;
+    }
 
     /** Sets whether this file's multi-byte fields are written big-endian. @param bigEndian the byte order */
-    public void setBigEndian(boolean bigEndian) { this.bigEndian = bigEndian; }
+    public void setBigEndian(boolean bigEndian)
+    {
+        this.bigEndian = bigEndian;
+    }
 
     /** @return the text encoding: 1 = Windows-1252, 2 = UTF-16, 3 = Shift-JIS, 4 = UTF-8. */
-    public int getEncoding() { return encoding; }
+    public int getEncoding()
+    {
+        return encoding;
+    }
 
     /**
      * Sets the text encoding used to serialise message strings.
@@ -485,10 +506,16 @@ public class BinaryMessage
     }
 
     /** @return true if this file carries the (DS Zelda-specific) FLW1 script-flow section. */
-    public boolean hasFlw1() { return hasFlw1; }
+    public boolean hasFlw1()
+    {
+        return hasFlw1;
+    }
 
     /** @return true if this file carries the (DS Zelda-specific) FLI1 script-index section. */
-    public boolean hasFli1() { return hasFli1; }
+    public boolean hasFli1()
+    {
+        return hasFli1;
+    }
 
     /**
      * A single message: a list of interleaved text runs and {@link Escape} sequences, plus a
@@ -548,11 +575,20 @@ public class BinaryMessage
         }
 
         /** @return this message's opaque per-entry info bytes. */
-        public byte[] getInfo() { return info; }
+        public byte[] getInfo()
+        {
+            return info;
+        }
         /** @return the message content: a list of {@code String} and {@link Escape} objects, in order. */
-        public List<Object> getParts() { return parts; }
+        public List<Object> getParts()
+        {
+            return parts;
+        }
         /** @return true if this message has no text at all (distinct from an empty string). */
-        public boolean isNull() { return isNull; }
+        public boolean isNull()
+        {
+            return isNull;
+        }
 
         /**
          * Replaces this message's opaque per-entry info bytes (speaker id, sound effect, etc.). The
@@ -599,15 +635,18 @@ public class BinaryMessage
         public String toString()
         {
             StringBuilder sb = new StringBuilder();
-            for (Object p : parts) sb.append(p instanceof String ? (String) p : p.toString());
+            for (Object p : parts)
+                sb.append(p instanceof String ? (String) p : p.toString());
             return sb.toString();
         }
 
         @Override
         public boolean equals(Object o)
         {
-            if (this == o) return true;
-            if (!(o instanceof Message)) return false;
+            if (this == o)
+                return true;
+            if (!(o instanceof Message))
+                return false;
             Message message = (Message) o;
             return isNull == message.isNull && Arrays.equals(info, message.info) && parts.equals(message.parts);
         }
@@ -633,12 +672,21 @@ public class BinaryMessage
             }
 
             /** @return the escape's 1-byte type selector */
-            public int getType() { return type; }
+            public int getType()
+            {
+                return type;
+            }
             /** @return the escape's raw parameter bytes */
-            public byte[] getData() { return data; }
+            public byte[] getData()
+            {
+                return data;
+            }
 
             /** Sets the escape's 1-byte type selector. @param type 0..255 */
-            public void setType(int type) { this.type = type & 0xFF; }
+            public void setType(int type)
+            {
+                this.type = type & 0xFF;
+            }
             /**
              * Sets the escape's raw parameter bytes. The whole escape is length-prefixed by a single
              * byte holding {@code data.length + 2 + (1..2 for the 0x1A marker)}, so {@code data} may be at
@@ -656,22 +704,31 @@ public class BinaryMessage
             @Override
             public boolean equals(Object o)
             {
-                if (this == o) return true;
-                if (!(o instanceof Escape)) return false;
+                if (this == o)
+                    return true;
+                if (!(o instanceof Escape))
+                    return false;
                 Escape escape = (Escape) o;
                 return type == escape.type && Arrays.equals(data, escape.data);
             }
 
             @Override
-            public int hashCode() { return 31 * type + Arrays.hashCode(data); }
+            public int hashCode()
+            {
+                return 31 * type + Arrays.hashCode(data);
+            }
 
             @Override
-            public String toString() { return "[" + type + ":" + bytesToHex(data) + "]"; }
+            public String toString()
+            {
+                return "[" + type + ":" + bytesToHex(data) + "]";
+            }
 
             private static String bytesToHex(byte[] b)
             {
                 StringBuilder sb = new StringBuilder();
-                for (byte x : b) sb.append(String.format("%02x", x));
+                for (byte x : b)
+                    sb.append(String.format("%02x", x));
                 return sb.toString();
             }
         }
@@ -692,20 +749,31 @@ public class BinaryMessage
         }
 
         /** @return this script's id */
-        public long getId() { return id; }
+        public long getId()
+        {
+            return id;
+        }
         /** @return the FLW1 instruction index this script starts at */
-        public short getIndex() { return index; }
+        public short getIndex()
+        {
+            return index;
+        }
 
         @Override
         public boolean equals(Object o)
         {
-            if (this == o) return true;
-            if (!(o instanceof Script)) return false;
+            if (this == o)
+                return true;
+            if (!(o instanceof Script))
+                return false;
             Script script = (Script) o;
             return id == script.id && index == script.index && Arrays.equals(padding, script.padding);
         }
 
         @Override
-        public int hashCode() { return Objects.hash(id, index) * 31 + Arrays.hashCode(padding); }
+        public int hashCode()
+        {
+            return Objects.hash(id, index) * 31 + Arrays.hashCode(padding);
+        }
     }
 }
